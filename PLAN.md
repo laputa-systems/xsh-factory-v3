@@ -37,25 +37,21 @@ The MVP is accepted by one bounded campaign that:
 
 1. starts from a clean V3 PostgreSQL database with no imported V1/V2 tickets,
    Forum posts, handbook, runs, or decisions;
-2. exercises a real generation transition from the bootstrap generation to the
-   candidate generation, including a schema migration, clone qualification,
-   quiescent live migration, candidate health check, and pre-admission rollback
-   rehearsal;
-3. uses a Product/Research Pi session to discover at least one previously
+2. uses a Product/Research Pi session to discover at least one previously
    unseeded, user-observable XSH defect and submit an exact reproducible ticket;
-4. receives an explicit sponsorship decision from the external Grand
+3. receives an explicit sponsorship decision from the external Grand
    Architect;
-5. uses a fresh Engineering Pi session to checkpoint a regression that fails
+4. uses a fresh Engineering Pi session to checkpoint a regression that fails
    before the fix, implement the root fix, and submit a clean candidate tree;
-6. passes the kernel-owned reproducer and the XSH application's full product
+5. passes the kernel-owned reproducer and the XSH application's full product
    suite on the exact candidate tree;
-7. uses a fresh, independent Quality Pi session to inspect the exact candidate
+6. uses a fresh, independent Quality Pi session to inspect the exact candidate
    tree, invoke the full suite again, and submit a review;
-8. receives an explicit final decision from the Grand Architect;
-9. has the kernel construct one provenance-bearing commit and guardedly
+7. receives an explicit final decision from the Grand Architect;
+8. has the kernel construct one provenance-bearing commit and guardedly
    fast-forward the clean local `../xsh` default branch to that exact commit;
-10. never pushes a remote; and
-11. reports total factory-launched Pi provider spend at or below 500,000
+9. never pushes a remote; and
+10. reports total factory-launched Pi provider spend at or below 500,000
     micro-USD ($0.50), with a breakdown by office, assignment, model, and
     session.
 
@@ -64,20 +60,18 @@ session, is out of band and cannot be included in the factory total. Local CPU,
 PostgreSQL, storage, builds, and tests are reported as durations and byte counts,
 not assigned fictional dollar values.
 
-The bootstrap-to-candidate upgrade used by this gate may be prepared before the
-campaign. Future factory changes use the Engineering and Quality circuit in
-section 13. The combined gate proves that one campaign can cross a generation
-boundary and then perform useful product work; it does not require spending Pi
-budget to rediscover the already-prepared bootstrap upgrade.
+The initial XSH application has exactly one product-work contract: a
+reproducible user-visible behavior defect. There is no `TicketKind` field,
+generic work taxonomy, feature lane, or placeholder contract for other work.
 
 ## 2. Constitutional model and explicit trust assumptions
 
 ### 2.1 What is trusted
 
-The currently active Rust generation is the sole authority for:
+The installed Rust kernel build is the sole authority for:
 
 - durable identity and legal lifecycle transitions;
-- PostgreSQL writes and schema migration admission;
+- PostgreSQL writes and schema identity;
 - aggregate provider-cost admission and reconciliation;
 - application, prompt, model-profile, assignment, and repository-snapshot
   identity;
@@ -87,8 +81,7 @@ The currently active Rust generation is the sole authority for:
 - required-read assertions;
 - deterministic validation custody;
 - candidate Git tree and commit construction;
-- guarded local product delivery; and
-- generation qualification and activation.
+- guarded local product delivery.
 
 Applications, actors, Forum posts, prompts, reports, and external operators do
 not write SQL or manufacture these facts.
@@ -116,24 +109,74 @@ This assumption must appear in the root README and operator preflight output.
 Adding adversarial isolation is a future architecture change, not an implied
 MVP property.
 
-### 2.3 Fully self-authorizing generations
+### 2.3 Manual kernel deployment boundary
 
-The Grand Architect may authorize changes to TypeScript policy, the Rust
-kernel, the database schema, qualification logic, and the activation mechanism
-itself. There is no immutable warden and no permanent human activation gate.
+The MVP does not update its own Rust code, executable TypeScript, database
+schema, qualification logic, or boot mechanism. Those changes are built and
+tested outside a running factory, installed by the operator while the daemon is
+stopped, and admitted only when the installed schema identity matches the
+binary. The kernel records a `KernelBuildId` in durable provenance but has no
+generation-package, clone-qualification, activation, or automatic rollback
+state machine.
 
-V3 can prove a chain of predecessor-authorized generations, exact candidate
-bytes, qualification results, activation time, and retained recovery material.
-It cannot prove that every future generation will preserve the safeguards in
-this document, because a future generation may change the very rules that
-evaluate or activate its successor. Documentation and status output must state
-this limitation plainly rather than describing the kernel as an immutable
-root of trust.
+The Grand Architect can reconfigure declarative application policy between
+campaigns. Automated full-system reconfiguration is deferred to `V1.md`.
+Removing it from the MVP is a scope boundary, not a claim that manual operator
+deployment is self-validating or automatically recoverable.
 
-Automatic rollback is guaranteed only until the new generation opens paid or
-mutating work admission. After a generation accepts new commands, recovery is
-roll-forward. V3 never discards accepted post-activation work to restore an old
-database snapshot silently.
+### 2.4 Strict at boundaries, agile inside them
+
+V3 uses three deliberately different levels of control:
+
+1. **Kernel invariants** are few, typed, and non-overridable: authority,
+   aggregate cost, exact identity, legal transitions, process custody,
+   reproducibility, validation, provenance, and safe local delivery.
+2. **Application policy** is versioned and Architect-replaceable without a
+   Rust change when it concerns prompts, models, limits, buffer pressure,
+   required product reads, or validation profiles.
+3. **Actor judgment** is unconstrained inside one assignment workspace. An
+   actor may inspect, experiment, use the Forum, run arbitrary shell commands,
+   and revise its approach without asking the kernel to approve intermediate
+   reasoning.
+
+A proposed hard gate belongs in Rust only if failure could make accepted state
+false, unaffordable, irreproducible, untraceable, or unsafe to deliver. A rule
+that merely expresses a preferred technique belongs in application policy or a
+prompt. Every kernel rejection must name the violated invariant and the exact
+evidence needed to proceed; generic "policy failed" results are forbidden.
+
+The normal product path has only two external judgment gates: ticket
+sponsorship and final candidate decision. There is no approval for plans,
+individual tool calls, Forum participation, focused test selection, or
+intermediate implementation checkpoints beyond the single regression-tree
+boundary needed to prove test-first behavior. No paid assignment is retried
+automatically. This keeps experimentation cheap while making the few durable
+claims hard to fake accidentally.
+
+### 2.5 Complexity budget
+
+The architecture is considered wrong if the acceptance path requires a large
+internal framework. Before the first paid campaign:
+
+- the Rust workspace has at most four crates;
+- PostgreSQL has at most the 20 application tables listed in section 8.2 plus
+  SQLx migration history;
+- there is one daemon process, one transient actor host at a time, and no other
+  resident service;
+- a trait exists only for a real physical boundary with at least a production
+  implementation and a provider-free test double, not for every domain noun;
+- modules call typed domain functions directly; there is no per-concept
+  repository/service/handler stack;
+- there are no custom derive/procedural macros, generated Rust protocol code,
+  dependency-injection container, generic policy engine, or internal message
+  bus; and
+- any new crate, table, resident task, or direct dependency must name the MVP
+  acceptance fact it makes possible and the simpler alternative that failed.
+
+Line count is diagnostic rather than an optimization target, but crossing
+20,000 non-test Rust lines before the complete provider-free product vertical
+slice triggers an explicit architecture review before more code is added. The
+response is simplification, not raising the threshold silently.
 
 ## 3. Company and authority
 
@@ -183,8 +226,7 @@ written rationale linked to the rejected review. It cannot override:
 - a failed full product suite;
 - an illegal lifecycle transition;
 - a dirty delivery checkout;
-- a non-fast-forward delivery; or
-- a failed generation qualification.
+- a non-fast-forward delivery.
 
 The Architect may request at most one fresh Engineering rework session for a
 product candidate in the MVP. The rework receives the sealed prior candidate,
@@ -289,21 +331,34 @@ these states:
 
 ```text
 Proposed
-  -> Sponsored
-  -> Engineering
-  -> Candidate
-  -> QualityReview
-  -> Accepted
-  -> Delivered
+  -> Sponsored -> InFlight -> Delivered
+       |            |
+       |            +-> Sponsored  (explicit release after failed attempt)
+       +---------------------------> Blocked | Resolved | Superseded
 
-Proposed | Sponsored | Engineering | Candidate | QualityReview
-  -> Rejected | Blocked | Superseded | Resolved
+Proposed -> Rejected | Superseded
+InFlight -> Blocked | Resolved | Rejected
 ```
 
-`Sponsored` is the ready-buffer state. An Engineering claim removes exactly one
-ticket from ready inventory. Terminal states never count toward buffer
-occupancy. Rework creates a new candidate attempt beneath the same ticket
-revision; it does not clone or repurpose the ticket.
+`Sponsored` is the sole ready-buffer state. An Engineering claim atomically
+changes exactly one revision to `InFlight` and creates a `TicketAttempt`, so it
+cannot be claimed by another campaign. Candidate and Quality progress are
+states of that attempt, not proliferating ticket states:
+
+```text
+Engineering -> HardValidation -> Quality -> AwaitingArchitect
+    -> ReworkEngineering -> ReworkValidation -> ReworkQuality
+    -> Delivered | Failed | Cancelled
+```
+
+Terminal ticket states never count toward buffer occupancy. Rework creates a
+new candidate under the same attempt and ticket revision; it does not clone or
+repurpose the ticket. An actor/session/infrastructure failure ends the paid
+assignment and attempt rather than causing an automatic paid retry. The ticket
+may return from `InFlight` to `Sponsored` only through an explicit Architect
+release with a reason and a successful current-head requalification. That
+release is not the one permitted semantic rework; rework applies only to a
+reviewed candidate.
 
 ### 4.3 Reproducibility and moving product heads
 
@@ -330,19 +385,21 @@ The one-daemon scheduler applies these rules in order:
 
 1. Never start a paid session while another paid session is active.
 2. Never admit paid work when aggregate cost is unknown, the campaign is
-   terminal, the wall deadline has passed, or a generation transition is in
-   progress.
-3. If a sponsored ticket has an accepted candidate awaiting Quality, schedule
-   Quality before Product discovery.
-4. If the Architect has sponsored a ticket and Engineering is idle, pull the
-   oldest sponsored revision after current-head requalification.
-5. If projected ready inventory is below target, no Product proposal awaits an
+   terminal, or the wall deadline has passed.
+3. Finish already-started downstream flow first: schedule Quality or an
+   Architect-authorized rework before opening unrelated work.
+4. When ready inventory is below low water, no Product proposal awaits an
    Architect decision, and the proposal cap is not full, schedule one Product
-   replenishment assignment.
-6. Do not schedule Product merely because the low-water condition exists when
-   unsponsored proposals, blocked decisions, Engineering, or Quality already
-   constrain flow.
-7. Never invent a proposal, weaken a reproducer, auto-sponsor work, or count a
+   replenishment assignment before claiming another ticket.
+5. Otherwise, if Engineering is idle and a sponsored revision exists, claim
+   the oldest sponsorship after current-head requalification. FIFO sponsorship
+   order is the entire MVP priority policy; there is no scoring/ranking engine.
+6. When no Engineering work can run and projected ready inventory is below
+   target, schedule one Product replenishment assignment if proposal
+   backpressure permits it.
+7. Do not schedule Product merely because inventory is low when unsponsored
+   proposals or an Architect decision already constrain flow.
+8. Never invent a proposal, weaken a reproducer, auto-sponsor work, or count a
    Forum post as a ticket to satisfy the target.
 
 The scheduler is deterministic over PostgreSQL state and the pinned
@@ -367,6 +424,39 @@ It reports ready-buffer occupancy, age, blocked reasons, time in each state,
 cost per delivered commit, failed/reworked attempts, and the current projected
 low-water condition. It does not synthesize a scalar health or reward score.
 
+### 4.6 Campaign boundary and persistent inventory
+
+Tickets and Forum history belong to the application and survive campaigns and
+manual kernel deployments. A campaign is only a bounded execution and
+accounting envelope; it does not own or erase the ticket buffer.
+
+Only one campaign may be nonterminal in the MVP. Its lifecycle is:
+
+```text
+Running -> Completed | Failed | Cancelled
+```
+
+A campaign start atomically pins the installed kernel build, active application
+revision, repository, aggregate budget, wall deadline, and delivery target.
+Application-policy activation and manual kernel deployment require no running
+campaign, so one campaign never mixes revisions between offices.
+
+The scheduler may consume application-global sponsored tickets and may add
+proposals that remain useful after the campaign. Sponsorship is likewise an
+application-global Architect decision, although the eventual claim records the
+campaign that paid for its attempt. A campaign completes immediately when its
+delivery target is reached. It does not spend extra money merely to refill the
+buffer after success; any remaining low-water condition is durable status and
+drives the next campaign's opening schedule.
+
+`Running` does not gain persisted waiting substates. `factoryctl campaign
+status` derives `awaiting_architect`, `awaiting_product`, `awaiting_engineering`,
+`awaiting_quality`, `budget_blocked`, or another precise current constraint
+without writing. Cancellation stops and reconciles the exact active child,
+preserves every ticket/candidate/artifact, and never rolls back a delivered
+commit. Failure or cancellation does not carry unused budget into another
+campaign.
+
 ## 5. Architecture and dependency direction
 
 ### 5.1 Planes
@@ -374,7 +464,7 @@ low-water condition. It does not synthesize a scalar health or reward score.
 ```text
 applications/xsh
   mission, fixed company policy, prompts, model profiles,
-  ticket discovery contract, product required reads, full-suite commands
+  ticket discovery contract, product required reads, full-suite profiles
                     |
 packages/factory-pi-host + packages/factory-sdk
   Pi coding-agent SDK, common tools, Forum tools, assignment submission,
@@ -382,7 +472,7 @@ packages/factory-pi-host + packages/factory-sdk
                     |
 factoryd / Rust kernel
   authority, lifecycle, scheduler, Postgres, CAS, process custody,
-  budgets, validation, Git, generation activation
+  budgets, validation, Git
                     |
 PostgreSQL 18 + append-only filesystem CAS + local Git repositories
 ```
@@ -399,39 +489,98 @@ daemon-owned assignment path.
 Cargo.toml
 Cargo.lock
 rust-toolchain.toml
-package.json
-package-lock.json
+deno.json
+deno.lock
 
 crates/
-  factory-domain/       identifiers, enums, transitions, invariants
-  factory-protocol/     miniserde operation structs and framed protocol
-  factory-content/      append-only CAS adoption and verified reads
-  factory-git/          qualified worktrees, trees, commits, delivery
-  factory-kernel/       SQLx store, scheduler, budgets, process and upgrade logic
+  factory-protocol/     wire/domain value types; no SQLx or effectful code
+  factory-kernel/       domain, SQLx, CAS, Git, scheduler, process modules
   factoryd/             resident daemon executable
   factoryctl/           operator/Grand Architect CLI
 
 packages/
-  factory-sdk/          typed TypeScript client and application interfaces
+  factory-sdk/          typed actor client and application authoring/compiler
   factory-pi-host/      one-assignment Pi SDK runtime and common/custom tools
 
 applications/
-  xsh/                  XSH mission, policies, prompts, result validators
+  xsh/                  XSH manifest source, policies, and Markdown templates
 
 schema/
   migrations/           forward-only SQLx PostgreSQL migrations
 
 tests/
   protocol-fixtures/    Rust/TypeScript golden frames
-  integration/          daemon, process, Git, upgrade, and fake-Pi judges
+  integration/          daemon, process, Git, and fake-Pi judges
 
 var/                    ignored runtime root: CAS, worktrees, transcripts, backups
 ```
 
-The seven Rust crates are the maximum initial workspace shape, not an invitation
-to split every concept into a crate. New crates require a dependency-boundary
-reason. There is no generic application/plugin loader beyond the one typed SDK
-contract needed by the XSH application.
+The four Rust crates are the maximum initial workspace shape. CAS, Git, store,
+scheduler, budget, and process code are modules inside `factory-kernel`, not
+microcrates. `factory-protocol` remains separate because both daemon and CLI
+need the wire/domain values without making the CLI depend on SQLx or kernel
+effects. New crates require a physical dependency-boundary reason and an
+explicit plan revision. There is no generic application/plugin loader beyond
+the one typed SDK contract needed by the XSH application.
+
+### 5.3 Application SDK and compiled-bundle boundary
+
+The TypeScript application SDK is an authoring API, not an authority plugin
+runtime. `applications/xsh/mod.ts` calls a closed `defineApplicationV1(...)`
+surface and refers to separately stored Markdown templates. A Deno compiler in
+`factory-sdk` emits one canonical application bundle containing only generic,
+bounded data understood by the Rust kernel:
+
+- application key, revision predecessor, and product repository binding;
+- mission and template artifact paths/digests;
+- the fixed office profiles, tools, models, and turn/wall/output bounds;
+- ticket-buffer thresholds and proposal bounds;
+- required-read paths and reasons;
+- typed ticket fields and byte/count bounds;
+- approved reproducer executable/argv/environment profiles;
+- product forbidden paths and Git policy;
+- deterministic focused/full validation command profiles; and
+- commit-message bounds and provenance policy.
+
+The schema is intentionally specific to V3's initial application needs. It is
+not a JSON-schema engine, arbitrary predicate language, workflow DSL, or plugin
+ABI. If a future application needs a new authoritative concept, the protocol
+and Rust type change explicitly; it is not smuggled through an opaque metadata
+map or executable callback.
+
+Compilation runs twice in separate clean Deno processes and must produce
+byte-identical canonical bundle bytes and referenced template digests. The
+incumbent kernel parses the bundle into closed Rust types, checks all generic
+invariants and repository bindings, adopts its artifacts, and creates an
+immutable `ApplicationRevision`. TypeScript may provide early ergonomic error
+messages, but only Rust admission makes the revision authoritative.
+
+No application TypeScript executes inside `factoryd`, receives a database URL,
+or runs as a callback during a state transition. The live Pi host is generic:
+it receives the already-rendered, sealed assignment packet and closed tool
+profile, and does not import `applications/xsh`. XSH-specific qualitative rules
+are expressed in prompts and judged by Product, Quality, and the Architect;
+XSH-specific hard rules are declarative command/path profiles enforced by the
+kernel. This is the primary black-box seam between the factory and its first
+product.
+
+### 5.4 Prompt materialization
+
+Application prompts remain human-authored Markdown files. The bundle names one
+system template and one assignment template per office and declares the exact
+placeholder set for each. The template language is deliberately not a language:
+it supports only required `${FIELD_NAME}` byte substitution. There are no
+conditionals, loops, includes, evaluation, filters, defaults, environment
+lookups, or filesystem reads.
+
+The Deno compiler rejects unknown placeholders, missing declared placeholders,
+and placeholders not allowed for that office. At assignment creation the Rust
+kernel supplies every value from authoritative state or a sealed artifact,
+renders once with a generic byte-level renderer, enforces final byte ceilings,
+seals both rendered prompts, and records their digests in the assignment. A
+ticket narrative or Forum excerpt cannot create another template directive;
+substitution is one pass. The Pi host receives final bytes and performs no
+second rendering or context discovery.
 
 ## 6. Rust and TypeScript dependency budget
 
@@ -441,11 +590,11 @@ Pin exact versions in `Cargo.lock` and use only these direct runtime families:
 
 | Dependency | Features/purpose |
 | --- | --- |
-| `smol` | Executor, timers, async Unix I/O, and async process integration. No Tokio compatibility layer. |
-| `sqlx 0.9.x` | `postgres`, `runtime-smol`, `migrate`, and macros only. No ORM or `Any` driver. |
+| `smol 2.0.2` | Executor, timers, async Unix I/O, and its re-exported async process integration. No Tokio compatibility layer. |
+| `sqlx 0.9.0` | `default-features = false`; `postgres`, `runtime-smol`, `tls-none`, `migrate`, and macros only. No ORM or `Any` driver. |
 | `tracing 0.1.x` | Structured in-process diagnostics. Libraries install no subscriber. |
 | `tracing-subscriber 0.3.x` | Compact daemon/CLI stderr diagnostics only; no JSON or appender feature unless measured need appears. |
-| `blake3 1.x` | Artifact, prompt, policy, transcript, patch, tree-packet, and generation identities. |
+| `blake3 1.x` | Artifact, prompt, policy, transcript, patch, tree-packet, and kernel-build identities. |
 | `miniserde 0.1.46+` | Local JSON wire structs only. No untyped `Value` in authoritative commands. |
 | `thiserror 2.x` | Closed errors at domain and physical boundaries. |
 | `rustix 1.x` | Narrow process/signal/filesystem primitives needed for PGID custody, file identity, and atomic operations. |
@@ -453,7 +602,7 @@ Pin exact versions in `Cargo.lock` and use only these direct runtime families:
 
 `fastrand` is never used for authority, secrets, content identity, durable
 entity identity, or evidence. One daemon-local `Rng::with_seed` is seeded from
-a BLAKE3 mix of generation ID, PID, and startup timestamp. PostgreSQL sequences
+a BLAKE3 mix of kernel build ID, PID, and startup timestamp. PostgreSQL sequences
 own durable numeric identities; BLAKE3 owns content identities.
 
 Test-only dependencies may include `tempfile` if its behavior is isolated to
@@ -466,6 +615,7 @@ Explicit exclusions:
 - no `tokio`, Axum, Hyper, Tower, Actix, or HTTP framework;
 - no `async-std`, which is discontinued;
 - no Serde in the initial wire path;
+- no `chrono` or `time` crate;
 - no ORM or dynamic SQL query builder;
 - no Git library;
 - no UUID or cryptographic RNG crate;
@@ -475,20 +625,72 @@ Explicit exclusions:
 
 ### 6.2 TypeScript dependencies
 
-Use Node's built-in `net`, `fs`, `path`, `child_process`, `zlib`, and `node:test`
-modules. Pin:
+The only supported TypeScript runtime, dependency resolver, type checker, test
+runner, formatter, linter, and script launcher is Deno. There is no Node
+executable, npm/pnpm/yarn CLI, `package.json`, `package-lock.json`, `tsconfig`,
+separate TypeScript compiler, `@types/node`, or third-party test runner in the
+V3 toolchain.
 
-- the exact Pi coding-agent SDK version already qualified by the implementation
-  effort, initially `@mariozechner/pi-coding-agent` 0.84.1 unless a pre-code
-  compatibility spike proves the package name/version has changed;
-- one exact TypeScript compiler version; and
-- the matching exact `@types/node` development version.
+Pin initially:
+
+- Deno `2.9.4`, including its bundled TypeScript compiler;
+- `npm:@earendil-works/pi-coding-agent@0.84.1`, matching the already exercised
+  V2 SDK line;
+- exact `jsr:@std/path@1.1.6` for platform-correct path operations; and
+- exact `jsr:@std/assert@1.0.19` as a development-only test dependency.
+
+All import specifiers live in root `deno.json`; `deno.lock` is the sole
+JavaScript/TypeScript resolution and integrity lock. Configure
+`nodeModulesDir: "none"` and a frozen lockfile. Deno resolves Pi's npm package
+from an installed-build-specific cache. A provider-free clean-cache probe on Deno
+2.9.4 has already proved that the exact Pi 0.84.1 root exports used by V2 load
+with no `package.json` and no `node_modules`, and that they load again under
+`--cached-only`. A complete fake-provider session remains a tranche-5 gate;
+import success alone is not production qualification.
+
+Direct V3 TypeScript uses Deno APIs and Web Platform APIs: an inherited
+`Deno.FsFile` for the actor's already-connected daemon socket, `Deno.connect`
+for an explicitly authorized external SDK client, `Deno.open`/`Deno.realPath`
+for files, `Deno.Command` for assigned subprocesses, and
+`CompressionStream("gzip")` for transcript sealing. Pi may use Deno's
+Node-compatibility implementation transitively; V3 does not support falling
+back to a Node runtime.
+
+Offline build installation first populates an isolated build-specific
+`DENO_DIR` using the frozen lock, then runs every check and
+live assignment with `--frozen --cached-only`. Dependency acquisition is
+therefore an installation effect, never an assignment-time network effect.
+After provider-free qualification, that cache materialization is immutable,
+retained with the installed build, and included in the recovery set.
+`deno.lock` plus the checked
+module-graph receipt defines dependency identity; Deno's internal cache layout
+is retained execution material, not a second package authority.
+
+No npm lifecycle script is approved initially. The two transitive scripts Deno
+currently reports while resolving Pi are unnecessary for the admitted SDK
+surface and remain disabled. If a later Pi/provider path actually requires a
+script or local `node_modules`, its exact package/version, generated bytes, and
+reason require an explicit dependency-policy revision and full offline build
+qualification. V3 never changes to `nodeModulesDir: "auto"` as an implicit
+compatibility fallback.
+The installed-build manifest pins the canonical Deno executable path and exact output of
+`deno --version`; the daemon refuses to launch a session if either differs.
+Actor sessions run `deno run -A --no-prompt --frozen --cached-only` because the
+MVP deliberately grants same-user host filesystem, process, and network access.
+Deno permissions are not represented as an adversarial sandbox.
+
+TypeScript qualification is exactly `deno fmt --check`, `deno lint`,
+`deno check` over the SDK, Pi host, application, and test entrypoints, then
+`deno test -A --no-prompt --frozen --cached-only`. Provider-facing calls are
+replaced by a fake Pi provider in every ordinary test.
 
 There is no TypeScript HTTP client/server, validation framework, ORM, logger,
-search library, Git library, or test framework dependency. `package-lock.json`
-is authoritative. The live application revision records Node executable/version,
-lockfile digest, compiled bundle digest, Pi SDK version, and resolved package-set
-digest.
+search library, Git library, compression library, or test framework
+dependency. Do not use `deno compile` in the MVP: the sealed, checked TypeScript
+source graph is the executable artifact, and Deno's generated transpilation
+cache is disposable. The live application revision records the Deno
+executable/version, source-graph digest, `deno.json` digest, `deno.lock` digest,
+Pi SDK version, and resolved dependency-graph digest.
 
 ## 7. Local protocol and SDK
 
@@ -596,66 +798,66 @@ explicit conflict.
   discriminants and hard-to-evolve PostgreSQL enum types.
 - Currency is nonnegative `BIGINT` micro-USD. Never store floating-point money.
 - Times are `TIMESTAMPTZ`; durations are integer milliseconds.
+- PostgreSQL transaction time owns durable wall timestamps. Rust uses
+  `std::time::Instant` for local deadlines/durations and exchanges epoch
+  microseconds or SQL-formatted text at the database boundary, avoiding a
+  `chrono`/`time` dependency.
 - Paths stored in PostgreSQL are safe runtime-root-relative paths only.
 - No actor, application, CLI, or TypeScript process receives a database URL.
 
 Use SQLx checked queries and checked-in offline query metadata so ordinary
 builds do not require a live database. There is one forward-only migration
-lineage. Every migration used for self-upgrade must be transaction-safe on the
-live database; concurrent/nontransactional migration forms are rejected for
-MVP activation.
+lineage. The MVP initializes a fresh schema; later schema changes are applied
+only during an explicit offline operator deployment after backup. Automated
+online clone qualification, activation, and rollback belong to `V1.md`.
 
 ### 8.2 Tables
 
 The initial schema is deliberately relational and purpose-specific:
 
-1. `kernel_generations` — source/binary/schema/application artifact identities,
-   predecessor, lifecycle, qualification, activation, and admission-open fact.
-2. `generation_qualifications` — one candidate's clone database, commands,
-   result artifact, duration, and incumbent decision.
-3. `application_revisions` — sealed application bundle, mission, policy, prompt
-   set, tool revision, and predecessor.
-4. `model_profiles` — application revision, office, provider, model, thinking,
-   turn/wall/output bounds, and Pi runtime identity.
-5. `repositories` — logical repository identity, canonical local path, default
+1. `kernel_builds` — operator-installed source/binary/schema/Deno identities,
+   install time, qualification receipt artifact, and current-build fact. It is
+   provenance, not a self-activation state machine.
+2. `application_revisions` — sealed application bundle, mission, policy, prompt
+   set, model/tool profiles, and predecessor.
+3. `repositories` — logical repository identity, canonical local path, default
    branch, and allowed delivery mode.
-6. `repository_snapshots` — repository, commit, tree, cleanliness, observed
-   generation, and qualification time.
-7. `campaigns` — application/generation, lifecycle, aggregate micro-USD cap,
-   deadline, delivery target, measured totals, and revision.
-8. `tickets` — stable identity, application, lifecycle, and current revision.
-9. `ticket_revisions` — immutable problem contract, discovery snapshot,
-   narrative/evidence artifacts, scope, acceptance, and supersession.
-10. `ticket_reproducers` — exact command-spec artifact, expected observation,
-    discovery runs, and latest pre-claim qualification.
-11. `assignments` — campaign, office, exact work target, immutable input packet,
-    lifecycle, attempt ordinal, and revision.
-12. `assignment_required_reads` — assignment, canonical path, expected BLAKE3,
-    and reason.
-13. `sessions` — assignment/model/process identity, start/terminal state,
-    transcript artifact, normalized usage/cost totals, and failure class.
-14. `session_read_assertions` — terminal normalized satisfaction for each
-    required read; one row per requirement, not one row per read call.
-15. `artifacts` — digest, byte length, media role/type, CAS relative path,
-    creation generation, and seal time.
-16. `candidates` — ticket/base, regression tree, candidate tree, patch,
+4. `campaigns` — kernel build/application identities, lifecycle, aggregate
+   micro-USD cap, deadline, delivery target, measured totals, and revision.
+5. `tickets` — stable identity, application, lifecycle, and current revision.
+6. `ticket_revisions` — immutable problem contract, discovery commit/tree,
+   narrative/evidence, scope, acceptance, exact reproducer/observations,
+   latest requalification, and supersession artifact references.
+7. `ticket_attempts` — one campaign claim of one sponsored revision, exact
+   current-head commit/tree, current work stage, candidate/rework ordinals,
+   failure/release, and lifecycle.
+8. `assignments` — campaign, office, exact work target, immutable input packet
+    and required-read manifest artifacts, lifecycle, attempt ordinal, and
+    revision.
+9. `sessions` — assignment/profile/model/process identity, start/terminal
+    state, transcript and read-assertion manifest artifacts, normalized
+    required-read counts, usage/cost totals, and failure class.
+10. `artifacts` — digest, byte length, media role/type, CAS relative path,
+    creating kernel build, and seal time.
+11. `candidates` — ticket attempt/base, regression tree, candidate tree, patch,
     Engineering session/report, commit identity, attempt, and lifecycle.
-17. `validations` — candidate/generation, validation profile, pristine tree,
+12. `validations` — candidate/kernel build, validation profile, pristine tree,
     exact command-set revision, terminal result, duration, and log artifact.
-18. `reviews` — candidate, Quality session, full-suite validation, verdict,
+13. `reviews` — candidate, Quality session, full-suite validation, verdict,
     rationale/risks artifact, and override relation.
-19. `architect_decisions` — sponsor/deliver/rework/reject/activate decision,
-    exact subject revision, bounded rationale, and principal.
-20. `deliveries` — candidate commit, expected old ref, resulting ref/tree,
+14. `architect_decisions` — sponsor/release/deliver/rework/reject or
+    application-activation decision, exact subject revision, bounded rationale,
+    and principal.
+15. `deliveries` — candidate commit, expected old ref, resulting ref/tree,
     method, time, and recovery status.
-21. `forum_topics` — immutable name/description, creator, creation time, and
+16. `forum_topics` — immutable name/description, creator, creation time, and
     optional superseding topic.
-22. `forum_threads` — topic, immutable title, creator, creation time, and
+17. `forum_threads` — topic, immutable title, creator, creation time, and
     optional superseding thread.
-23. `forum_posts` — thread, globally ordered ID, author occurrence, bounded
+18. `forum_posts` — thread, globally ordered ID, author occurrence, bounded
     immutable UTF-8 body, kind, reply/supersession relation, and creation time.
-24. `forum_attachments` — post-to-artifact relation with bounded label.
-25. `audit_log` — one slim ordered receipt per accepted semantic transition.
+19. `forum_attachments` — post-to-artifact relation with bounded label.
+20. `audit_log` — one slim ordered receipt per accepted semantic transition.
 
 SQLx's own migration history table is also present. No generic object, edge,
 EAV, JSONB metadata, workflow graph, report, projection, outbox, lease,
@@ -665,14 +867,18 @@ or trace-event table is created.
 Long narratives, prompts, ticket packets, model transcripts, patches, command
 logs, and validation output live in CAS. PostgreSQL stores the fields needed
 for authority, eligibility, lifecycle queries, cost breakdown, Forum search,
-and provenance plus direct artifact references.
+and provenance plus direct artifact references. Immutable child collections
+that are written and consumed as a unit—model profiles, required reads, and
+terminal read assertions—remain bounded typed CAS manifests rather than tables.
+Their owner row stores the artifact identity and the few normalized counts or
+identities needed for admission and status.
 
 ### 8.3 One semantic transition, one transaction
 
 An accepted mutating command performs one transaction that:
 
 1. checks principal jurisdiction, expected revision, references, lifecycle,
-   WIP, budget, and generation;
+   WIP, budget, and installed kernel build;
 2. inserts or updates the one authoritative domain fact set;
 3. inserts one `audit_log` receipt with command fingerprint and resulting
    revision; and
@@ -708,7 +914,8 @@ session rows.
 Tests assert row/transition counts, not merely outcomes. In particular:
 
 - a Pi session with 1,000 SDK events creates no SDK-event rows and only the
-  required assignment/session/read-assertion/audit facts;
+  required assignment/session/artifact-relation/audit facts; its required-read
+  observations are one sealed manifest, not one row per read;
 - 100 Forum searches and reads create zero writes;
 - one Forum post creates one post, zero copied inbox/read rows, optional
   attachment relations, and one audit receipt;
@@ -747,7 +954,8 @@ in MVP.
 Every assignment has one fresh Pi session and no resume. The TypeScript host
 retains the complete SDK event, message, tool-call/result, usage, retry, and
 terminal stream as newline-delimited JSON in its assigned staging directory.
-At terminal state it uses Node's built-in gzip to produce one stream artifact;
+At terminal state it uses Deno's Web Platform `CompressionStream("gzip")` to
+produce one stream artifact;
 the daemon adopts it and records:
 
 - BLAKE3 and byte length;
@@ -860,7 +1068,7 @@ The daemon creates one exact immutable assignment packet and launches one
 TypeScript Pi host. The packet pins:
 
 - campaign, office, assignment, ticket/candidate where applicable;
-- kernel generation and XSH application revision;
+- installed kernel build and XSH application revision;
 - provider/model/thinking/turn/wall/output profile;
 - aggregate campaign cost remaining at launch;
 - system prompt and task prompt digests;
@@ -911,7 +1119,10 @@ The wrapped Pi `read` tool emits an internal observation only after it returns
 the exact canonical file bytes. Shell `cat`, search output, a prompt quotation,
 or an actor assertion does not satisfy the gate. At terminal submission the
 host supplies its observed read set; the daemon independently verifies path and
-digest against the assignment and stores one normalized row per requirement.
+digest against the assignment, seals one bounded typed assertion manifest, and
+stores its artifact identity plus expected/satisfied counts on the terminal
+session row. Exact per-path proof remains inspectable without multiplying
+PostgreSQL rows.
 
 Every XSH Product, Engineering, and Quality assignment requires the pinned:
 
@@ -925,6 +1136,43 @@ A missing or changed required read rejects terminal submission.
 
 There is no V3 rolling handbook. Durable XSH truths belong in XSH's own
 AGENTS/contracts/docs/tests; cross-task discussion belongs in the Forum.
+
+### 11.4 Deterministic Pi construction and credentials
+
+The Pi SDK is an inspectable execution primitive, not a second control plane.
+`factory-pi-host` constructs the session from the immutable assignment packet
+and a narrow adapter; it does not invoke the Pi CLI. It disables ambient
+discovery of user/project extensions, skills, prompt templates, themes,
+settings, model fallback, prior sessions, and nested AGENTS files. The XSH
+application explicitly supplies the system prompt, assignment prompt, selected
+model descriptor, tool definitions, and required context. Pi session storage,
+if required by the SDK, is rooted only in the assignment staging directory and
+is never resumed.
+
+Authentication is the one permitted ambient operator facility. Initialization
+registers an explicit credential source for each admitted provider, normally
+the operator's existing Pi auth store or a named environment credential. The
+path/name is configuration; secret bytes, OAuth tokens, and API keys never
+enter PostgreSQL, CAS, prompts, transcripts, assignment packets, or tracing.
+The host may let Pi refresh its own operator credential when the selected
+credential mechanism requires it, consistent with the cooperative same-user
+trust model. V3 does not build a credential broker in the MVP.
+
+An `ApplicationRevision` pins the complete effective model contract, not only
+a friendly model name: provider, model ID, thinking level, context/output
+limits, supported capability flags, and provider price inputs exposed by Pi.
+At session construction the host asks the pinned Pi SDK for the effective
+descriptor and rejects absence, fallback, or drift before the first model
+request. A credential may change without changing application identity; a
+model descriptor or price change requires a new application revision.
+
+The host exports only the environment required for Deno, Pi authentication,
+the inherited authority descriptor, assigned roots, and the actor's ordinary
+shell tool baseline. It sets noninteractive execution and disables update
+checks or package/resource installation. It records names of admitted
+environment fields but never values of secret fields. The provider-free Pi
+adapter tests must prove that no default extension/resource discovery or model
+fallback occurs.
 
 ## 12. Product change circuit and Git provenance
 
@@ -1029,7 +1277,7 @@ Inputs:
 - fixed factory author and committer identities;
 - recorded construction timestamp;
 - provenance trailers for campaign, ticket, ticket revision digest, kernel
-  generation, application revision, base, regression tree, candidate tree,
+  build, application revision, base, regression tree, candidate tree,
   patch BLAKE3, Engineering session BLAKE3, and validation identity.
 
 Quality and Architect decisions remain database provenance because they occur
@@ -1073,15 +1321,15 @@ If the branch moved, checkout is dirty, fast-forward fails, or postcondition
 differs, delivery fails closed and preserves the candidate branch and evidence.
 There is no merge commit, rebase, force update, remote fetch, or push.
 
-## 13. Factory policy and generation change circuits
+## 13. Factory policy and manual build changes
 
 ### 13.1 Application-policy change
 
 Prompts, model profiles, turn/wall/output limits, Forum guidance, ticket-buffer
 limits, and other declarative XSH application policy form an immutable
 `ApplicationRevision`. The Grand Architect may author and activate a new
-declarative revision directly at a quiescent assignment boundary after the
-kernel validates:
+declarative revision directly when no campaign is `Running` and the kernel
+validates:
 
 - fixed office set and authority contracts;
 - buffer inequalities and WIP bounds;
@@ -1091,93 +1339,33 @@ kernel validates:
 - no changed product repository identity; and
 - exact predecessor/application lineage.
 
-Activation is an explicit Architect decision and affects only new assignments.
-Active sessions retain their pinned old revision.
+Activation is an explicit Architect decision. It may occur between campaigns
+only; a running campaign does not mix policy revisions between its offices.
+The selected revision is pinned when a campaign starts.
 
-A TypeScript code change is not a declarative policy edit; it follows the full
-factory Engineering/Quality circuit.
+A TypeScript code change is not a declarative policy edit. In the MVP it is an
+offline operator-deployed kernel-build change.
 
-### 13.2 Factory source change
+### 13.2 Offline kernel-build change
 
-The Grand Architect may originate a typed factory change request directly,
-without Product sponsorship. It states objective, affected trusted boundary,
-acceptance tests, migration impact, rollback boundary, and expected operational
-improvement.
+Rust, executable TypeScript, dependency-lock, and schema changes are outside
+the running factory's authority in the MVP. The operator must:
 
-1. A fresh Engineering Director session works in an isolated V3 source
-   worktree and submits source tree plus any migration.
-2. The incumbent kernel runs the complete provider-free V3 qualification set.
-3. A fresh Quality Director session reviews exact source/tree/migration and
-   invokes the qualification set again.
-4. The Architect accepts or rejects the exact candidate generation.
-5. An accepted candidate enters clone qualification and activation below.
+1. stop the daemon and prove no child process remains;
+2. take a PostgreSQL dump and preserve the CAS/runtime root;
+3. build and run the complete provider-free qualification set outside the live
+   daemon;
+4. apply any SQLx migration offline;
+5. install one exact Rust/Deno source-and-runtime set;
+6. start the daemon and require schema, lockfile, binary/source, Deno/Pi, CAS,
+   audit/material-state, and read-only health checks before starting a
+   campaign; and
+7. record the installed `KernelBuildId` and qualification receipt.
 
-The incumbent generation owns every gate. The candidate never certifies itself
-by writing incumbent state.
-
-### 13.3 Generation package
-
-An immutable candidate generation package contains:
-
-- predecessor generation ID;
-- source commit/tree and portable patch artifact;
-- Rust binaries with BLAKE3/length;
-- compiled TypeScript bundles, Node/Pi lock/runtime identities;
-- ordered SQL migration artifact and expected resulting schema identity;
-- application revision set;
-- exact qualification command-set revision;
-- test and Quality receipts; and
-- Architect activation decision.
-
-### 13.4 Clone qualification
-
-The incumbent daemon:
-
-1. closes new work admission and waits for all sessions, validation children,
-   Git materializations, and pending writes to become terminal;
-2. takes a custom-format `pg_dump` of the live database and records its BLAKE3;
-3. creates a uniquely named qualification database;
-4. restores the dump;
-5. starts the candidate in qualification mode against only the clone and a
-   cloned runtime manifest;
-6. applies candidate migrations to the clone;
-7. verifies expected schema identity, FKs/checks/indexes, audit/material-state
-   consistency, CAS references, ticket readiness, campaign cost derivation,
-   Forum search, and read-only status queries;
-8. runs restart and idempotency probes;
-9. proves the candidate does not touch the live database or product refs;
-10. seals the complete qualification log; and
-11. destroys the clone only after its evidence is sealed.
-
-Qualification never requires rebuilding every materialized row from the audit
-log. V3 uses audit-ledger-plus-state, not full event sourcing.
-
-### 13.5 Live activation and pre-admission rollback
-
-After clone qualification passes:
-
-1. retain the live dump, prior binaries/bundles, prior active-generation
-   manifest, and append-only CAS;
-2. stop the incumbent serving socket while retaining process custody;
-3. apply the already-qualified transaction-safe migration to live PostgreSQL;
-4. atomically replace the active-generation manifest using write/fsync/rename;
-5. `exec` or spawn the candidate daemon;
-6. require singleton-lock acquisition, schema check, audit/material-state
-   audit, CAS sample verification, and read-only health response;
-7. rehearse rollback before opening work admission: stop candidate, restore the
-   old database from the retained dump, start old generation and health-check,
-   then repeat the qualified migration and candidate health check; and
-8. only then record candidate activation and open admission.
-
-Failure before step 8 restores the old database/generation automatically and
-records a failed qualification/activation. Once admission opens and the new
-generation accepts a command, automatic snapshot rollback is forbidden;
-recovery must roll forward.
-
-The tiny boot shim that reads the active-generation manifest provides no policy
-or qualification judgment and is not called an immutable warden. A future
-generation may replace it through the same self-authorized package, consistent
-with the explicit limitation in section 2.3.
+MVP tooling does not orchestrate these steps, restore automatically, or claim
+the successor was authorized by its predecessor. The full Engineering/Quality
+self-change circuit, clone qualification, activation, and rollback rehearsal
+are specified as deferred work in `V1.md`.
 
 ## 14. Budget and process supervision
 
@@ -1228,7 +1416,7 @@ Every host or deterministic validation child has:
 - exact executable and argv;
 - assigned cwd and environment;
 - PID and process group;
-- owner generation/campaign/assignment/session;
+- owner kernel build/campaign/assignment/session;
 - stream byte ceilings;
 - wall deadline;
 - cancellation state; and
@@ -1242,22 +1430,26 @@ state. It never scans or kills by executable name.
 
 ## 15. Operator surface
 
-`factoryctl` is the only operator/Grand Architect entry point. It speaks the
-same Unix-socket protocol and supports stable text plus `--format json` for
-automation. Initial commands:
+`factoryctl` is the primary human/operator entry point. The Deno
+`@factory/sdk` is the supported programmatic Grand Architect/application
+surface and exposes the same typed commands over the same operator socket; it
+does not have additional authority. `factoryctl` supports stable text plus
+`--format json` for shell automation. Initial commands:
 
 ```text
 factoryctl init
 factoryctl daemon status
-factoryctl generation status
-factoryctl generation qualify <package>
+factoryctl application show [<revision>]
+factoryctl application register <bundle>
+factoryctl application activate <revision> --reason ...
 factoryctl campaign start --application xsh --budget-micro-usd 500000 \
-  --delivery-target 1 --upgrade-package <package>
+  --delivery-target 1
 factoryctl campaign status <id>
 factoryctl campaign cancel <id>
 factoryctl ticket list [--state ...]
 factoryctl ticket show <id>
 factoryctl ticket sponsor <revision> --expected-revision ... --reason ...
+factoryctl ticket release <attempt> --expected-revision ... --reason ...
 factoryctl candidate show <id>
 factoryctl candidate decide <id> --accept|--rework|--reject --reason ...
 factoryctl forum topics
@@ -1268,8 +1460,17 @@ factoryctl forum post ...
 factoryctl audit show <subject>
 ```
 
-`init` creates/validates only a specifically named administrator-approved
-database/schema and runtime root. It never discovers or deletes databases.
+`init` connects only to one explicitly supplied, already-created dedicated
+database, creates/validates its owned schema and runtime root, and never issues
+`CREATE DATABASE` or `DROP DATABASE`. The MVP daemon therefore needs no
+PostgreSQL `CREATEDB` or superuser capability.
+
+For an empty database, `factoryctl init` launches the exact installed
+`factoryd` in bounded initialization mode and passes configuration without
+giving the CLI a database-writing implementation. That one-shot kernel applies
+the initial SQLx schema, records the installed build, validates the runtime
+root, and exits before the resident daemon starts.
+
 Status commands are read-only. Mutating commands require explicit expected
 revision and idempotency key internally. No command pushes Git, starts an
 unbounded autonomous loop, or imports V1/V2 state.
@@ -1281,16 +1482,19 @@ every transition.
 ## 16. Implementation sequence
 
 Each tranche must pass its provider-free judges before the next. Do not begin a
-paid Pi call until tranche 10 is complete.
+paid Pi call until tranche 9 is complete.
 
 ### Tranche 1 — contracts and skeleton
 
 - Write root `AGENTS.md`, `README.md`, architecture glossary, trust assumptions,
   and repository boundary.
-- Create the bounded Rust workspace and TypeScript workspaces.
+- Create the bounded Rust workspace and root Deno workspace.
 - Pin toolchains and direct dependencies; commit lockfiles.
 - Define identifier newtypes, closed enums, error taxonomy, currency/duration
   types, path types, and aggregate revisions.
+- Define `ApplicationBundleV1` in Rust and the matching
+  `defineApplicationV1(...)` Deno authoring contract, with no callback/metadata
+  escape hatch.
 - Add a dependency-direction test preventing Rust references to XSH/application
   vocabulary and preventing application database imports.
 - Add CI/local make targets for provider-free checks only.
@@ -1300,7 +1504,7 @@ tests pass.
 
 ### Tranche 2 — PostgreSQL command core
 
-- Implement schema bootstrap/migrations for generations, applications,
+- Implement schema bootstrap/migrations for kernel builds, applications,
   repositories, campaigns, audit, and artifacts first.
 - Implement advisory singleton lock, schema identity comment/check, SQLx offline
   metadata, transactions, expected revisions, and audit-backed idempotency.
@@ -1322,9 +1526,12 @@ one audit receipt; failures produce neither.
   frame tests.
 - Implement inherited actor connection binding so actor payloads cannot choose
   their office/session identity accidentally.
+- Implement two-run canonical application compilation, closed Rust bundle
+  admission, template adoption, and application-revision identity.
 
 Exit: TypeScript SDK can perform typed test commands and seal/read artifacts
-without HTTP or database access.
+without HTTP or database access, and XSH source can compile to authoritative
+generic data without an executable kernel callback.
 
 ### Tranche 4 — Forum
 
@@ -1345,9 +1552,13 @@ Forum content changes authority or lifecycle.
   cancellation, direct wait, and terminal reconciliation.
 - Build the one-assignment Pi host using the coding-agent SDK with fake-provider
   injection for tests.
+- Use the Deno-only, no-`node_modules` SDK construction path; disable ambient Pi
+  resources, fallback, update/install behavior, and session resume.
+- Implement explicit credential-source selection and effective model/price
+  descriptor verification without persisting secret bytes.
 - Install common workspace tools and full-network host behavior.
-- Stream full raw events to disk, gzip and seal once, normalize terminal usage,
-  and halt on unknown cost.
+- Stream full raw events to disk, gzip through `CompressionStream`, seal once,
+  normalize terminal usage, and halt on unknown cost.
 - Implement required-read observations and terminal assertion.
 - Test disconnect, daemon crash, child refusal, timeout, output limit, signal
   escalation, partial transcript, missing usage, and no-resume retry.
@@ -1357,7 +1568,9 @@ has exact provenance and bounded shutdown.
 
 ### Tranche 6 — ticket buffer and Product workflow
 
-- Implement ticket/revision/reproducer/sponsorship transitions.
+- Implement application-global ticket/revision/reproducer/sponsorship state,
+  campaign-scoped ticket attempts, explicit failed-attempt release, and the
+  `Running -> terminal` campaign boundary.
 - Implement XSH application mission, Product prompt, model profile, mandatory
   reads, proposal validator, duplicate-search input, and buffer policy.
 - Implement deterministic two-run discovery and pre-claim reproduction.
@@ -1365,7 +1578,8 @@ has exact provenance and bounded shutdown.
   one-paid-session WIP, and constraint reporting.
 - Test buffer empty/low/target/full, unsponsored-proposal backpressure,
   downstream blockage, resolved-on-new-head, divergent reproducer, duplicate,
-  and no-quality-lowering behavior.
+  failed-attempt no-auto-retry/release, cross-campaign inventory persistence,
+  immediate target completion, and no-quality-lowering behavior.
 
 Exit: a fake Product session can replenish up to target but cannot auto-sponsor
 or create nonreproducible work.
@@ -1400,48 +1614,29 @@ accepted exact commit can reach a synthetic product main branch.
 Exit: complete provider-free product workflow passes against synthetic Git and
 fake Pi sessions.
 
-### Tranche 9 — self-update
-
-- Implement generation packages, source/binary/bundle/migration digests, and
-  qualification command sets.
-- Implement quiescence and prohibition on active children/writes.
-- Implement `pg_dump`/restore clone qualification and live backup.
-- Implement candidate qualification mode, schema/audit/material-state audits,
-  active manifest atomic switch, health handshake, rollback rehearsal, second
-  activation, and admission opening.
-- Implement failure injection after every boundary and prove pre-admission
-  restoration.
-- Prove that automatic rollback refuses after the new generation accepts its
-  first command.
-
-Exit: provider-free generation A upgrades to B, rehearses rollback, returns to
-B, preserves campaign identity, and continues scheduling.
-
-### Tranche 10 — complete XSH application and dry runs
+### Tranche 9 — complete XSH application and dry runs
 
 - Finalize exact XSH Product, Engineering, and Quality prompts and result
   validators.
-- Pin Node, Pi SDK, provider/model profiles, tool schema, full-suite argv, and
-  required reads.
+- Pin Deno, Pi SDK, the frozen dependency graph, provider/model profiles, tool
+  schema, full-suite argv, and required reads.
 - Run all flows with scripted fake Pi outputs and synthetic XSH-like repos.
 - Run the real XSH build/full suite outside a paid session to qualify host
   prerequisites and expected duration.
 - Exercise Forum search with a large synthetic corpus and inspect query plans,
   index size, memory, and latency.
 - Exercise 1,000-event transcripts and assert bounded PostgreSQL writes.
-- Run crash/cancel/unknown-cost/dirty-repo/moved-head/generation-failure drills.
-- Produce an operator checklist and exact combined MVP campaign request.
+- Run crash/cancel/unknown-cost/dirty-repo/moved-head drills.
+- Produce an operator checklist and exact MVP campaign request.
 
 Exit: no known deterministic defect requires a provider call to diagnose.
 
-### Tranche 11 — one paid combined MVP campaign
+### Tranche 10 — one paid MVP campaign
 
-- Verify clean V3 and XSH checkouts, PostgreSQL 18, exact active bootstrap
-  generation, Node/Pi/runtime identities, authentication, aggregate $0.50 cap,
-  and no prior live state import.
-- Start one campaign with the prepared bootstrap-to-candidate upgrade package.
-- Complete and preserve the upgrade/rollback rehearsal before paid Product
-  work.
+- Verify clean V3 and XSH checkouts, PostgreSQL 18, exact installed kernel
+  build, Deno/Pi/runtime identities, authentication, aggregate $0.50 cap, and
+  no prior live state import.
+- Start one campaign for one delivery.
 - Run one Product replenishment session; the task is not seeded.
 - Have the external Architect sponsor a reproducible ticket.
 - Run Engineering, hard validation, Quality, and final decision sequentially.
@@ -1457,12 +1652,15 @@ Exit: no known deterministic defect requires a provider call to diagnose.
 ### 17.1 Domain/state tests
 
 - every legal and illegal campaign, ticket, assignment, session, candidate,
-  review, delivery, Forum, and generation transition;
+  review, delivery, and Forum transition;
 - expected-revision and idempotency behavior;
 - fixed office jurisdiction;
 - aggregate budget known/unknown/exceeded;
 - one paid session, one Engineering WIP, one Quality WIP;
-- ticket buffer pressure and proposal caps;
+- application-global ticket buffer pressure, proposal caps, FIFO sponsorship,
+  campaign claim/release, and inventory survival across campaigns;
+- campaign preparation, exact running revision, immediate target completion,
+  cancellation, and refusal to mix active revisions;
 - one rework maximum; and
 - Quality override only for qualitative rejection.
 
@@ -1506,6 +1704,12 @@ Exit: no known deterministic defect requires a provider call to diagnose.
 - timeout, cancellation, daemon disconnect, nonzero child exit, output limit,
   protocol error, and process-group escalation;
 - exact model/runtime/prompt/tool identity;
+- clean-cache and `--cached-only` Pi SDK construction with
+  `nodeModulesDir: "none"`, no approved lifecycle scripts, and no Node
+  executable;
+- no ambient Pi extensions, skills, prompts, settings, prior sessions, update
+  checks, resource installation, or model fallback;
+- explicit credential-source selection without secret persistence;
 - full compressed event stream and normalized totals;
 - cost rounding, absent cost, retry telemetry, and aggregate stop;
 - no session resume; and
@@ -1525,35 +1729,22 @@ Exit: no known deterministic defect requires a provider call to diagnose.
   evidence; and
 - explicit proof no remote Git command is reachable.
 
-### 17.7 Generation tests
-
-- candidate cannot touch live DB during clone qualification;
-- migration/schema mismatch;
-- corrupt dump/CAS reference;
-- active session prevents quiescence;
-- failure before/after migration, manifest switch, candidate start, health,
-  rollback restore, and second activation;
-- old generation is healthy after rehearsal;
-- new generation resumes the same campaign and preserves Forum/ticket state;
-- first post-admission command closes automatic rollback; and
-- predecessor/generation/audit lineage is queryable.
-
-### 17.8 No-paid-test rule
+### 17.7 No-paid-test rule
 
 All ordinary, integration, failure, replay-audit, process, Git, Postgres, Forum,
-SDK, and upgrade tests use fake Pi providers and synthetic repositories. No
+and SDK tests use fake Pi providers and synthetic repositories. No
 test target may call a model provider. The only paid action before MVP
-acceptance is the explicitly authorized combined campaign.
+acceptance is the explicitly authorized paid MVP campaign.
 
 ## 18. Operational acceptance and observability
 
-The daemon emits compact `tracing` diagnostics with generation, campaign,
+The daemon emits compact `tracing` diagnostics with kernel build, campaign,
 assignment, session, ticket/candidate, and operation IDs where applicable.
 Tracing is operational and disposable; provenance is PostgreSQL plus CAS.
 
 `factoryctl campaign status` must show at least:
 
-- generation and application revision;
+- installed kernel build and application revision;
 - campaign state, deadline, and delivery target;
 - current office/assignment and elapsed wall time;
 - ready/proposed/blocked/in-flight buffer counts versus policy;
@@ -1569,8 +1760,9 @@ Post-campaign inspection must be possible without reading raw transcripts.
 Raw transcripts remain available for disputed or subtle judgments.
 
 Backups pair a PostgreSQL custom-format dump with the append-only CAS root and
-active-generation manifest. Restoring into a blank database and runtime root
-must pass schema, CAS-reference, and audit/material-state checks before serving.
+installed-build manifest. Restoring into a blank database and runtime root with
+that exact build must pass schema, CAS-reference, and audit/material-state
+checks before serving.
 
 ## 19. Explicit non-goals and bloat exclusions
 
@@ -1579,6 +1771,8 @@ traits, feature flags, protocol fields, or unused abstractions:
 
 - importing or converting V1/V2 tickets, reports, sessions, graph nodes, Forum
   state, handbook state, or lifecycle state;
+- runtime application callbacks, a generic plugin ABI, JSON Schema validator,
+  policy-expression language, or arbitrary application metadata map;
 - a universal causal/epistemic graph;
 - objectives, hypotheses, conflicts, lessons, or outcomes as generic graph
   ontology;
@@ -1587,6 +1781,8 @@ traits, feature flags, protocol fields, or unused abstractions:
 - mutable actor genomes, arbitrary organization graphs, role reproduction,
   selection, reinforcement learning, or scalar institutional fitness;
 - ticket creation merely to meet buffer occupancy;
+- feature development, refactors, cleanup-only changes, documentation-only
+  changes, dependency updates, or performance work as product ticket classes;
 - autonomous eval design, package-owned benchmark portfolios, V1 eval-manager
   loops, or a rolling handbook;
 - per-department dollar budgets;
@@ -1605,13 +1801,15 @@ traits, feature flags, protocol fields, or unused abstractions:
   claims against same-user actor processes;
 - remote Git operations, pull requests, pushes, deployment, or release
   packaging;
-- automatic rollback after a new generation has accepted work; and
-- an immutable human/warden authority above self-updating generations.
+- automated factory source changes, generation packages, clone qualification,
+  live schema migration, self-activation, or rollback rehearsal. These are
+  deferred to `V1.md`.
 
 Desired but deferred Forum digests and notifications must begin with measured
 evidence that explicit indexed browse/search is insufficient. Remote workers
 and concurrent paid sessions require a new resource-reservation and fencing
-design; they are not incremental flag changes.
+design; they are not incremental flag changes. `V1.md` is the complete
+post-MVP/deferred-work register.
 
 ## 20. Definition of done
 
@@ -1619,17 +1817,17 @@ V3 MVP is done only when:
 
 - the cleanroom repository contains no dependency/import from V1 or V2;
 - generic Rust has no XSH application vocabulary;
+- the XSH Deno module compiles twice to the same closed bundle, Rust admits it,
+  and neither daemon nor live Pi host loads XSH application code;
 - all provider-free checks in section 17 pass on a fresh PostgreSQL 18 schema;
-- SQLx offline metadata and both lockfiles are current;
+- SQLx offline metadata, `Cargo.lock`, and `deno.lock` are current;
 - the dependency budget contains no Tokio/HTTP/ORM/generic workflow stack;
 - Forum search is indexed, bounded, order-independent, and read-only;
 - a 1,000-event fake Pi session demonstrates bounded PostgreSQL writes;
 - exact required reads are proven for each XSH office;
 - the ticket buffer enforces target/maximum/backpressure without weakening its
   reproducer/sponsorship contract;
-- generation A upgrades to B, rehearses rollback, returns to B, and resumes the
-  same campaign before work admission;
-- the combined paid campaign discovers rather than receives its XSH task;
+- the paid campaign discovers rather than receives its XSH task;
 - Product's reproducer fails deterministically on the base;
 - Engineering's regression checkpoint fails and candidate passes;
 - the full XSH suite passes twice on the exact candidate tree, once as the hard
@@ -1640,7 +1838,7 @@ V3 MVP is done only when:
 - no remote is pushed;
 - total factory Pi provider cost is known and at most $0.50 with the required
   breakdown; and
-- status, audit, CAS, PostgreSQL, transcript, review, validation, generation,
+- status, audit, CAS, PostgreSQL, transcript, review, validation, kernel-build,
   and Git evidence are sufficient to explain the delivered commit without
   reconstructing state from chat.
 
@@ -1648,5 +1846,5 @@ The success metric is not that the company was busy or that the buffer was
 full. It is that a clean, understandable institution converted an unseeded,
 reproducible XSH problem into an independently reviewed, fully tested,
 provenance-bearing local commit within the declared aggregate cost—and left a
-qualified buffer and evidence that make the next commit easier rather than
-more mysterious.
+durable, honestly measured buffer state and evidence that make the next commit
+easier rather than more mysterious.
