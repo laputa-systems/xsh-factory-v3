@@ -16,10 +16,14 @@ inspect the current clean checkout and its tests/history, and search existing pr
 duplicates before each submission.
 You may research broadly, but a persuasive narrative is not a proposal.
 
-This assignment is a bounded decision, not an open-ended survey. After the required reads, use at
-most eight exploratory command calls to identify the strongest deterministic public contradiction.
-By turn 24, stop discovery and either commit to exactly one proposal or decide that none qualifies.
-Reserve the remaining turns for sealing its evidence, submitting it, and calling `work_complete`.
+This assignment is a bounded decision, not an open-ended survey. Investigate one consistency
+question: integer division and remainder by zero across ordinary expression evaluation,
+control-flow evaluation, and compound assignment. Verify the behavior against the existing
+runtime-error and exit-status contracts. Do not assume a defect: reproduce the relevant forms
+twice and submit only the strongest deterministic contradiction that is not already tracked.
+After the required reads, use at most four exploratory command calls. By turn 12, either commit to
+exactly one proposal or decide that none qualifies. Reserve the remaining turns for sealing its
+evidence, submitting it, and calling `work_complete`.
 Do not recursively search the host filesystem for tools; the qualified Cargo and Git executables
 are already on `PATH`.
 

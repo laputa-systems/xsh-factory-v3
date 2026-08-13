@@ -156,7 +156,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "9c83d3c211a48183dd5ade5c696647786d19286919f071fff0adb5c4641ae277",
+        "3a991e27515f85a07e380af699bdf0aaa7a5f700dcdcfc15a9a8abb1b85f6e46",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -169,15 +169,11 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "product_submit_ticket",
         "work_complete",
       ],
-      // Live Product discovery needs the same instruction-following model as
-      // Engineering; the cheaper review model exhausted two bounded sessions
-      // without making the required terminal decision.
+      // Product receives one bounded semantic question and must independently
+      // verify it before proposing work. The same model can later implement
+      // the accepted contract without changing the provider/runtime boundary.
       model: engineeringModel,
-      // Product must inspect a real language implementation and prove a
-      // deterministic reproducer; 24 turns was exhausted before terminal
-      // submission in the first live campaign. The aggregate cost authority
-      // remains the hard spend bound.
-      limits: { turn_limit: 48, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
+      limits: { turn_limit: 32, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
     },
     {
       office: "engineering",

@@ -685,6 +685,31 @@ impl KernelSessionRpc {
         })
     }
 
+    /// A workspace path or request rejection is an ordinary tool result, not
+    /// loss of the inherited actor transport.  Keep the connection alive so
+    /// the actor can correct the path and continue.  Binding mismatches remain
+    /// fatal because they mean the daemon-side capability itself is wrong.
+    fn workspace_read_response(
+        request_id: String,
+        operation: String,
+        result: Result<Vec<u8>, WorkspaceReadError>,
+    ) -> Result<Vec<u8>, LocalTransportError> {
+        match result {
+            Ok(response) => Ok(response),
+            Err(WorkspaceReadError::ConnectionIdentityMismatch) => Err(
+                LocalTransportError::WorkspaceRead(WorkspaceReadError::ConnectionIdentityMismatch),
+            ),
+            Err(error) => Ok(json::to_string(&factory_protocol::ErrorResponse {
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                request_id,
+                operation,
+                error_code: "workspace_read_rejected".to_owned(),
+                message: error.to_string(),
+            })
+            .into_bytes()),
+        }
+    }
+
     async fn handle(&self, frame: BoundActorFrame) -> Result<Vec<u8>, LocalTransportError> {
         self.verify_binding(frame.binding())?;
         match frame.envelope().operation.as_str() {
@@ -1896,20 +1921,18 @@ where
         let result = server
             .serve(move |frame| {
                 if frame.envelope().operation == factory_protocol::OP_WORKSPACE_READ {
+                    let request_id = frame.envelope().request_id.clone();
+                    let operation = frame.envelope().operation.clone();
                     let result = match read_authority_for_server.lock() {
                         Ok(mut authority) => match authority.as_mut() {
-                            Some(authority) => authority
-                                .handle_frame(&frame)
-                                .map_err(LocalTransportError::from),
-                            None => Err(LocalTransportError::WorkspaceRead(
-                                WorkspaceReadError::ConnectionIdentityMismatch,
-                            )),
+                            Some(authority) => authority.handle_frame(&frame),
+                            None => Err(WorkspaceReadError::ConnectionIdentityMismatch),
                         },
-                        Err(_) => Err(LocalTransportError::WorkspaceRead(
-                            WorkspaceReadError::ConnectionIdentityMismatch,
-                        )),
+                        Err(_) => Err(WorkspaceReadError::ConnectionIdentityMismatch),
                     };
-                    Box::pin(async move { result })
+                    Box::pin(async move {
+                        KernelSessionRpc::workspace_read_response(request_id, operation, result)
+                    })
                 } else {
                     rpc.dispatch_response(frame)
                 }
@@ -1967,6 +1990,18 @@ where
             )
         }
         Ok(FirstStop::Transport(server_result)) => {
+            match &server_result {
+                Ok(disconnect) => tracing::warn!(
+                    session_id = session.session_id.get(),
+                    ?disconnect,
+                    "actor transport ended before process or terminal evidence"
+                ),
+                Err(error) => tracing::warn!(
+                    session_id = session.session_id.get(),
+                    %error,
+                    "actor transport failed before process or terminal evidence"
+                ),
+            }
             process_cancellation.request();
             let process_outcome = process_receiver
                 .recv()
@@ -2285,14 +2320,14 @@ fn infrastructure_stop_reason(
     // of terminating the exact owned group. Preserve the initiating custody
     // reason instead of misclassifying that expected peer close as a daemon
     // disconnect.
+    if transport == SessionTransportStop::TransportFailed {
+        return StopReasonV1::ProtocolError;
+    }
     if process == ProcessStopReason::Cancelled {
         return StopReasonV1::Cancelled;
     }
     if transport == SessionTransportStop::PeerDisconnected {
         return StopReasonV1::DaemonDisconnected;
-    }
-    if transport == SessionTransportStop::TransportFailed {
-        return StopReasonV1::ProtocolError;
     }
     match process {
         ProcessStopReason::Exited => StopReasonV1::ProtocolError,
@@ -2788,6 +2823,54 @@ mod tests {
             .expect("current stage retains named reference");
         assert!(
             require_current_assignment_evidence_closure(&BTreeSet::new(), expected_id,).is_err()
+        );
+    }
+
+    #[test]
+    fn rejected_workspace_read_is_a_response_and_later_reads_can_continue() {
+        let rejected = KernelSessionRpc::workspace_read_response(
+            "missing-read".to_owned(),
+            factory_protocol::OP_WORKSPACE_READ.to_owned(),
+            Err(WorkspaceReadError::Io {
+                operation: "canonicalize workspace file",
+                path: std::path::PathBuf::from("missing.xsh"),
+                source: std::io::Error::from(std::io::ErrorKind::NotFound),
+            }),
+        )
+        .expect("a missing path is a framed actor response");
+        let error: factory_protocol::ErrorResponse =
+            json::from_str(std::str::from_utf8(&rejected).unwrap()).unwrap();
+        assert_eq!(error.request_id, "missing-read");
+        assert_eq!(error.operation, factory_protocol::OP_WORKSPACE_READ);
+        assert_eq!(error.error_code, "workspace_read_rejected");
+
+        let successful = br#"{"operation":"workspace.read","request_id":"next"}"#.to_vec();
+        assert_eq!(
+            KernelSessionRpc::workspace_read_response(
+                "next".to_owned(),
+                factory_protocol::OP_WORKSPACE_READ.to_owned(),
+                Ok(successful.clone()),
+            )
+            .expect("the same dispatcher remains usable"),
+            successful
+        );
+    }
+
+    #[test]
+    fn initiating_transport_failure_is_not_mislabeled_as_actor_cancellation() {
+        assert_eq!(
+            infrastructure_stop_reason(
+                ProcessStopReason::Cancelled,
+                SessionTransportStop::TransportFailed,
+            ),
+            StopReasonV1::ProtocolError,
+        );
+        assert_eq!(
+            infrastructure_stop_reason(
+                ProcessStopReason::Cancelled,
+                SessionTransportStop::PeerDisconnected,
+            ),
+            StopReasonV1::Cancelled,
         );
     }
 }
