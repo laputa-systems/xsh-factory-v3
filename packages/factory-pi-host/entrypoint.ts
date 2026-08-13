@@ -144,7 +144,7 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
       root.remaining_campaign_allowance_micro_usd,
       "remaining_campaign_allowance_micro_usd",
     ),
-    aggregate_revision: numericIdentity(root.aggregate_revision, "aggregate_revision"),
+    aggregate_revision: aggregateRevision(root.aggregate_revision),
     legal_terminal_operations: strings(
       root.terminal_operations,
       "terminal_operations",
@@ -362,6 +362,11 @@ function numericIdentity(value: unknown, name: string): string {
     throw new Error(`${name} must be a positive safe integer`);
   }
   return String(value);
+}
+
+/** Aggregate revisions begin at zero; unlike database identities, zero is valid. */
+function aggregateRevision(value: unknown): string {
+  return String(integer(value, "aggregate_revision"));
 }
 
 function nullableNumericIdentity(value: unknown, name: string): string | null {

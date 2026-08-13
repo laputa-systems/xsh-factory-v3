@@ -163,6 +163,15 @@ Deno.test("AssignmentPacketV1 golden is canonical and maps numeric wire identiti
     Error,
     "assignment packet",
   );
+
+  const initialRevision = JSON.parse(text);
+  initialRevision.aggregate_revision = 0;
+  assertEquals(
+    decodeAssignmentPacketV1(
+      new TextEncoder().encode(canonicalJson(initialRevision)),
+    ).aggregate_revision,
+    "0",
+  );
 });
 
 Deno.test("TypeScript frame boundary rejects malformed and oversized input", () => {
