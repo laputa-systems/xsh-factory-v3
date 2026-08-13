@@ -371,7 +371,15 @@ impl DecisionStore {
             .validate("candidate changed paths", 256 * 1024, false)?;
         command
             .regression_patch
-            .validate("regression binary patch", 16 * 1024 * 1024, false)?;
+            // Product has already captured and run the assigned reproducer
+            // twice before an Engineering ticket exists. A checkpoint can
+            // therefore validly prove that already-sealed failure on the
+            // pristine tree, with no test-only worktree delta yet. The
+            // command set, failed log, nonempty candidate patch, and final
+            // hard validation remain mandatory; an empty checkpoint patch is
+            // evidence of that legitimate existing-reproducer case, not an
+            // actor-controlled waiver.
+            .validate("regression binary patch", 16 * 1024 * 1024, true)?;
         command.regression_command_set.validate(
             "regression checkpoint command set",
             256 * 1024,

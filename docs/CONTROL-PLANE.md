@@ -13,7 +13,10 @@
 4. The external Architect sponsors one proposed ticket revision. This is the
    first human judgement gate.
 5. Engineering receives that ticket and an isolated worktree. It must obtain a
-   kernel-captured failing regression checkpoint before changing source.
+   kernel-captured failing regression checkpoint before the implementation fix.
+   A ticket's already-sealed Product reproducer may validly checkpoint the
+   pristine tree, so the checkpoint patch can be empty; its failed command log,
+   the nonempty final candidate patch, and hard validation remain mandatory.
 6. Engineering submits its candidate using only a normalized commit message
    and checkpoint identity. The kernel captures the final tree, changed paths,
    binary patch, completion record, and risk record; runs the reproducer and

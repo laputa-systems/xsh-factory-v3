@@ -155,6 +155,38 @@ fn failed_attempt_requires_an_explicit_architect_release() {
     });
 }
 
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn candidate_submission_accepts_an_empty_checkpoint_patch_for_a_ticket_reproducer() {
+    smol::block_on(async {
+        let mut fixture = Fixture::new().await;
+        let engineering = fixture.open_session(Office::Engineering).await;
+        // Product has already sealed and run the ticket reproducer. An
+        // Engineering checkpoint may therefore capture the pristine base tree
+        // while the candidate patch itself supplies the durable regression
+        // test. Empty checkpoint bytes must not turn that reproducible path
+        // into a terminal protocol fault.
+        let empty_checkpoint_patch = register(
+            &fixture.store,
+            &fixture.build,
+            "empty-checkpoint-patch",
+            b"",
+        )
+        .await;
+        let mut command = fixture.candidate_command(&engineering, 'b', 'd', "empty-checkpoint");
+        command.regression_patch = empty_checkpoint_patch.reference();
+        let candidate = fixture
+            .store
+            .decision_store()
+            .submit_candidate(&command)
+            .await
+            .expect("the sealed Product reproducer makes the empty checkpoint patch admissible");
+        assert_eq!(candidate.state, factory_protocol::CandidateState::Submitted);
+        fixture.finish_session(engineering).await;
+        fixture.store.close().await;
+    });
+}
+
 struct Fixture {
     store: KernelStore,
     build: InstalledBuild,
