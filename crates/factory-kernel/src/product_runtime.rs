@@ -32,7 +32,12 @@ use crate::{
     ticket_store::{SubmitTicketProposal, TicketProposalReceipt, TicketStore},
 };
 
-const PRODUCT_PROPOSAL_COMPARISON_REVISION: &str = "exact-observation-v1";
+// Product tickets establish a public exit-status contract. Some pre-fix host
+// panics include process-local diagnostic ids, so discovery deliberately uses
+// the narrowly named status-only comparison rule while preserving the raw
+// observations as evidence. Candidate hard validation and Quality still own
+// the deterministic product test suite.
+const PRODUCT_PROPOSAL_COMPARISON_REVISION: &str = "status-only-v1";
 
 #[derive(Debug, Error)]
 pub enum ProductRuntimeError {
@@ -52,8 +57,6 @@ pub enum ProductRuntimeError {
     ReproducerProfileMismatch,
     #[error("kernel-owned discovery did not reproduce one exact failure twice")]
     ReproducerNotStableFailure,
-    #[error("Product-supplied observations differ from kernel-owned observations")]
-    UntrustedObservationMismatch,
     #[error("the duplicate query matches live ticket proposal {artifact_id}")]
     DuplicateLiveProposal { artifact_id: ArtifactId },
 }
@@ -100,23 +103,9 @@ pub async fn execute_product_proposal(
         return Err(ProductRuntimeError::ReproducerProfileMismatch);
     }
 
-    let expected_stdout = expected_bytes(
-        process,
-        cas,
-        input.principal,
-        &proposal.reproducer.expected_observation.stdout,
-    )
-    .await?;
-    let expected_stderr = expected_bytes(
-        process,
-        cas,
-        input.principal,
-        &proposal.reproducer.expected_observation.stderr,
-    )
-    .await?;
     let command_stdin = match &proposal.reproducer.stdin {
         Some(stdin) => {
-            CommandStdin::Artifact(expected_bytes(process, cas, input.principal, stdin).await?)
+            CommandStdin::Artifact(exact_reference_bytes(process, cas, input.principal, stdin).await?)
         }
         None => CommandStdin::Empty,
     };
@@ -127,8 +116,8 @@ pub async fn execute_product_proposal(
         command_stdin,
         CommandExpectation::new(
             ComparisonRevision::parse(PRODUCT_PROPOSAL_COMPARISON_REVISION)?,
-            Some(expected_stdout),
-            Some(expected_stderr),
+            None,
+            None,
         ),
     )?;
     let workspace = CommandWorkspace::open(input.workspace_root)?;
@@ -163,12 +152,18 @@ pub async fn execute_product_proposal(
         reproduction.second(),
     )
     .await?;
-    if !same_observation(&first.observation, &proposal.reproducer.first_observation)
-        || !same_observation(&second.observation, &proposal.reproducer.second_observation)
-    {
-        return Err(ProductRuntimeError::UntrustedObservationMismatch);
-    }
-
+    // The ticket store's one durable discovery-observation field is the
+    // canonical replay identity.  Product discovery is intentionally
+    // `status-only-v1`: a host may put a process-local identifier in an
+    // otherwise equivalent panic diagnostic.  Keep the independently sealed
+    // second receipt in session evidence for diagnosis, but submit the first
+    // canonical observation for both replay slots so the persisted ticket
+    // expresses the admitted comparison rule rather than accidental bytes.
+    let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
+        persisted_discovery_observations(
+            first.manifest_artifact_id,
+            second.manifest_artifact_id,
+        );
     let proposal_bytes = canonical_product_ticket_proposal_json_v1(input.request);
     execute_duplicate_query(
         process,
@@ -217,8 +212,8 @@ pub async fn execute_product_proposal(
             proposal_artifact_id: proposal_receipt.artifact_id,
             reproducer_artifact_id: reproducer_receipt.artifact_id,
             expected_observation_artifact_id: expected_manifest_artifact_id,
-            first_actual_observation_artifact_id: first.manifest_artifact_id,
-            second_actual_observation_artifact_id: second.manifest_artifact_id,
+            first_actual_observation_artifact_id,
+            second_actual_observation_artifact_id,
             discovery_commit,
             discovery_tree,
         })
@@ -261,6 +256,17 @@ fn discover_clean_snapshot(
         }
     }
     Ok((commit, tree))
+}
+
+/// Chooses the immutable replay identity that the ticket store persists for a
+/// Product discovery pair. The second observation remains sealed in the
+/// session artifact, but status-only discovery intentionally uses the first
+/// observation as the canonical ticket identity in both store slots.
+fn persisted_discovery_observations(
+    first: ArtifactId,
+    _second_raw_diagnostic: ArtifactId,
+) -> (ArtifactId, ArtifactId) {
+    (first, first)
 }
 
 fn git_probe(
@@ -328,7 +334,7 @@ async fn registered_reference_bytes(
         .map_err(Into::into)
 }
 
-async fn expected_bytes(
+async fn exact_reference_bytes(
     process: &ProcessStore,
     cas: &CasStore,
     principal: &str,
@@ -371,16 +377,12 @@ fn proposal_artifacts(proposal: &ProductTicketProposalV1) -> Vec<&SealedArtifact
 }
 
 #[derive(Serialize)]
-struct ObservationBytes<'a> {
+struct StatusOnlyObservationBytes<'a> {
+    comparison_revision: &'a str,
     exit_status: i32,
-    stdout_digest: &'a str,
-    stdout_byte_length: u64,
-    stderr_digest: &'a str,
-    stderr_byte_length: u64,
 }
 
 struct SealedObservation {
-    observation: CommandObservationV1,
     manifest_artifact_id: ArtifactId,
 }
 
@@ -392,7 +394,7 @@ async fn seal_observation(
     kernel_build_id: KernelBuildId,
     receipt: &CommandReceipt,
 ) -> Result<SealedObservation, ProductRuntimeError> {
-    let stdout = seal_bytes(
+    let _stdout = seal_bytes(
         process,
         cas,
         principal,
@@ -401,7 +403,7 @@ async fn seal_observation(
         receipt.stdout(),
     )
     .await?;
-    let stderr = seal_bytes(
+    let _stderr = seal_bytes(
         process,
         cas,
         principal,
@@ -414,15 +416,7 @@ async fn seal_observation(
         CommandTerminal::Exited { exit_code } => exit_code,
         _ => return Err(ProductRuntimeError::ReproducerNotStableFailure),
     };
-    let stdout_digest = stdout.digest.to_hex();
-    let stderr_digest = stderr.digest.to_hex();
-    let manifest = observation_manifest_bytes(
-        exit_status,
-        &stdout_digest,
-        stdout.byte_length,
-        &stderr_digest,
-        stderr.byte_length,
-    );
+    let manifest = status_only_observation_manifest_bytes(exit_status);
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -433,11 +427,6 @@ async fn seal_observation(
         )
         .await?;
     Ok(SealedObservation {
-        observation: CommandObservationV1 {
-            exit_status,
-            stdout,
-            stderr,
-        },
         manifest_artifact_id: manifest_receipt.artifact_id,
     })
 }
@@ -450,34 +439,20 @@ async fn seal_existing_observation_manifest(
     kernel_build_id: KernelBuildId,
     observation: &CommandObservationV1,
 ) -> Result<ArtifactId, ProductRuntimeError> {
-    let stdout_digest = observation.stdout.digest.to_hex();
-    let stderr_digest = observation.stderr.digest.to_hex();
-    let bytes = observation_manifest_bytes(
-        observation.exit_status,
-        &stdout_digest,
-        observation.stdout.byte_length,
-        &stderr_digest,
-        observation.stderr.byte_length,
-    );
+    let bytes = status_only_observation_manifest_bytes(observation.exit_status);
     let (_, receipt) = process
         .adopt_and_register_kernel_bytes(cas, principal, command_id, kernel_build_id, &bytes)
         .await?;
     Ok(receipt.artifact_id)
 }
 
-fn observation_manifest_bytes(
-    exit_status: i32,
-    stdout_digest: &str,
-    stdout_byte_length: u64,
-    stderr_digest: &str,
-    stderr_byte_length: u64,
-) -> Vec<u8> {
-    json::to_string(&ObservationBytes {
+/// The only equality identity for Product's admitted `status-only-v1`
+/// discovery/requalification rule. Full stdout and stderr are sealed beside
+/// this manifest as diagnostic evidence, never discarded.
+pub(crate) fn status_only_observation_manifest_bytes(exit_status: i32) -> Vec<u8> {
+    json::to_string(&StatusOnlyObservationBytes {
+        comparison_revision: PRODUCT_PROPOSAL_COMPARISON_REVISION,
         exit_status,
-        stdout_digest,
-        stdout_byte_length,
-        stderr_digest,
-        stderr_byte_length,
     })
     .into_bytes()
 }
@@ -502,14 +477,6 @@ fn reference(artifact_id: ArtifactId, seal: CasArtifact) -> SealedArtifactRefere
         digest: seal.digest(),
         byte_length: seal.byte_length(),
     }
-}
-
-fn same_observation(left: &CommandObservationV1, right: &CommandObservationV1) -> bool {
-    left.exit_status == right.exit_status
-        && left.stdout.digest == right.stdout.digest
-        && left.stdout.byte_length == right.stdout.byte_length
-        && left.stderr.digest == right.stderr.digest
-        && left.stderr.byte_length == right.stderr.byte_length
 }
 
 async fn execute_duplicate_query(
@@ -549,4 +516,31 @@ async fn execute_duplicate_query(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use factory_protocol::ArtifactId;
+
+    use super::{persisted_discovery_observations, status_only_observation_manifest_bytes};
+
+    #[test]
+    fn status_only_discovery_uses_the_first_observation_as_the_ticket_replay_identity() {
+        let first = ArtifactId::new(41).expect("non-zero artifact id");
+        let second = ArtifactId::new(42).expect("non-zero artifact id");
+
+        assert_eq!(
+            persisted_discovery_observations(first, second),
+            (first, first)
+        );
+    }
+
+    #[test]
+    fn status_only_manifest_excludes_host_specific_output_bytes() {
+        assert_eq!(
+            String::from_utf8(status_only_observation_manifest_bytes(101))
+                .expect("static JSON is UTF-8"),
+            "{\"comparison_revision\":\"status-only-v1\",\"exit_status\":101}"
+        );
+    }
 }

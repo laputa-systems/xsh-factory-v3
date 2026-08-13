@@ -734,9 +734,14 @@ impl TicketStore {
         if proposal_count >= i64::from(application.proposal_maximum) {
             return Err(StoreError::ProposalBufferFull);
         }
+        // A blocked ticket has no live work attached. It records why its
+        // exact proposal could not proceed, but must not force a paid Product
+        // rediscovery after a kernel-level reproduction correction changes the
+        // canonical observation identity.
         let duplicate = sqlx::query!(
             "SELECT id FROM factory.ticket_revisions
-             WHERE application_revision_id = $1 AND reproducer_artifact_id = $2",
+             WHERE application_revision_id = $1 AND reproducer_artifact_id = $2
+               AND lifecycle <> 4::SMALLINT",
             command.application_revision_id.get(),
             command.reproducer_artifact_id.get()
         )
@@ -1346,7 +1351,8 @@ impl TicketStore {
         let campaign = sqlx::query!(
             "SELECT c.lifecycle, c.revision, c.delivery_target, c.cost_state,
                     c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",
-                    ar.application_key, ar.ticket_low_water, ar.ticket_target,
+                    ar.id AS application_revision_id, ar.application_key,
+                    ar.ticket_low_water, ar.ticket_target,
                     ar.ticket_maximum, ar.proposal_maximum
              FROM factory.campaigns AS c
              JOIN factory.application_revisions AS ar ON ar.id = c.application_revision_id
@@ -1356,13 +1362,25 @@ impl TicketStore {
         .fetch_optional(&self.pool)
         .await?
         .ok_or(StoreError::UnknownCampaign { campaign_id })?;
-        let application_key = campaign.application_key;
-        let ready =
-            application_ticket_count(&self.pool, &application_key, TICKET_SPONSORED).await?;
-        let proposed =
-            application_ticket_count(&self.pool, &application_key, TICKET_PROPOSED).await?;
-        let in_flight =
-            application_ticket_count(&self.pool, &application_key, TICKET_IN_FLIGHT).await?;
+        let application_revision_id = ApplicationRevisionId::new(campaign.application_revision_id)?;
+        let ready = application_revision_ticket_count(
+            &self.pool,
+            application_revision_id,
+            TICKET_SPONSORED,
+        )
+        .await?;
+        let proposed = application_revision_ticket_count(
+            &self.pool,
+            application_revision_id,
+            TICKET_PROPOSED,
+        )
+        .await?;
+        let in_flight = application_revision_ticket_count(
+            &self.pool,
+            application_revision_id,
+            TICKET_IN_FLIGHT,
+        )
+        .await?;
         // Count and FIFO head come from one bounded statement so a status
         // projection cannot mix a count from one snapshot with a candidate
         // from another. A candidate-less or lifecycle-inconsistent head is
@@ -1374,9 +1392,7 @@ impl TicketStore {
                         tr.revision AS ticket_revision
                  FROM factory.ticket_attempts AS ta
                  JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id
-                 JOIN factory.application_revisions AS ticket_application
-                   ON ticket_application.id = tr.application_revision_id
-                 WHERE ticket_application.application_key = $1
+                 WHERE tr.application_revision_id = $1
                    AND ta.stage BETWEEN $2 AND $3
              )
              SELECT (SELECT count(*)::BIGINT FROM downstream) AS \"count!\",
@@ -1428,7 +1444,7 @@ impl TicketStore {
                  ORDER BY created_at DESC, id DESC
                  LIMIT 1
              ) AS decision ON TRUE",
-            application_key,
+            application_revision_id.get(),
             ATTEMPT_HARD_VALIDATION,
             ATTEMPT_REWORK_QUALITY,
         )
@@ -1452,13 +1468,11 @@ impl TicketStore {
             "SELECT tr.id, tr.revision
              FROM factory.ticket_revisions AS tr
              JOIN factory.tickets AS t ON t.id = tr.ticket_id
-             JOIN factory.application_revisions AS ticket_application
-               ON ticket_application.id = tr.application_revision_id
-             WHERE ticket_application.application_key = $1
+             WHERE tr.application_revision_id = $1
                AND t.current_ticket_revision_id = tr.id
                AND tr.lifecycle = $2
              ORDER BY tr.sponsored_at ASC, tr.id ASC LIMIT 1",
-            application_key,
+            application_revision_id.get(),
             TICKET_SPONSORED
         )
         .fetch_optional(&self.pool)
@@ -1594,21 +1608,22 @@ enum RequalificationOutcome {
     Diverged,
 }
 
-async fn application_ticket_count(
+/// A campaign is pinned to one immutable application revision. Its queue must
+/// ignore tickets from earlier revisions of the same application key: those
+/// tickets cannot be requalified or materialized under the new bundle.
+async fn application_revision_ticket_count(
     pool: &PgPool,
-    application_key: &str,
+    application_revision_id: ApplicationRevisionId,
     state: i16,
 ) -> Result<i64, StoreError> {
     Ok(sqlx::query_scalar!(
         "SELECT count(*)::BIGINT AS \"count!\"
          FROM factory.ticket_revisions AS tr
          JOIN factory.tickets AS t ON t.id = tr.ticket_id
-         JOIN factory.application_revisions AS ticket_application
-           ON ticket_application.id = tr.application_revision_id
-         WHERE ticket_application.application_key = $1
+         WHERE tr.application_revision_id = $1
            AND t.current_ticket_revision_id = tr.id
            AND tr.lifecycle = $2",
-        application_key,
+        application_revision_id.get(),
         state,
     )
     .fetch_one(pool)
@@ -1636,6 +1651,25 @@ async fn application_ticket_count_in_transaction(
     .await?)
 }
 
+async fn application_revision_ticket_count_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    application_revision_id: ApplicationRevisionId,
+    state: i16,
+) -> Result<i64, StoreError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT count(*)::BIGINT AS \"count!\"
+         FROM factory.ticket_revisions AS tr
+         JOIN factory.tickets AS t ON t.id = tr.ticket_id
+         WHERE tr.application_revision_id = $1
+           AND t.current_ticket_revision_id = tr.id
+           AND tr.lifecycle = $2",
+        application_revision_id.get(),
+        state,
+    )
+    .fetch_one(&mut **transaction)
+    .await?)
+}
+
 async fn validate_claim_campaign(
     transaction: &mut Transaction<'_, Postgres>,
     command: &ClaimSponsoredTicket,
@@ -1644,8 +1678,9 @@ async fn validate_claim_campaign(
     let campaign = sqlx::query!(
         "SELECT c.lifecycle, c.revision, c.cost_state,
                 c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",
+                c.application_revision_id AS campaign_application_revision_id,
                 campaign_application.application_key AS campaign_application_key,
-                ticket_application.application_key AS ticket_application_key
+                ticket_application.id AS ticket_application_revision_id
          FROM factory.campaigns AS c
          JOIN factory.application_revisions AS campaign_application
            ON campaign_application.id = c.application_revision_id
@@ -1677,17 +1712,17 @@ async fn validate_claim_campaign(
             campaign_id: command.campaign_id,
         });
     }
-    if campaign.campaign_application_key != campaign.ticket_application_key {
+    if campaign.campaign_application_revision_id != campaign.ticket_application_revision_id {
         return Err(StoreError::CampaignApplicationMismatch);
     }
     // A claim becomes durable before assignment/session creation. Serialize
-    // application-global claims here, rather than inferring Engineering WIP
+    // the stable application key here, rather than inferring Engineering WIP
     // from a later running session, so two schedulers cannot claim distinct
     // ready tickets in the gap between those transitions.
     application_advisory_lock(transaction, &campaign.campaign_application_key).await?;
-    let in_flight = application_ticket_count_in_transaction(
+    let in_flight = application_revision_ticket_count_in_transaction(
         transaction,
-        &campaign.campaign_application_key,
+        ticket.application_revision_id,
         TICKET_IN_FLIGHT,
     )
     .await?;

@@ -68,24 +68,13 @@ Deno.test("XSH Product policy exposes the bounded buffer and repeatable proposal
     profile.office === "product_research"
   );
   assert(product !== undefined);
-  assert(product.tools.includes("product_submit_ticket"));
-  assert(product.tools.includes("work_complete"));
-  assert(!product.tools.includes("artifact_read"));
-  for (
-    const tool of [
-      "workspace_read",
-      "workspace_write",
-      "workspace_edit",
-      "workspace_search",
-      "workspace_list",
-      "shell",
-      "forum_search",
-      "forum_post",
-      "artifact_seal",
-    ] as const
-  ) {
-    assert(product.tools.includes(tool));
-  }
+  assertEquals(product.tools, [
+    "workspace_read",
+    "shell",
+    "artifact_seal",
+    "product_submit_ticket",
+    "work_complete",
+  ]);
   assertEquals(PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1.additionalProperties, false);
 });
 
@@ -113,7 +102,8 @@ Deno.test("XSH application pins exact repository, reads, and deterministic comma
     profile.office === "product_research"
   );
   assert(product !== undefined);
-  assertEquals(product.model.model_id, "deepseek/deepseek-v4-flash-0731");
+  assertEquals(product.model.model_id, "openai/gpt-5.6-luna");
+  assertEquals(product.model.thinking_level, "none");
   assertEquals(product.limits.output_byte_limit, 16_777_216);
   assertEquals(
     xshApplicationV1.required_reads.map((read) => read.path),
@@ -128,9 +118,14 @@ Deno.test("XSH application pins exact repository, reads, and deterministic comma
     timeout_millis: 300_000,
     stdout_byte_limit: 4_194_304,
     stderr_byte_limit: 4_194_304,
-    expected_exit_status: 0,
+    expected_exit_status: 3,
   }]);
-  assertEquals(xshApplicationV1.validation_profiles.full[0].argv, ["test", "--locked"]);
+  assertEquals(xshApplicationV1.validation_profiles.full[0].argv, [
+    "test",
+    "--locked",
+    "--test",
+    "integration",
+  ]);
 });
 
 Deno.test("XSH Product proposal validator binds owner to a stated contract read", () => {

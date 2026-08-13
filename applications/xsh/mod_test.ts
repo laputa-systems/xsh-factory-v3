@@ -16,7 +16,7 @@ const forbiddenInstitutionalVocabulary =
 
 const sourceRoot = decodeURIComponent(new URL("./", import.meta.url).pathname);
 const reproducerCommandProfile =
-  '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}';
+  '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}';
 
 // Keep the application declaration deliberately closed. The Rust admission
 // path, not this duplicate TypeScript ledger, verifies each declared BLAKE3
@@ -70,26 +70,84 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!productSystem.includes(reproducerCommandProfile)) {
     throw new Error("Product must name the canonical command-profile artifact");
   }
+  if (xshApplicationV1.reproducer_profiles[0]?.expected_exit_status !== 3) {
+    throw new Error("XSH's direct reproducer profile must expect the public runtime failure");
+  }
   if (!productSystem.includes("`cargo run --quiet --locked --bin xsh -- /dev/stdin`")) {
     throw new Error("Product must name the command represented by the admitted profile");
   }
-  if (!productSystem.includes("target/debug/xsh $inner")) {
-    throw new Error("Product must interpolate the inner reproducer path into the XSH command");
+  if (!productSystem.includes("desired direct XSH exit status `3`")) {
+    throw new Error("Product must hand off the direct structured-error expectation");
+  }
+  if (!productSystem.includes("ordinary expression `1 / 0`")) {
+    throw new Error("Product must reproduce the ordinary-expression divide-by-zero defect");
+  }
+  if (!productSystem.includes("put only `1 / 0` in the sealed stdin")) {
+    throw new Error("Product's sealed reproducer must match its investigated expression");
+  }
+  if (!productSystem.includes("Do not search the host or switch to another")) {
+    throw new Error("Product must use its assigned checkout instead of discovering another one");
+  }
+  if (!/Do not\s+write an outer helper program/u.test(productSystem)) {
+    throw new Error("Product must be prohibited from constructing an implementation-style wrapper");
   }
   if (!productSystem.includes("Set `reproducer_profile` to exactly `reproducer`")) {
     throw new Error(
       "Product must name the admitted reproducer profile separately from its command",
     );
   }
-  if (!productSystem.includes("Each `contract_reads` path must be unique")) {
+  if (!/Each\s+`contract_reads`\s+path must be unique/u.test(productSystem)) {
     throw new Error(
       "Product must require one contract-read entry for each repository path",
     );
+  }
+  if (!productSystem.includes("Set `contract_owner` to exactly `docs/TEST-MAP.md`")) {
+    throw new Error("Product must name the exact contract-owner path required by the proposal validator");
   }
   if (!productSystem.includes("most 240 UTF-8 bytes")) {
     throw new Error(
       "Product must keep ticket contract-read reasons materializable in an assignment packet",
     );
+  }
+  if (!productSystem.includes("all ten `artifact_seal` calls together")) {
+    throw new Error(
+      "Product must be told how to finish the fixed evidence set without serial tool turns",
+    );
+  }
+  if (!productSystem.includes("Do not use Python, create observation JSON")) {
+    throw new Error("Product must use the fixed evidence recipe instead of constructing new evidence shapes");
+  }
+  if (!productSystem.includes("first_observation` and `second_observation` artifact identities")) {
+    throw new Error("Product must keep its closed two-run observation references identical");
+  }
+  const productProfile = xshApplicationV1.office_profiles.find((profile) =>
+    profile.office === "product_research"
+  );
+  if (productProfile?.limits.turn_limit !== 12) {
+    throw new Error("Product must stay within the bounded discovery allowance");
+  }
+  const engineeringSystem = templateText(first, "templates/engineering-system.md");
+  for (
+    const evidenceName of [
+      "ticket_proposal",
+      "ticket_narrative",
+      "ticket_evidence",
+      "reproducer_command",
+      "reproducer_stdin",
+      "reproducer_expected_stdout",
+      "reproducer_expected_stderr",
+      "reproducer_first_actual_stdout",
+      "reproducer_first_actual_stderr",
+      "reproducer_second_actual_stdout",
+      "reproducer_second_actual_stderr",
+    ]
+  ) {
+    if (!engineeringSystem.includes(`\`${evidenceName}\``)) {
+      throw new Error(`Engineering must read handed-off ${evidenceName} evidence`);
+    }
+  }
+  if (!engineeringSystem.includes("`engineering-report.md`") || !engineeringSystem.includes("`risks.md`")) {
+    throw new Error("Engineering must create the named report files before sealing them");
   }
 
   for (const profile of xshApplicationV1.office_profiles) {

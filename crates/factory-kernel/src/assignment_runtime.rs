@@ -265,6 +265,7 @@ pub async fn materialize_and_launch_assignment(
             request.target,
             &context,
             &assignment_evidence,
+            &required_reads,
             &application.mission,
         )?;
         let system_prompt = render_declared_template(
@@ -307,7 +308,12 @@ pub async fn materialize_and_launch_assignment(
             installed.runtime_identity_for_provider(&application.profile.model.provider)?;
         let workspace_root = absolute_path(resources.workspace.path(), "workspace root")?;
         let staging_absolute = absolute_path(&resources.staging_root, "staging root")?;
-        let target = target_text(request.target, &context, &assignment_evidence)?;
+        let target = target_text(
+            request.target,
+            &context,
+            &assignment_evidence,
+            &required_reads,
+        )?;
         let mut wire = assignment_wire(
             assignment_id,
             request.campaign_id,
@@ -745,12 +751,16 @@ fn prompt_values(
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
     evidence: &[AssignmentEvidenceV1],
+    required_reads: &[ReadExactFileV1],
     mission: &str,
 ) -> Result<BTreeMap<String, String>, AssignmentRuntimeError> {
     let mut values = BTreeMap::from([
         ("ASSIGNMENT_ID".to_owned(), assignment_id.get().to_string()),
         ("MISSION".to_owned(), mission.to_owned()),
-        ("TARGET".to_owned(), target_text(target, context, evidence)?),
+        (
+            "TARGET".to_owned(),
+            target_text(target, context, evidence, required_reads)?,
+        ),
     ]);
     match target {
         DurableAssignmentTarget::Product => {}
@@ -1287,6 +1297,7 @@ fn target_text(
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
     evidence: &[AssignmentEvidenceV1],
+    required_reads: &[ReadExactFileV1],
 ) -> Result<String, AssignmentRuntimeError> {
     let target = match target {
         DurableAssignmentTarget::Product => "product-research".to_owned(),
@@ -1335,6 +1346,7 @@ fn target_text(
     };
     let mut rendered = target;
     append_target_evidence(&mut rendered, evidence)?;
+    append_target_required_reads(&mut rendered, required_reads)?;
     Ok(rendered)
 }
 
@@ -1358,6 +1370,33 @@ fn append_target_evidence(
     if rendered.len() > 4_096 {
         Err(AssignmentRuntimeError::Application(
             "target plus closed assignment evidence exceeds the packet bound".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Renders the exact, packet-bound workspace reads beside the evidence map so
+/// an actor can satisfy the kernel's pre-mutation read gate without inferring
+/// ticket contract paths from narrative prose or a failed tool invocation.
+fn append_target_required_reads(
+    rendered: &mut String,
+    required_reads: &[ReadExactFileV1],
+) -> Result<(), AssignmentRuntimeError> {
+    if required_reads.is_empty() {
+        return Ok(());
+    }
+    rendered.push_str("\n\nExact workspace reads required before any mutating tool:\n");
+    for read in required_reads {
+        rendered.push_str("- `");
+        rendered.push_str(read.path.as_str());
+        rendered.push_str("`: ");
+        rendered.push_str(&read.reason);
+        rendered.push('\n');
+    }
+    if rendered.len() > 4_096 {
+        Err(AssignmentRuntimeError::Application(
+            "target plus closed assignment evidence and required reads exceeds the packet bound".to_owned(),
         ))
     } else {
         Ok(())
@@ -1478,6 +1517,29 @@ mod tests {
             !rendered.to_ascii_lowercase().contains("architect"),
             "worker-visible TARGET leaked authority vocabulary: {rendered}"
         );
+    }
+
+    #[test]
+    fn target_names_each_packet_bound_workspace_read_before_mutation() {
+        let reads = [
+            ReadExactFileV1 {
+                path: factory_protocol::RepositoryRelativePath::parse("docs/contract.md").unwrap(),
+                digest: ContentDigest::of_bytes(b"contract"),
+                reason: "defines the assigned runtime behavior".to_owned(),
+            },
+            ReadExactFileV1 {
+                path: factory_protocol::RepositoryRelativePath::parse("src/runtime.rs").unwrap(),
+                digest: ContentDigest::of_bytes(b"runtime"),
+                reason: "owns the assigned implementation boundary".to_owned(),
+            },
+        ];
+        let mut rendered = "ticket-1-revision-1-attempt-1".to_owned();
+
+        append_target_required_reads(&mut rendered, &reads).unwrap();
+
+        assert!(rendered.contains("Exact workspace reads required before any mutating tool"));
+        assert!(rendered.contains("`docs/contract.md`: defines the assigned runtime behavior"));
+        assert!(rendered.contains("`src/runtime.rs`: owns the assigned implementation boundary"));
     }
 
     #[test]

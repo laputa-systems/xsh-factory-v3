@@ -341,7 +341,7 @@ export function createFramedToolAdapters(
 ): readonly PiToolAdapter[] {
   return names.flatMap((name) => {
     const operation = TOOL_OPERATIONS[name];
-    // These five common tools are the pinned Pi SDK's host-local primitives;
+    // These five common tools are the local Pi-headless runtime's host-local primitives;
     // they deliberately do not pretend a daemon operation exists.
     if (
       operation === undefined &&
@@ -381,6 +381,45 @@ export function createFramedToolAdapters(
  */
 function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
   const detail = error instanceof Error ? error.message : "";
+  if (
+    name === "candidate_checkpoint_regression" &&
+    detail.includes("all assigned exact reads are required before mutation")
+  ) {
+    return new Error(
+      "Before retrying the checkpoint, use `workspace_read` (not shell commands) on every path " +
+        "listed in the assignment's `Exact workspace reads required before any mutating tool` " +
+      "section. Then retry the same checkpoint before editing the implementation.",
+    );
+  }
+  if (name === "candidate_checkpoint_regression") {
+    // A checkpoint is deliberately nonterminal, so its failure is a correction
+    // opportunity rather than a reason to keep the engineer guessing. The
+    // daemon has already bound this operation to one assigned repository and
+    // one ticket reproducer; preserve a bounded task diagnostic in the Pi
+    // transcript so the actor can correct the assigned work before editing.
+    const taskDetail = detail
+      .replace(/^[a-z_]+:\s*/u, "")
+      .replace(/[\r\n\t]+/gu, " ")
+      .slice(0, 480);
+    if (taskDetail.length > 0) {
+      return new Error(
+        `The regression checkpoint was rejected: ${taskDetail}. ` +
+          "Do not edit until the checkpoint succeeds; correct the stated pre-fix condition and retry it.",
+      );
+    }
+  }
+  if (name === "candidate_submit") {
+    // Submission is terminal only when validation succeeds. A rejected
+    // candidate remains a durable, inspectable fact, so expose its bounded
+    // task outcome instead of leaving the engineer with an opaque failure.
+    const taskDetail = detail
+      .replace(/^[a-z_]+:\s*/u, "")
+      .replace(/[\r\n\t]+/gu, " ")
+      .slice(0, 480);
+    if (taskDetail.length > 0) {
+      return new Error(`Candidate submission did not pass: ${taskDetail}.`);
+    }
+  }
   if (
     name === "product_submit_ticket" &&
     detail.includes(
@@ -429,8 +468,21 @@ function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
     return new Error(
       "Each `contract_reads` reason must be nonempty, contain no NUL, and fit within 240 UTF-8 " +
         "bytes so downstream implementation can read the same exact contract. Tighten the reason " +
-        "without changing its path, then submit again.",
+      "without changing its path, then submit again.",
     );
+  }
+  if (name === "product_submit_ticket") {
+    // A Product proposal is nonterminal until the kernel accepts its exact
+    // evidence. Preserve the bounded validator outcome so Product can repair
+    // a field such as `contract_owner` in the same paid assignment instead of
+    // completing successfully and forcing another discovery session.
+    const taskDetail = detail
+      .replace(/^[a-z_]+:\s*/u, "")
+      .replace(/[\r\n\t]+/gu, " ")
+      .slice(0, 480);
+    if (taskDetail.length > 0) {
+      return new Error(`Ticket submission did not pass: ${taskDetail}. Correct the stated field and submit again.`);
+    }
   }
   return new Error(`The assigned ${name} operation failed.`);
 }

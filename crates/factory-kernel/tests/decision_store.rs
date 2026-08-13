@@ -61,7 +61,11 @@ fn failed_attempt_requires_an_explicit_architect_release() {
         let mut fixture = Fixture::new().await;
         let engineering = fixture.open_session(Office::Engineering).await;
         let candidate = fixture
-            .submit_candidate(&engineering, 'c', 'd', "candidate-failure")
+            // A regression checkpoint intentionally captures the pristine
+            // base tree before the implementation exists. Candidate storage
+            // must accept that equality while still requiring the completed
+            // candidate tree to differ.
+            .submit_candidate(&engineering, 'b', 'd', "candidate-failure")
             .await;
         fixture.attempt_revision = fixture.attempt_revision.next().expect("attempt revision");
         let failed = fixture

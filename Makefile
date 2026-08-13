@@ -1,8 +1,33 @@
 DENO_VERSION := 2.9.4
+PI_HEADLESS_ROOT := $(CURDIR)/vendor/pi-headless
+PI_HEADLESS_BUILD := $(PI_HEADLESS_ROOT)/packages/coding-agent/dist
+PI_HEADLESS_RUNTIME := $(CURDIR)/packages/factory-pi-host/headless
+PI_HEADLESS_SDK := $(PI_HEADLESS_RUNTIME)/headless-sdk.mjs
+PI_HEADLESS_AI := $(PI_HEADLESS_RUNTIME)/headless-ai.mjs
+FACTORY_OPERATION_DEADLINE_MS ?= 900000
 
-.PHONY: cache check rust-check deno-check deno-version factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
+.PHONY: cache check rust-check deno-check deno-version pi-headless-cache pi-headless-build factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
 
-cache:
+pi-headless-cache:
+	test -f "$(PI_HEADLESS_ROOT)/package-lock.json"
+	cd "$(PI_HEADLESS_ROOT)" && npm ci --ignore-scripts
+
+# The local Pi fork owns its frozen provider catalog as source. `cache` may
+# install its locked Node build dependencies, while ordinary checks only use
+# this offline build and never contact a provider or the npm registry.
+pi-headless-build:
+	test -d "$(PI_HEADLESS_ROOT)/node_modules"
+	test -d "$(PI_HEADLESS_ROOT)/packages/ai/src/providers/data"
+	cd "$(PI_HEADLESS_ROOT)" && npm run build:offline
+	mkdir -p "$(PI_HEADLESS_RUNTIME)"
+	cp "$(PI_HEADLESS_BUILD)/headless-sdk.mjs" "$(PI_HEADLESS_RUNTIME)/headless-sdk.mjs"
+	cp "$(PI_HEADLESS_BUILD)/headless-sdk.d.ts" "$(PI_HEADLESS_RUNTIME)/headless-sdk.d.ts"
+	cp "$(PI_HEADLESS_BUILD)/headless-ai.mjs" "$(PI_HEADLESS_RUNTIME)/headless-ai.mjs"
+	cp "$(PI_HEADLESS_BUILD)/headless-ai.d.ts" "$(PI_HEADLESS_RUNTIME)/headless-ai.d.ts"
+	test -s "$(PI_HEADLESS_SDK)"
+	test -s "$(PI_HEADLESS_AI)"
+
+cache: pi-headless-cache pi-headless-build
 	deno task cache
 
 rust-check:
@@ -13,7 +38,7 @@ rust-check:
 deno-version:
 	test "$$(deno --version | sed -n '1s/^deno \([0-9.]*\).*/\1/p')" = "$(DENO_VERSION)"
 
-deno-check: deno-version
+deno-check: deno-version pi-headless-build
 	deno fmt --check
 	deno lint
 	deno task check
@@ -29,7 +54,8 @@ factoryd-serve:
 	test -n "$$FACTORY_RUNTIME_ROOT"
 	vault OPENROUTER_API_KEY -- target/release/factoryd serve \
 		--database-url "$$FACTORY_DATABASE_URL" \
-		--runtime-root "$$FACTORY_RUNTIME_ROOT"
+		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
+		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
 
 postgres-test:
 	test -n "$$FACTORY_TEST_DATABASE_URL"

@@ -1,4 +1,5 @@
 import { gzipFile, transcriptPaths, TranscriptWriter, writeManifest } from "./transcript.ts";
+import { projectHeadlessAuditEvent } from "@factory/pi-headless";
 import type {
   ArtifactSealer,
   AuthorityLiveness,
@@ -179,7 +180,9 @@ export async function runAssignment(
 
   const onEvent = (event: unknown): void => {
     eventWrites = eventWrites.then(async () => {
-      const append = await writer.append(event);
+      const auditEvent = projectHeadlessAuditEvent(event);
+      if (auditEvent === undefined) return;
+      const append = await writer.append(auditEvent);
       if (append.truncated && !transcriptLimitExceeded) {
         transcriptLimitExceeded = true;
         outputLimitExceeded = true;

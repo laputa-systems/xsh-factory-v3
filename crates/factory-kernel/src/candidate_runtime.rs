@@ -450,7 +450,7 @@ pub async fn checkpoint_regression(
     validate_request_revision(&authority.actor, request.expected_revision)?;
     validate_regression_request(authority, request)?;
 
-    let regression = git.capture_tree(authority.actor_worktree)?;
+    let regression = git.capture_regression_tree(authority.actor_worktree)?;
     reject_forbidden_paths(authority.application, &regression)?;
     let tree = regression.tree().clone();
     let receipt = run_validation_in_fresh_worktree(

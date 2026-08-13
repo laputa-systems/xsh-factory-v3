@@ -10,7 +10,7 @@ import {
   SessionManager,
   SettingsManager,
   type ToolDefinition,
-} from "@pi/coding-agent";
+} from "@factory/pi-headless";
 import { builtinPiToolNames } from "./host.ts";
 import type {
   PiAssignmentPacket,
@@ -137,7 +137,12 @@ export async function createSdkSessionWithRuntimeForTest(
   const resourceLoader = sealedAssignmentResourceLoader(systemPrompt, packet.workspace_root);
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
-    retry: { enabled: false, maxRetries: 0 },
+    // A provider call that produces no bytes must not occupy the factory's
+    // single paid-session slot until the much broader assignment wall limit.
+    // Pi applies this setting to each model request, including the initial
+    // response and every tool-follow-up. The host keeps retries disabled so a
+    // timeout is a truthful terminal failure, not hidden additional spend.
+    retry: { enabled: false, maxRetries: 0, provider: { timeoutMs: 90_000, maxRetries: 0 } },
     extensions: [],
     skills: [],
     prompts: [],
@@ -233,21 +238,19 @@ export function emptyResourceLoader(systemPrompt: string): ResourceLoader {
 }
 
 /**
- * Pi's normal coding-agent prompt builder appends a current-working-directory
- * disclosure.  That is useful interactively, but this host must pass the
- * immutable sealed system prompt as final bytes: the workspace path is not
- * packet prompt content and can accidentally carry factory-only vocabulary.
- *
  * This one inline extension is a host envelope, not discovered extension
  * code.  It has exactly one handler, performs no I/O, registers no tools or
  * providers, and replaces each turn's system prompt with the sealed bytes
- * before Pi makes a provider request.  All ambient extension resources remain
- * empty below.
+ * plus the exact shell workspace before Pi makes a provider request.  The
+ * path is packet-owned operational context, not a source-discovery hint: an
+ * actor that cannot name its worktree wastes turns searching the host and may
+ * inspect the wrong checkout. All ambient extension resources remain empty.
  */
 function sealedAssignmentResourceLoader(
   systemPrompt: string,
-  _cwd: string,
+  cwd: string,
 ): ResourceLoader {
+  const prompt = `${systemPrompt}\n\nYour shell starts in this assigned workspace: ${cwd}\nRun assignment commands there. Do not search for or switch to another checkout.`;
   const runtime = createExtensionRuntime();
   // `createAgentSession` consumes an already-loaded extension collection.
   // Construct exactly one closed handler in memory rather than invoking Pi's
@@ -263,7 +266,7 @@ function sealedAssignmentResourceLoader(
     }),
     handlers: new Map([[
       "before_agent_start",
-      [() => Promise.resolve({ systemPrompt })],
+      [() => Promise.resolve({ systemPrompt: prompt })],
     ]]),
     tools: new Map(),
     messageRenderers: new Map(),
@@ -278,7 +281,7 @@ function sealedAssignmentResourceLoader(
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => systemPrompt,
+    getSystemPrompt: () => prompt,
     getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
     getAppendSystemPromptSources: () => [],

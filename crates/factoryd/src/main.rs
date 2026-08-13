@@ -24,9 +24,9 @@ use factory_kernel::{
     },
     local_transport::{LocalDaemon, LocalTransportConfig},
     restart_recovery::{RestartRecoveryPolicy, reconcile_daemon_restart},
-    storage::{InstallQualifiedKernelBuild, KernelStore, SCHEMA_IDENTITY},
+    storage::{InstallQualifiedKernelBuild, KernelBuildStatus, KernelStore, SCHEMA_IDENTITY},
 };
-use factory_protocol::{AggregateRevision, ExpectedRevision, RuntimeRelativePath};
+use factory_protocol::{AggregateRevision, ExpectedRevision, KernelBuildId, RuntimeRelativePath};
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt().with_target(false).init();
@@ -207,9 +207,11 @@ fn verify_serve_preflight(
         .map_err(|error| init_error(&format!("installed build preflight failed: {error}")))
 }
 
-/// Applies the forward-only schema lineage and records exactly one qualified
-/// installed build. This is intentionally a one-shot process: it never binds
-/// an operator socket or starts the resident daemon loop.
+/// Applies the forward-only schema lineage and installs one qualified build.
+/// This is intentionally an offline process: it never binds an operator socket
+/// or starts the resident daemon loop. A later invocation may replace the
+/// current build, but only from the kernel-build revision observed after schema
+/// verification; a resident daemon can never upgrade itself.
 async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     let store = KernelStore::connect(&args.database_url).await?;
     let result: Result<(), Box<dyn std::error::Error>> = async {
@@ -254,16 +256,20 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
         let build_id = build_receipt.kernel_build_id();
         let seed = CasStore::temporary_name_seed(build_id, std::process::id(), SystemTime::now())?;
         let cas = CasStore::with_default_limit(&args.runtime_root, seed)?;
+        // Installation is an offline deployment boundary. Read the current
+        // build aggregate immediately before the guarded write so the first
+        // install and a later exact-source replacement both use the same
+        // optimistic-concurrency rule. The store makes an exact retry of this
+        // build idempotent and rejects a concurrent deployment.
+        let expected_revision =
+            expected_install_revision(&store.kernel_build_status().await?, build_id)?;
         let receipt = store
             .install_qualified_kernel_build(
                 &cas,
                 &InstallQualifiedKernelBuild {
                     principal: "factoryd-init".to_owned(),
                     command_id: format!("factoryd-init-{}", build_id.digest().to_hex()),
-                    // A repeated initialization of this exact build is an
-                    // idempotent retry. A different pre-existing build fails
-                    // its initial-revision guard; init is not deployment.
-                    expected_revision: ExpectedRevision::new(AggregateRevision::initial()),
+                    expected_revision: ExpectedRevision::new(expected_revision),
                     receipt: build_receipt,
                 },
             )
@@ -290,6 +296,25 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     .await;
     store.close().await;
     result
+}
+
+/// Returns the revision that originally admitted `build_id` when that exact
+/// build is current, preserving its command fingerprint for an idempotent
+/// offline-install retry. A different build advances from the observed
+/// current revision. Kernel-build revisions are contiguous and begin at one.
+fn expected_install_revision(
+    status: &KernelBuildStatus,
+    build_id: KernelBuildId,
+) -> Result<AggregateRevision, Box<dyn std::error::Error>> {
+    if status.current_kernel_build_id == Some(build_id) {
+        let preceding = status
+            .aggregate_revision
+            .get()
+            .checked_sub(1)
+            .ok_or_else(|| boxed_init_error("current kernel build has no preceding revision"))?;
+        return Ok(AggregateRevision::from_persisted(preceding));
+    }
+    Ok(status.aggregate_revision)
 }
 
 #[derive(Debug)]
@@ -554,6 +579,8 @@ fn usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use factory_protocol::ContentDigest;
+
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
 
@@ -738,6 +765,41 @@ mod tests {
             DaemonCommand::Serve(DaemonArgs { runtime_root, .. })
                 if runtime_root == PathBuf::from("/tmp/factory")
         ));
+    }
+
+    #[test]
+    fn offline_install_uses_the_original_revision_for_an_exact_current_build_retry() {
+        let current = KernelBuildId::new(ContentDigest::from_bytes([7; 32]));
+        let other = KernelBuildId::new(ContentDigest::from_bytes([8; 32]));
+        let status = KernelBuildStatus {
+            current_kernel_build_id: Some(current),
+            aggregate_revision: AggregateRevision::from_persisted(8),
+        };
+
+        assert_eq!(
+            expected_install_revision(&status, current)
+                .expect("current build retry")
+                .get(),
+            7
+        );
+        assert_eq!(
+            expected_install_revision(&status, other)
+                .expect("replacement build")
+                .get(),
+            8
+        );
+        assert_eq!(
+            expected_install_revision(
+                &KernelBuildStatus {
+                    current_kernel_build_id: None,
+                    aggregate_revision: AggregateRevision::initial(),
+                },
+                current,
+            )
+            .expect("first build")
+            .get(),
+            0
+        );
     }
 
     #[test]

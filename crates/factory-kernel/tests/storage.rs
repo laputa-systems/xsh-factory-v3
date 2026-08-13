@@ -43,7 +43,10 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .fetch_one(&inspection)
             .await
             .expect("canonical migration count");
-        assert_eq!(migration_count, 1, "fresh V3 uses one canonical migration");
+        assert_eq!(
+            migration_count, 3,
+            "fresh V3 applies all canonical migrations"
+        );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
              FROM information_schema.tables
@@ -151,6 +154,36 @@ fn install_register_and_seal_transitions_are_idempotent_and_guarded() {
         );
         assert!(repository.repository_id.get() > 0);
         assert!(artifact.artifact_id.get() > 0);
+        store.close().await;
+    });
+}
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn offline_build_installation_can_advance_the_current_qualified_build() {
+    smol::block_on(async {
+        let store = store().await;
+        store.migrate_and_verify().await.expect("migrate");
+
+        let first = install_build(&store).await;
+        let second = install_build(&store).await;
+        assert_ne!(first.kernel_build_id, second.kernel_build_id);
+        assert_eq!(
+            second.receipt.resulting_revision.get(),
+            first.receipt.resulting_revision.get() + 1,
+            "the replacement is a single revision-fenced build transition"
+        );
+
+        let status = store.kernel_build_status().await.expect("build status");
+        assert_eq!(status.current_kernel_build_id, Some(second.kernel_build_id));
+        assert_eq!(status.aggregate_revision, second.receipt.resulting_revision);
+
+        let retry = store
+            .install_kernel_build(&second.cas, &second.command)
+            .await
+            .expect("exact replacement retry");
+        assert!(retry.was_idempotent_retry);
+        assert_eq!(retry.audit_log_id, second.receipt.audit_log_id);
         store.close().await;
     });
 }
@@ -630,7 +663,6 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             .await
             .expect("divergent current-head reproducer is a durable outcome");
         assert_eq!(diverged.outcome, ClaimOutcome::Blocked);
-
         // Claims are durable before assignment/session creation. Two daemon
         // loops may therefore observe two ready rows concurrently, but the
         // application advisory lock must admit just one InFlight ticket and

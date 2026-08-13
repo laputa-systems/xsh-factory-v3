@@ -2,35 +2,32 @@
 
 ## Trusted authority
 
-The installed Rust kernel is trusted to enforce durable identity, legal state transitions, aggregate
-provider-cost admission, application/repository/packet identity, process custody, artifact adoption,
-deterministic validation, and guarded local Git delivery. An application, actor, prompt, Forum post,
-report, or external operator never writes SQL or manufactures one of those facts.
+The installed Rust kernel enforces durable identity, legal transitions,
+aggregate-cost admission, application/repository/packet identity, process and
+worktree custody, CAS adoption, deterministic validation, commit construction,
+and guarded local delivery. Applications, prompts, actors, Forum posts,
+reports, and operators do not write SQL or manufacture those facts.
 
-## Cooperative same-user host boundary
+## Cooperative same-user boundary
 
-MVP actors are ordinary processes under the operator's OS account with normal host networking and
-workspace tools. Factory V3 makes a deliberately limited safety claim: it detects and rejects
-accidental or protocol-level authority, identity, lifecycle, repository, and evidence mismatches at
-accepted durable boundaries. Only kernel-owned Git operations can make or deliver an accepted
-commit.
-
-It does not claim to defend against a malicious process under the same user. Such a process may
-inspect available credentials, change unrelated host files, signal another process, or tamper with
-unprotected host state. Containers, VMs, seccomp, filesystem isolation, credential brokerage, and
-network mediation are deferred architecture, not implicit protections.
+Actors are ordinary processes under the operator's OS account with workspace
+tools, networking, and the selected provider credential only at the daemon
+process boundary. Factory detects accidental and protocol-level authority,
+identity, lifecycle, repository, and evidence mistakes. It does not defend
+against a malicious same-user process that can inspect accessible credentials,
+change unrelated files, or signal peer processes. Containers, VMs, seccomp,
+network mediation, and credential brokers are not implied safeguards.
 
 ## Manual deployment boundary
 
-The MVP cannot update its own Rust code, executable Deno source, dependency locks, schema,
-qualification logic, or boot mechanism. An operator installs and qualifies those changes while the
-daemon is stopped and records the installed `KernelBuildId`. The kernel verifies installed
-identities; it does not claim automatic activation, recovery, or rollback. Those capabilities are
-deferred in `V1.md`.
+The factory cannot upgrade its Rust binary, executable Deno source, locks,
+schema, local Pi-headless revision, or boot logic. The operator changes and
+qualifies those inputs while the daemon is stopped. The kernel records their
+identity but does not claim automatic rollback or self-activation.
 
-## Consequences for operators
+## Operator consequence
 
-Before a future campaign, operators must verify the exact installed Rust/Deno identities, the
-dedicated already-created database, runtime-root ownership, and the clean product checkout. A
-provider-free check is not a paid campaign; ordinary tests use fake providers only. No remote Git
-push is part of the factory's authority.
+Before paid work, verify the installed build, dedicated database, runtime root,
+clean product checkout, active application revision, and credential source.
+Provider-free tests prove deterministic boundaries only; they do not prove a
+model will find or fix a valuable defect. No remote Git push is authorized.

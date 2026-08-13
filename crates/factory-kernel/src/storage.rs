@@ -20,8 +20,8 @@ use sqlx::{
 };
 use thiserror::Error;
 
-/// Comment installed on the factory-owned schema by the canonical migration.
-pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:initial-authority-v1";
+/// Comment installed on the factory-owned schema by the canonical migrations.
+pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:authority-v3";
 
 /// A fixed kernel-local key. PostgreSQL holds it per connection until explicit
 /// release or connection death, so a daemon restart cannot inherit a stale lock.

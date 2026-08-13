@@ -2,66 +2,65 @@
 
 ## Kernel
 
-The installed Rust authority. The kernel alone will admit durable state, manage PostgreSQL, custody
-artifacts and processes, validate candidates, construct commits, and guardedly deliver local product
-commits. `factoryd` and `factoryctl` are its daemon and operator executable shells; they do not
-create additional authority layers.
+The installed Rust authority. It alone admits durable state, owns PostgreSQL
+and CAS, manages processes and worktrees, validates trees, constructs commits,
+and performs guarded local delivery.
 
-## Protocol
+## Application bundle and revision
 
-The closed Rust values and wire shapes shared by the daemon and CLI through `factory-protocol`.
-Protocol data names exact fields and legal enum values. It does not include arbitrary metadata,
-callbacks, opaque application data, or a workflow language.
-
-## Application bundle
-
-`ApplicationBundleV1` is the canonical, bounded data the kernel can admit as an application
-revision. It binds a generic application key and repository to mission/template artifacts, fixed
-offices, profiles, required reads, ticket limits, reproducer and validation commands, path/Git
-policy, and commit policy. The Deno authoring equivalent is `defineApplicationV1(...)` in
-`packages/factory-sdk`.
-
-## Application revision
-
-An immutable kernel-admitted instance of an application bundle. An application can propose source
-data, but only the future kernel admission path makes that data an authoritative revision. A running
-campaign pins exactly one revision.
+`ApplicationBundleV1` is immutable, closed policy: repository binding,
+templates, tools, model profile, required reads, ticket limits, reproducer,
+validation commands, path policy, and commit-message policy. Registration
+adopts one bundle and its named source artifacts into CAS as an application
+revision. A campaign pins exactly one revision.
 
 ## Aggregate revision
 
-The monotonically increasing revision of one durable aggregate. A mutating command will supply the
-revision it observed; a different current value is an explicit conflict, not an implicit overwrite.
+A monotonically increasing optimistic-concurrency revision. Every mutating
+command supplies the revision it observed; a mismatch is a conflict, never an
+implicit overwrite.
 
-## Artifact and digest
+## Artifact and CAS
 
-An artifact is a bounded byte sequence adopted by the kernel into its append-only content-addressed
-store. Its BLAKE3 digest identifies bytes, while the owning domain relation gives those bytes their
-role and provenance.
+An artifact is bounded bytes sealed by the kernel and addressed by BLAKE3.
+PostgreSQL stores immutable identity and domain relations; CAS stores bytes.
+The relation, not an actor-supplied label, gives the artifact its durable role.
 
 ## Assignment and session
 
-An assignment is one immutable packet authorizing one office to perform one exact task. A session is
-one fresh, kernel-custodied actor process for that assignment. Neither is a reusable agent identity
-or an authority source.
+An assignment is one immutable packet for one exact office/task. A session is
+one fresh kernel-custodied actor process for that assignment. Neither is a
+reusable identity or a source of authority.
 
 ## Required read
 
-An exact canonical file path and BLAKE3 digest that an actor must read through the wrapped read
-tool. A shell command, search result, prompt quotation, or assertion does not satisfy it.
+An exact repository path and BLAKE3 digest that must be read through the
+wrapped tool. Shell output, a prompt quotation, or an actor assertion does not
+satisfy it.
 
-## Candidate and validation
+## Ticket, checkpoint, candidate, and review
 
-A candidate is an Engineering-submitted tree captured from its exact assigned base. Validation is a
-kernel-owned deterministic command receipt against a pristine exact tree. A later Quality review is
-independent qualitative evidence, not a substitute for validation.
+Product proposes a reproducible behavior-defect ticket. Engineering creates a
+kernel-captured pre-fix regression checkpoint, then a candidate is the exact
+changed tree the kernel captures and hard-validates. Quality receives a fresh
+materialization and supplies independent qualitative review; it cannot replace
+deterministic validation. The Architect sponsors a ticket and decides delivery,
+rework, or rejection.
 
 ## Campaign
 
-A bounded execution and accounting envelope. It pins a kernel build, application revision, aggregate
-provider-cost cap, wall deadline, and delivery target. Application ticket inventory and Forum
-history outlive campaigns.
+A bounded spend and time envelope pinned to one kernel build, application
+revision, repository snapshot, aggregate cost cap, and delivery target. Ticket
+inventory and Forum history outlive campaigns.
+
+## Compact audit transcript
+
+The locally built Pi headless runtime projects its event stream before it hits
+disk. The projection retains bounded assistant text and tool diagnostics while
+discarding interactive session snapshots, forks, and thinking blocks. Its gzip
+archive is one session artifact, not a PostgreSQL event log.
 
 ## Forum
 
-Permanent shared, non-authoritative discussion. A Forum post cannot sponsor a ticket, complete an
-assignment, grant authority, or certify a candidate.
+Permanent, shared, non-authoritative discussion. A Forum post cannot grant
+authority, create a ticket, certify validation, or make a delivery decision.

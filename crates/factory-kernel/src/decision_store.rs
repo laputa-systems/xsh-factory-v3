@@ -987,7 +987,12 @@ impl DecisionStore {
         let ticket =
             lock_ticket_revision_state(&mut tx, command.decision.ticket_revision_id).await?;
         require_revision(command.expected_ticket_revision, ticket.ticket_revision)?;
-        require_ticket_state(TicketState::Proposed, ticket.ticket_state)?;
+        // A blocked ticket that never acquired an Engineering attempt may be
+        // re-sponsored after the kernel itself is corrected. This retains the
+        // original Product evidence and records a new Architect decision
+        // instead of forcing a paid Product actor to rediscover the exact
+        // same reproducer.
+        require_sponsorable_ticket_state(ticket.ticket_state)?;
         require_artifact_unbound(&mut tx, &command.decision.rationale).await?;
         let decision_id = insert_decision(
             &mut tx,
@@ -2133,23 +2138,19 @@ async fn require_artifact_unbound(
     Ok(())
 }
 
-async fn artifact_digest_for_build(
+async fn artifact_digest(
     tx: &mut Transaction<'_, Postgres>,
     artifact_id: i64,
-    expected_build_database_id: i64,
 ) -> Result<ContentDigest, DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT digest, creating_kernel_build_id FROM factory.artifacts WHERE id = $1",
+        "SELECT digest FROM factory.artifacts WHERE id = $1",
         artifact_id,
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
-    if row.creating_kernel_build_id != expected_build_database_id {
-        return Err(DecisionStoreError::ArtifactBuildMismatch);
-    }
-    let bytes = row.digest;
-    let bytes: [u8; 32] = bytes
+    let bytes: [u8; 32] = row
+        .digest
         .as_slice()
         .try_into()
         .map_err(|_| DecisionStoreError::CorruptState)?;
@@ -2300,7 +2301,10 @@ async fn update_ticket_state_parts(
          SET lifecycle = $1, revision = $2,
              sponsored_at = CASE WHEN $3::TEXT IS NULL THEN sponsored_at ELSE CURRENT_TIMESTAMP END,
              sponsorship_reason = COALESCE($3, sponsorship_reason),
-             blocked_reason = COALESCE($4, blocked_reason)
+             blocked_reason = CASE
+                 WHEN $1 = 1::SMALLINT THEN NULL
+                 ELSE COALESCE($4, blocked_reason)
+             END
          WHERE id = $5",
         state,
         revision_sql(next)?,
@@ -2369,30 +2373,16 @@ async fn classify_requalification(
     attempt: &AttemptRow,
     value: &CurrentHeadRequalification,
 ) -> Result<RequalificationClassification, DecisionStoreError> {
-    let expected = artifact_digest_for_build(
-        tx,
-        attempt.expected_observation_artifact_id,
-        attempt.kernel_build_database_id,
-    )
-    .await?;
-    let discovery = artifact_digest_for_build(
-        tx,
-        attempt.discovery_observation_artifact_id,
-        attempt.kernel_build_database_id,
-    )
-    .await?;
-    let first = artifact_digest_for_build(
-        tx,
-        value.first_actual_observation_artifact_id.get(),
-        attempt.kernel_build_database_id,
-    )
-    .await?;
-    let second = artifact_digest_for_build(
-        tx,
-        value.second_actual_observation_artifact_id.get(),
-        attempt.kernel_build_database_id,
-    )
-    .await?;
+    // Observation bytes are globally content-addressed. The ticket's expected
+    // and discovery observations therefore retain their original creation
+    // build, and a later trusted re-run may reuse that same immutable artifact
+    // row even though its build-scoped registration audit belongs to this
+    // attempt. The resolver, not caller input, owns those fresh registrations;
+    // classification compares their verified content identity here.
+    let expected = artifact_digest(tx, attempt.expected_observation_artifact_id).await?;
+    let discovery = artifact_digest(tx, attempt.discovery_observation_artifact_id).await?;
+    let first = artifact_digest(tx, value.first_actual_observation_artifact_id.get()).await?;
+    let second = artifact_digest(tx, value.second_actual_observation_artifact_id.get()).await?;
     if first != second {
         return Ok(RequalificationClassification::Diverged);
     }
@@ -2575,6 +2565,17 @@ fn require_ticket_state(
         Ok(())
     } else {
         Err(DecisionStoreError::TicketStateConflict { required, observed })
+    }
+}
+
+fn require_sponsorable_ticket_state(observed: TicketState) -> Result<(), DecisionStoreError> {
+    if matches!(observed, TicketState::Proposed | TicketState::Blocked) {
+        Ok(())
+    } else {
+        Err(DecisionStoreError::TicketStateConflict {
+            required: TicketState::Proposed,
+            observed,
+        })
     }
 }
 
@@ -2904,6 +2905,19 @@ mod tests {
         ] {
             assert!(validate_candidate_ref(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn a_blocked_ticket_is_sponsorable_after_a_kernel_correction() {
+        assert!(require_sponsorable_ticket_state(TicketState::Proposed).is_ok());
+        assert!(require_sponsorable_ticket_state(TicketState::Blocked).is_ok());
+        assert!(matches!(
+            require_sponsorable_ticket_state(TicketState::InFlight),
+            Err(DecisionStoreError::TicketStateConflict {
+                required: TicketState::Proposed,
+                observed: TicketState::InFlight,
+            })
+        ));
     }
 
     #[test]

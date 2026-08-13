@@ -1,7 +1,13 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
-import { type Context, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@pi/ai";
-import { ModelRuntime } from "@pi/coding-agent";
+import {
+  type Context,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxText,
+  fauxToolCall,
+} from "@factory/pi-headless-ai";
+import { ModelRuntime } from "@factory/pi-headless";
 import {
   type ArtifactSealer,
   type ArtifactSealReceipt,
@@ -386,11 +392,11 @@ Deno.test("fake Pi success preserves exact identity, retries, usage, and require
   assertEquals(underlyingTerminalCalls, 0);
 });
 
-Deno.test("1,000 raw events are streamed and gzip is complete", async () => {
+Deno.test("1,000 compact audit events are streamed and gzip is complete", async () => {
   const root = await Deno.makeTempDir({ prefix: "pi-host-events-" });
   const events: unknown[] = Array.from(
     { length: 1_000 },
-    (_, index) => ({ type: "message_update", index }),
+    (_, index) => ({ type: "message_update", index, assistantMessageEvent: { delta: "x" } }),
   );
   events.push({ type: "terminal", cost_micro_usd: 1, stop_reason: "completed" });
   const source = packet(root, false);
@@ -761,16 +767,26 @@ Deno.test("full-control SDK session constructs offline with the pinned catalog",
   }
 });
 
-Deno.test("real Pi SDK faux provider prompts, invokes a bound tool, and emits terminal usage", async () => {
+Deno.test("local Pi-headless faux provider prompts, invokes a bound tool, and emits terminal usage", async () => {
   const root = await Deno.makeTempDir({ prefix: "pi-host-faux-sdk-" });
   try {
     const faux = fauxProvider();
+    const providerTimeouts: unknown[] = [];
     faux.setResponses([
-      fauxAssistantMessage(
-        [fauxToolCall("workspace_read", { repository_relative_path: "AGENTS.md" })],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage([fauxText("complete")]),
+      (
+        _context: Context,
+        options: unknown,
+      ) => {
+        providerTimeouts.push((options as { timeoutMs?: unknown }).timeoutMs);
+        return fauxAssistantMessage(
+          [fauxToolCall("workspace_read", { repository_relative_path: "AGENTS.md" })],
+          { stopReason: "toolUse" },
+        );
+      },
+      (_context: Context, options: unknown) => {
+        providerTimeouts.push((options as { timeoutMs?: unknown }).timeoutMs);
+        return fauxAssistantMessage([fauxText("complete")]);
+      },
     ]);
     const runtime = await ModelRuntime.create({
       credentials: createEphemeralCredentialStore(),
@@ -826,12 +842,13 @@ Deno.test("real Pi SDK faux provider prompts, invokes a bound tool, and emits te
     session.dispose();
     assertEquals(invoked, [{ repository_relative_path: "AGENTS.md" }]);
     assert(events.some((event) => JSON.stringify(event).includes("usage")));
+    assertEquals(providerTimeouts, [90_000, 90_000]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
 });
 
-Deno.test("real Pi SDK faux provider completes a sealed host assignment through workspace read and terminal submission", async () => {
+Deno.test("local Pi-headless faux provider completes a sealed host assignment through workspace read and terminal submission", async () => {
   const root = await Deno.makeTempDir({ prefix: "pi-host-faux-assignment-" });
   try {
     const faux = fauxProvider();
@@ -976,8 +993,11 @@ Deno.test("real Pi SDK faux provider completes a sealed host assignment through 
       providerModels,
       Array.from({ length: 3 }, () => ({ provider: model.provider, id: model.id })),
     );
-    assertEquals(sdkSession?.systemPrompt, "sealed system");
-    assertEquals(providerContexts[0]?.systemPrompt, "sealed system");
+    const expectedSystemPrompt =
+      `sealed system\n\nYour shell starts in this assigned workspace: ${root}\n` +
+      "Run assignment commands there. Do not search for or switch to another checkout.";
+    assertEquals(sdkSession?.systemPrompt, expectedSystemPrompt);
+    assertEquals(providerContexts[0]?.systemPrompt, expectedSystemPrompt);
     assertEquals(providerContexts[0]?.messages.length, 1);
     assertEquals(providerContexts[0]?.messages[0]?.role, "user");
     assertEquals(providerContexts[0]?.messages[0]?.content, [{
@@ -1225,23 +1245,48 @@ Deno.test("output byte limit aborts the one session and remains explicit", async
   assertEquals(factory.lastSession?.aborted, true);
 });
 
-Deno.test("transcript cap stops cumulative SDK snapshots before durable evidence grows unbounded", async () => {
+Deno.test("durable headless audit keeps bounded diagnostics but drops interactive snapshots", async () => {
   const root = await Deno.makeTempDir({ prefix: "pi-host-transcript-limit-" });
   const factory = new FakeFactory([
-    { type: "tool_execution_end", result: { cumulative_snapshot: "x".repeat(20_000) } },
+    {
+      type: "message_update",
+      message: { cumulative_snapshot: "x".repeat(20_000) },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "I will inspect the failing command.",
+        fullMessage: "x".repeat(20_000),
+      },
+    },
+    {
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "bash",
+      args: { command: "xsht test" },
+    },
+    {
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "bash",
+      isError: false,
+      result: { content: [{ type: "text", text: "all tests passed" }] },
+    },
     terminal(1),
   ]);
   const source = packet(root, false);
   const result = await runAssignment(
-    { ...source, limits: { ...source.limits, output_byte_limit: 1_024 } },
+    { ...source, limits: { ...source.limits, output_byte_limit: 4_096 } },
     deps(factory),
   );
-  assertEquals(result.status, "failed");
-  assertEquals(result.summary.stop_reason, "output_limit");
-  assertEquals(factory.lastSession?.aborted, true);
+  assertEquals(result.status, "succeeded");
+  assertEquals(result.summary.stop_reason, "completed");
+  assertEquals(factory.lastSession?.aborted, false);
   const transcript = await Deno.readTextFile(result.summary.transcript_path);
-  assert(transcript.includes("factory.transcript_truncated.v1"));
-  assert(new TextEncoder().encode(transcript).byteLength <= 1_024);
+  assert(transcript.includes("I will inspect the failing command."));
+  assert(transcript.includes('\\"command\\":\\"xsht test\\"'));
+  assert(transcript.includes("all tests passed"));
+  assert(!transcript.includes("cumulative_snapshot"));
+  assert(!transcript.includes("fullMessage"));
+  assert(new TextEncoder().encode(transcript).byteLength <= 4_096);
 });
 
 Deno.test("turn, wall, and aggregate allowance limits halt before success", async () => {

@@ -1864,11 +1864,11 @@ where
             return Err(SessionRuntimeError::Store(error));
         }
     };
+    let assignment_wall_limit = Duration::from_millis(request.packet.limits.wall_limit.get());
     let mut server = unbound_server
         .bind(identity)
-        .with_assignment_read_deadline(Duration::from_millis(
-            request.packet.limits.wall_limit.get(),
-        ))?;
+        .with_assignment_read_deadline(assignment_wall_limit)?
+        .with_assignment_operation_deadline(assignment_wall_limit)?;
     let admission = admission_line(
         request.packet.assignment_id,
         session.session_id,

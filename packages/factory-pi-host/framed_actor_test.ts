@@ -280,6 +280,80 @@ Deno.test("Product submission names the canonical command-profile artifact after
   );
 });
 
+Deno.test("Product submission preserves its bounded validation outcome", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "invalid_json: Product proposal contract is invalid: invalid XSH Product proposal: contract_owner must name one supplied contract read",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "contract_owner must name one supplied contract read",
+  );
+});
+
+Deno.test("Engineering checkpoint names the exact-read recovery before mutation", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "invalid_rpc: all assigned exact reads are required before mutation",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["candidate_checkpoint_regression"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({
+      regression_command: "reproducer",
+      expected_failure: "ticket-attempt-1-reproducer",
+    }),
+    Error,
+    "use `workspace_read` (not shell commands) on every path listed in the assignment",
+  );
+});
+
+Deno.test("Engineering checkpoint preserves a bounded task diagnostic before edits", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error("invalid_json: the regression checkpoint unexpectedly passed"),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["candidate_checkpoint_regression"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({
+      regression_command: "reproducer",
+      expected_failure: "ticket-attempt-1-reproducer",
+    }),
+    Error,
+    "The regression checkpoint was rejected: the regression checkpoint unexpectedly passed",
+  );
+});
+
+Deno.test("Engineering candidate submission preserves its bounded validation outcome", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error("invalid_json: hard candidate validation is Failed (candidate 4, validation 9)"),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["candidate_submit"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "Candidate submission did not pass: hard candidate validation is Failed",
+  );
+});
+
 Deno.test("Product submission corrects duplicate ticket contract-read paths", async () => {
   const client = new FramedActorClient({
     exchange: () =>

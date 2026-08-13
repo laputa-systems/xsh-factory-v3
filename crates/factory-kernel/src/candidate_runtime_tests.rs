@@ -63,6 +63,30 @@ fn full_validation_profile_is_an_exact_ordered_command_set() {
 }
 
 #[test]
+fn regression_checkpoint_captures_a_pristine_pre_fix_tree() {
+    let fixture = WhitespaceFixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture.actor(&repository, "pristine-regression");
+
+    assert!(matches!(
+        fixture.custody.capture_tree(&actor),
+        Err(GitCustodyError::EmptyTreeCapture)
+    ));
+    let checkpoint = fixture
+        .custody
+        .capture_regression_tree(&actor)
+        .expect("capture pristine regression tree");
+    assert_eq!(checkpoint.tree(), checkpoint.base_tree());
+    assert!(checkpoint.changed_paths().is_empty());
+    assert!(checkpoint.binary_patch().is_empty());
+
+    fixture
+        .custody
+        .cleanup_worktree(actor)
+        .expect("cleanup pristine regression actor");
+}
+
+#[test]
 fn forbidden_paths_are_exact_not_prefix_or_substring_rules() {
     let forbidden = vec![RepositoryRelativePath::parse(".factory/private").unwrap()];
     assert_eq!(

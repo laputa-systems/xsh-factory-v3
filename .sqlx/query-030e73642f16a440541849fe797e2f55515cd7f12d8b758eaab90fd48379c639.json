@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.ticket_revisions\n         SET lifecycle = $1, revision = $2,\n             sponsored_at = CASE WHEN $3::TEXT IS NULL THEN sponsored_at ELSE CURRENT_TIMESTAMP END,\n             sponsorship_reason = COALESCE($3, sponsorship_reason),\n             blocked_reason = CASE\n                 WHEN $1 = 1::SMALLINT THEN NULL\n                 ELSE COALESCE($4, blocked_reason)\n             END\n         WHERE id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int8",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "030e73642f16a440541849fe797e2f55515cd7f12d8b758eaab90fd48379c639"
+}

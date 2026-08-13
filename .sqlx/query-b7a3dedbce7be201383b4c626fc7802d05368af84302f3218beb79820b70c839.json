@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.lifecycle, c.revision, c.cost_state,\n                c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",\n                campaign_application.application_key AS campaign_application_key,\n                ticket_application.application_key AS ticket_application_key\n         FROM factory.campaigns AS c\n         JOIN factory.application_revisions AS campaign_application\n           ON campaign_application.id = c.application_revision_id\n         JOIN factory.application_revisions AS ticket_application\n           ON ticket_application.id = $2\n         WHERE c.id = $1 FOR SHARE",
+  "query": "SELECT c.lifecycle, c.revision, c.cost_state,\n                c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",\n                c.application_revision_id AS campaign_application_revision_id,\n                campaign_application.application_key AS campaign_application_key,\n                ticket_application.id AS ticket_application_revision_id\n         FROM factory.campaigns AS c\n         JOIN factory.application_revisions AS campaign_application\n           ON campaign_application.id = c.application_revision_id\n         JOIN factory.application_revisions AS ticket_application\n           ON ticket_application.id = $2\n         WHERE c.id = $1 FOR SHARE",
   "describe": {
     "columns": [
       {
@@ -44,6 +44,17 @@
       },
       {
         "ordinal": 4,
+        "name": "campaign_application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
         "name": "campaign_application_key",
         "type_info": "Text",
         "origin": {
@@ -54,13 +65,13 @@
         }
       },
       {
-        "ordinal": 5,
-        "name": "ticket_application_key",
-        "type_info": "Text",
+        "ordinal": 6,
+        "name": "ticket_application_revision_id",
+        "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "factory.application_revisions",
-            "name": "application_key"
+            "name": "id"
           }
         }
       }
@@ -77,8 +88,9 @@
       false,
       null,
       false,
+      false,
       false
     ]
   },
-  "hash": "2d6d3171eb07da49f20d4cd3653342e14c606511443bf3938451ef454eb50142"
+  "hash": "b7a3dedbce7be201383b4c626fc7802d05368af84302f3218beb79820b70c839"
 }

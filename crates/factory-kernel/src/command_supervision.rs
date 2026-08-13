@@ -741,11 +741,22 @@ impl CommandReceipt {
     }
 
     fn same_actual_observation(&self, other: &Self) -> bool {
-        matches!(self.terminal, CommandTerminal::Exited { .. })
-            && matches!(other.terminal, CommandTerminal::Exited { .. })
-            && self.exit_status == other.exit_status
-            && self.stdout == other.stdout
-            && self.stderr == other.stderr
+        if !matches!(self.terminal, CommandTerminal::Exited { .. })
+            || !matches!(other.terminal, CommandTerminal::Exited { .. })
+            || self.exit_status != other.exit_status
+        {
+            return false;
+        }
+        // Product discovery occasionally exposes a host-generated diagnostic
+        // identifier (for example a process-local Rust panic id) that changes
+        // between otherwise identical normal exits. `status-only-v1` keeps
+        // the two-run gate meaningful for that closed policy: the bounded
+        // command must fail twice with the same exit status. Every other
+        // comparison revision retains byte-for-byte stream equality.
+        if self.comparison_revision.as_str() == "status-only-v1" {
+            return true;
+        }
+        self.stdout == other.stdout && self.stderr == other.stderr
     }
 }
 
@@ -1827,6 +1838,41 @@ exit 99
                 .expect("divergent reproducer")
                 .classification(),
             DiscoveryClassification::Divergent
+        );
+        fs::remove_dir_all(root).expect("remove synthetic repository");
+    }
+
+    #[test]
+    fn status_only_discovery_accepts_host_diagnostic_variation_with_the_same_failure_status() {
+        let root = temporary_repository("status-only-discovery");
+        write_script(
+            &root,
+            "status-only-discovery",
+            r#"
+if [ -e flip-state ]; then rm flip-state; printf second-diagnostic; exit 17; fi
+: > flip-state
+printf first-diagnostic
+exit 17
+"#,
+        );
+        let profile = repository_command("status-only-discovery", &[]);
+        let command = DeterministicCommand::new(
+            profile,
+            CommandStdin::Empty,
+            CommandExpectation::new(
+                ComparisonRevision::parse("status-only-v1").expect("status-only revision"),
+                None,
+                None,
+            ),
+        )
+        .expect("status-only command");
+
+        assert_eq!(
+            runner()
+                .run_discovery_reproducer(&workspace(&root), &command)
+                .expect("two normal failures")
+                .classification(),
+            DiscoveryClassification::ReproducibleFailure
         );
         fs::remove_dir_all(root).expect("remove synthetic repository");
     }

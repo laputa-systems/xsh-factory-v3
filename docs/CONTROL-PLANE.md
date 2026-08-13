@@ -1,0 +1,54 @@
+# Control-plane lifecycle
+
+## Product to delivery
+
+1. The operator builds and qualifies a kernel, then registers and activates an
+   immutable XSH application revision.
+2. A campaign pins that revision, the qualified product snapshot, one aggregate
+   budget, one deadline, and one delivery target.
+3. Product supplies a bounded defect proposal. The kernel runs the admitted
+   reproducer twice and seals the observations. Product discovery compares a
+   canonical status-only manifest so host-specific stdout/stderr cannot make a
+   repeat irreproducible; the raw streams remain sealed diagnostic artifacts.
+4. The external Architect sponsors one proposed ticket revision. This is the
+   first human judgement gate.
+5. Engineering receives that ticket and an isolated worktree. It must obtain a
+   kernel-captured failing regression checkpoint before changing source.
+6. Engineering submits its candidate. The kernel captures the final tree,
+   changed paths, and binary patch; runs the reproducer and full suite on a
+   pristine materialization; and records the result. A passing candidate is
+   not yet delivered.
+7. Quality receives a fresh worktree from the exact candidate tree, reruns the
+   independent full suite through the kernel, and submits a qualitative review.
+8. The Architect delivers, requests one bounded rework, or rejects. Delivery
+   constructs provenance-bearing local Git history and guardedly
+   fast-forwards `../xsh`; it never pushes.
+
+## What an actor cannot decide
+
+No actor can create a repository binding, pick a ticket outside its packet,
+assert a tree/commit/validation result, change the product default branch,
+deliver a commit, or waive a required read, cost, or hard-validation failure.
+Quality prose cannot turn a failed full suite into a pass. Forum content is
+never a lifecycle command.
+
+## What the Architect decides
+
+The Architect chooses whether to sponsor a valid Product ticket and whether to
+deliver/rework/reject an independently reviewed candidate. A written override
+may address a qualitative Quality rejection only; it cannot bypass a hard
+validation failure, unknown/exceeded cost, bad evidence, dirty checkout, or
+non-fast-forward delivery.
+
+## Failure and recovery
+
+The daemon owns the process group, deadline, output cap, cancellation, direct
+wait, and terminal reconciliation. A provider cost that cannot be measured is
+fail-closed for campaign admission. The raw session archive and typed terminal
+evidence remain available for diagnosis.
+
+The current remaining weakness is intentional and explicit: Engineering work
+is only admitted as a candidate after its actor calls `candidate_submit`. A
+tool/protocol failure after a useful checkout can therefore lose an otherwise
+recoverable patch. The next architecture change moves that recovery boundary
+into controller-owned terminal reconciliation; see `PLAN.md`.

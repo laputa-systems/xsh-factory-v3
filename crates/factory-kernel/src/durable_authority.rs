@@ -38,6 +38,7 @@ use crate::{
         ArchitectTransitionFuture, ArchitectTransitionResolutionError, ArchitectTransitionResolver,
         ResolvedCandidateDecisionTransition, ResolvedReleaseTransition,
     },
+    product_runtime::status_only_observation_manifest_bytes,
     scheduler::ClaimReadyTicketAction,
     session_runtime::{
         CandidateQualityAuthorityFuture, CandidateQualityAuthorityResolutionError,
@@ -333,9 +334,14 @@ impl DurableAuthorityResolver {
             .map_err(|error| format!("current-head reproducer failed to run: {error}"))?;
         let process = self.store.process_store();
         let kernel_build_id = kernel_build_id_bytes(row.build_digest, "build digest")?;
-        let prefix = format!(
-            "claim-ticket-revision-{}",
-            action.ticket.ticket_revision_id.get()
+        // A claim retry must reuse its sealed observations, while a later
+        // campaign that retries the same ticket must record its own
+        // requalification under that campaign's installed build. Scope the
+        // idempotency namespace to both durable identities so the latter does
+        // not collide with the former.
+        let prefix = claim_requalification_command_prefix(
+            action.campaign_id.get(),
+            action.ticket.ticket_revision_id.get(),
         );
         let first = seal_command_observation_manifest(
             &process,
@@ -355,11 +361,18 @@ impl DurableAuthorityResolver {
             reproduction.second(),
         )
         .await?;
+        // Product admitted this ticket under the narrowly scoped status-only
+        // discovery rule. Requalification still runs and seals both raw
+        // receipts, but a process-local diagnostic in the second receipt is
+        // not a new product state. Persist the first canonical receipt in the
+        // ticket's replay slots, just as Product admission did.
+        let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
+            canonical_requalification_observations(first, second);
         Ok(crate::ticket_store::CurrentHeadRequalification {
             current_head_commit: application.repository.snapshot().base_commit().to_string(),
             current_head_tree: application.repository.snapshot().base_tree().to_string(),
-            first_actual_observation_artifact_id: first,
-            second_actual_observation_artifact_id: second,
+            first_actual_observation_artifact_id,
+            second_actual_observation_artifact_id,
         })
     }
 
@@ -1018,20 +1031,18 @@ impl DurableAuthorityResolver {
             Some(reference) => CommandStdin::Artifact(self.exact_bytes(reference).await?),
             None => CommandStdin::Empty,
         };
-        let stdout = self
-            .exact_bytes(&proposal.reproducer.expected_observation.stdout)
-            .await?;
-        let stderr = self
-            .exact_bytes(&proposal.reproducer.expected_observation.stderr)
-            .await?;
         DeterministicCommand::new(
             profile,
             stdin,
             CommandExpectation::new(
-                ComparisonRevision::parse(EXACT_OBSERVATION_COMPARISON)
+                // Product tickets establish their public process contract by
+                // exit status. Raw expected stream artifacts remain durable
+                // diagnostic evidence, but cannot be used for exact replay
+                // when a pre-fix host panic embeds a process-local id.
+                ComparisonRevision::parse("status-only-v1")
                     .map_err(|error| error.to_string())?,
-                Some(stdout),
-                Some(stderr),
+                None,
+                None,
             ),
         )
         .map_err(|error| format!("ticket reproducer command is invalid: {error}"))
@@ -1897,6 +1908,8 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
             )
             .await
             .map_err(precondition)?;
+            let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
+                canonical_requalification_observations(first, second);
             Ok(ResolvedReleaseTransition {
                 expected_attempt_revision: ExpectedRevision::new(attempt_revision),
                 expected_ticket_revision: ExpectedRevision::new(
@@ -1910,8 +1923,8 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                         .base_commit()
                         .to_string(),
                     current_head_tree: application.repository.snapshot().base_tree().to_string(),
-                    first_actual_observation_artifact_id: first,
-                    second_actual_observation_artifact_id: second,
+                    first_actual_observation_artifact_id,
+                    second_actual_observation_artifact_id,
                 },
             })
         })
@@ -2135,18 +2148,9 @@ struct CandidateRecovery {
     engineering_started_at_seconds: i64,
 }
 
-#[derive(Serialize)]
-struct ObservationManifest<'a> {
-    exit_status: i32,
-    stdout_digest: &'a str,
-    stdout_byte_length: u64,
-    stderr_digest: &'a str,
-    stderr_byte_length: u64,
-}
-
-/// Stores the same closed observation-manifest bytes used at Product
-/// admission. DecisionStore compares only that manifest digest, preventing a
-/// release resolver from redefining equality for current-head reproduction.
+/// Stores the same status-only observation-manifest bytes used at Product
+/// admission. Full raw output remains sealed alongside it; DecisionStore
+/// compares the named comparison identity for current-head reproduction.
 async fn seal_command_observation_manifest(
     process: &crate::process::ProcessStore,
     cas: &CasStore,
@@ -2163,7 +2167,7 @@ async fn seal_command_observation_manifest(
             ));
         }
     };
-    let (stdout, _) = process
+    let (_stdout, _) = process
         .adopt_and_register_kernel_bytes(
             cas,
             principal,
@@ -2173,7 +2177,7 @@ async fn seal_command_observation_manifest(
         )
         .await
         .map_err(|error| format!("could not seal current-head stdout: {error}"))?;
-    let (stderr, _) = process
+    let (_stderr, _) = process
         .adopt_and_register_kernel_bytes(
             cas,
             principal,
@@ -2183,16 +2187,7 @@ async fn seal_command_observation_manifest(
         )
         .await
         .map_err(|error| format!("could not seal current-head stderr: {error}"))?;
-    let stdout_digest = stdout.digest().to_hex();
-    let stderr_digest = stderr.digest().to_hex();
-    let bytes = json::to_string(&ObservationManifest {
-        exit_status,
-        stdout_digest: &stdout_digest,
-        stdout_byte_length: stdout.byte_length(),
-        stderr_digest: &stderr_digest,
-        stderr_byte_length: stderr.byte_length(),
-    })
-    .into_bytes();
+    let bytes = status_only_observation_manifest_bytes(exit_status);
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -2204,6 +2199,21 @@ async fn seal_command_observation_manifest(
         .await
         .map_err(|error| format!("could not seal current-head observation manifest: {error}"))?;
     Ok(manifest_receipt.artifact_id)
+}
+
+fn claim_requalification_command_prefix(campaign_id: i64, ticket_revision_id: i64) -> String {
+    format!("claim-campaign-{campaign_id}-ticket-revision-{ticket_revision_id}")
+}
+
+/// Ticket store requalification predates status-only Product discovery and
+/// compares its two stored replay identities byte-for-byte. Keep both raw
+/// receipts sealed for diagnosis; make the first one the closed, canonical
+/// replay identity for the admitted status-only pair.
+fn canonical_requalification_observations(
+    first: ArtifactId,
+    _second_raw_diagnostic: ArtifactId,
+) -> (ArtifactId, ArtifactId) {
+    (first, first)
 }
 
 fn full_suite_commands(bundle: &ApplicationBundleV1) -> Result<Vec<DeterministicCommand>, String> {
@@ -2252,4 +2262,30 @@ fn db_error(error: sqlx::Error) -> String {
 
 fn precondition(message: String) -> ArchitectTransitionResolutionError {
     ArchitectTransitionResolutionError::Precondition { message }
+}
+
+#[cfg(test)]
+mod tests {
+    use factory_protocol::ArtifactId;
+
+    use super::{canonical_requalification_observations, claim_requalification_command_prefix};
+
+    #[test]
+    fn claim_requalification_keys_reuse_only_within_one_campaign() {
+        let first = claim_requalification_command_prefix(17, 4);
+        assert_eq!(first, claim_requalification_command_prefix(17, 4));
+        assert_ne!(first, claim_requalification_command_prefix(18, 4));
+        assert_ne!(first, claim_requalification_command_prefix(17, 5));
+    }
+
+    #[test]
+    fn status_only_requalification_uses_one_canonical_replay_identity() {
+        let first = ArtifactId::new(41).expect("non-zero artifact id");
+        let second = ArtifactId::new(42).expect("non-zero artifact id");
+
+        assert_eq!(
+            canonical_requalification_observations(first, second),
+            (first, first)
+        );
+    }
 }

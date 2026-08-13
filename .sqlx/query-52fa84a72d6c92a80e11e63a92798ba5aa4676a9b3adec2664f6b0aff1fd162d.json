@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT tr.id, tr.revision\n             FROM factory.ticket_revisions AS tr\n             JOIN factory.tickets AS t ON t.id = tr.ticket_id\n             JOIN factory.application_revisions AS ticket_application\n               ON ticket_application.id = tr.application_revision_id\n             WHERE ticket_application.application_key = $1\n               AND t.current_ticket_revision_id = tr.id\n               AND tr.lifecycle = $2\n             ORDER BY tr.sponsored_at ASC, tr.id ASC LIMIT 1",
+  "query": "SELECT tr.id, tr.revision\n             FROM factory.ticket_revisions AS tr\n             JOIN factory.tickets AS t ON t.id = tr.ticket_id\n             WHERE tr.application_revision_id = $1\n               AND t.current_ticket_revision_id = tr.id\n               AND tr.lifecycle = $2\n             ORDER BY tr.sponsored_at ASC, tr.id ASC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -28,7 +28,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Int8",
         "Int2"
       ]
     },
@@ -37,5 +37,5 @@
       false
     ]
   },
-  "hash": "61e67ee1064c082bb00878421200c2afd31107aaf15eeedefc514ede9e26f60f"
+  "hash": "52fa84a72d6c92a80e11e63a92798ba5aa4676a9b3adec2664f6b0aff1fd162d"
 }

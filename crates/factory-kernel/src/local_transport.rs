@@ -353,6 +353,24 @@ impl ActorServerConnection {
         Ok(self)
     }
 
+    /// Replaces the generic per-operation transport bound with the admitted
+    /// assignment's wall limit. Some actor operations deliberately run a
+    /// controller-custodied command (for example a candidate checkpoint),
+    /// whose narrower command profile enforces its own execution limit. The
+    /// assignment wall limit remains the outer deadline for that RPC and for
+    /// the supervised actor process, so the daemon's short operator default
+    /// cannot abort an otherwise admitted command.
+    pub(crate) fn with_assignment_operation_deadline(
+        mut self,
+        operation_deadline: Duration,
+    ) -> Result<Self, LocalTransportError> {
+        if operation_deadline.is_zero() {
+            return Err(LocalTransportError::ZeroOperationDeadline);
+        }
+        self.config.operation_deadline = operation_deadline;
+        Ok(self)
+    }
+
     /// Returns the opaque capability retained by this daemon-side connection.
     /// A caller can obtain it only after [`LocalDaemon`] has created the
     /// connected descriptor and bound the identity to its server end.
@@ -2454,6 +2472,37 @@ mod tests {
                 task.await,
                 Err(LocalTransportError::OperationDeadlineExceeded)
             ));
+
+            let config =
+                LocalTransportConfig::new(test_runtime_root("assignment-operation-deadline"))
+                    .with_deadlines(Duration::from_secs(1), Duration::from_millis(10));
+            let (mut client, server) = actor_pair(config);
+            let server = server
+                .with_assignment_operation_deadline(Duration::from_millis(100))
+                .expect("assignment wall limit is a valid actor operation deadline");
+            let task = smol::spawn(async move {
+                server
+                    .serve(|_| async {
+                        Timer::after(Duration::from_millis(30)).await;
+                        Ok(br#"{}"#.to_vec())
+                    })
+                    .await
+            });
+            write_known_request(&mut client, "assignment-operation-deadline").await;
+            read_stream_frame(
+                &mut client,
+                RESPONSE_FRAME_MAX_BYTES,
+                Duration::from_secs(1),
+            )
+            .await
+            .expect("read actor response")
+            .expect("actor response exists");
+            drop(client);
+            assert_eq!(
+                task.await.expect("actor server"),
+                ActorDisconnect::PeerClosed
+            );
+
             assert!(matches!(
                 with_write_deadline(Duration::from_millis(10), async {
                     Timer::after(Duration::from_millis(50)).await;

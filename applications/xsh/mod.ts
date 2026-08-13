@@ -26,6 +26,7 @@ const command = (
   argv: readonly string[],
   timeout_millis: number,
   stream_byte_limit: number,
+  expected_exit_status = 0,
 ) => ({
   name,
   executable: { approved_tool: "cargo" as const },
@@ -35,7 +36,7 @@ const command = (
   timeout_millis,
   stdout_byte_limit: stream_byte_limit,
   stderr_byte_limit: stream_byte_limit,
-  expected_exit_status: 0,
+  expected_exit_status,
 });
 
 const commonActorTools: readonly ActorToolV1[] = [
@@ -55,15 +56,28 @@ const commonActorTools: readonly ActorToolV1[] = [
   "artifact_seal",
 ];
 
+// Product is deliberately a narrow evidence collector.  It can read the
+// assigned contracts, make the one supplied reproduction run, seal that
+// observation, and submit it.  Source discovery, implementation, and review
+// belong to the later assignments, so exposing their tools here only creates
+// duplicated paid work.
+const productActorTools: readonly ActorToolV1[] = [
+  "workspace_read",
+  "shell",
+  "artifact_seal",
+  "product_submit_ticket",
+  "work_complete",
+];
+
 const researchReviewModel = {
   provider: "openrouter",
   model_id: "deepseek/deepseek-v4-flash-0731",
   thinking_level: "high" as const,
   context_token_limit: 1_048_576,
-  output_token_limit: 65_536,
-  price_input_micro_usd_per_million_tokens: 90_000,
+  output_token_limit: 384_000,
+  price_input_micro_usd_per_million_tokens: 80_000,
   price_output_micro_usd_per_million_tokens: 180_000,
-  price_cache_read_micro_usd_per_million_tokens: 18_000,
+  price_cache_read_micro_usd_per_million_tokens: 16_000,
   price_cache_write_micro_usd_per_million_tokens: 0,
   capability_flags: ["reasoning" as const],
 };
@@ -81,6 +95,11 @@ const engineeringModel = {
   price_cache_write_micro_usd_per_million_tokens: 125_000,
   capability_flags: ["reasoning" as const],
 };
+
+// Product has one prescribed evidence-collection path. A reliable no-
+// reasoning model is less expensive than repeatedly paying a weaker model to
+// rediscover the checkout or implementation details that Product does not own.
+const productModel = { ...engineeringModel, thinking_level: "none" as const };
 
 /**
  * Product buffer pressure is declarative application policy. The generic
@@ -139,7 +158,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
   format_version: 1,
   application_key: "xsh",
-  predecessor_bundle: null,
+  // The installed V1 bundle is the explicit lineage parent for this
+  // validation-profile and prompt revision. Admission rejects an accidental
+  // fork from any other active application bundle.
+  predecessor_bundle: "55578f0f41072ce4d47dff7d968a96c5e225175035ec4fbe52831fe571e1a877",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -156,7 +178,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "15308404a1af32eca0613cff48b875a979e2d88c24ca94cefe956f998e408571",
+        "cbd4124015d8a62cd8cc3e0340b8d2cfd507e186097fa67cd872acb53f1b5edb",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -164,21 +186,15 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "45af90aff658aaa330ee42e8fc54f7d2507eb2050d663facc1ffb13a1f7a5122",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
-      tools: [
-        ...commonActorTools,
-        "product_submit_ticket",
-        "work_complete",
-      ],
-      // Product's bounded investigation favors the lower-cost research
-      // profile; the separate Engineering assignment owns implementation.
-      model: researchReviewModel,
-      limits: { turn_limit: 32, wall_limit_millis: 1_800_000, output_byte_limit: 16_777_216 },
+      tools: productActorTools,
+      model: productModel,
+      limits: { turn_limit: 12, wall_limit_millis: 600_000, output_byte_limit: 16_777_216 },
     },
     {
       office: "engineering",
       system_template: template(
         "templates/engineering-system.md",
-        "61219906c4a2e3b1c6cea4f261028c44fe32f12c71a9186580153178a46727ae",
+        "de12748b6171a884a77ab52c7039f2f84f0fa3f361bc57fb1f08fa1b836a048b",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -234,11 +250,16 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       ["run", "--quiet", "--locked", "--bin", "xsh", "--", "/dev/stdin"],
       300_000,
       4_194_304,
+      3,
     ),
   ],
   validation_profiles: {
     focused: [command("focused", ["test", "--locked", "-p", "xsh", "--lib"], 900_000, 67_108_864)],
-    full: [command("full", ["test", "--locked"], 1_800_000, 67_108_864)],
+    // `cargo test` includes integration coverage that assumes a product
+    // checkout's development fixtures. The XSH integration target is the
+    // supported, hermetic full behavioral suite for an isolated candidate
+    // worktree.
+    full: [command("full", ["test", "--locked", "--test", "integration"], 1_800_000, 67_108_864)],
   },
   git_policy: {
     forbidden_paths: [".git"],

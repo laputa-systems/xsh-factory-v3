@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { ModelRuntime } from "@pi/coding-agent";
+import { ModelRuntime } from "@factory/pi-headless";
 import { xshApplicationV1 } from "../applications/xsh/mod.ts";
 import {
   createEphemeralCredentialStore,
@@ -9,7 +9,7 @@ import type { PiAssignmentPacket } from "../packages/factory-pi-host/types.ts";
 
 /**
  * This is an offline catalog compatibility judge, not a model invocation. It
- * uses the same Pi SDK and exact descriptor verifier as the paid host while
+ * uses the same local Pi-headless runtime and exact descriptor verifier as the paid host while
  * supplying an empty process-local credential store and disabling catalog
  * network refresh.
  */

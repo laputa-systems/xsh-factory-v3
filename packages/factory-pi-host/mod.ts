@@ -1,10 +1,8 @@
 /**
- * Generic one-assignment host seam. Tranche 1 pins the exact SDK import but
- * deliberately makes no provider call and imports no application source.
+ * Generic one-assignment host seam. The local Pi submodule is built into the
+ * pinned headless bundles selected by the root import map; it makes no
+ * provider call and imports no application source.
  */
-import type * as PiCodingAgent from "@pi/coding-agent";
-
-export type PiCodingAgentModule = typeof PiCodingAgent;
 
 export * from "./forum-tools.ts";
 export * from "./workspace-tools.ts";

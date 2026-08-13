@@ -1,23 +1,25 @@
 # Repository boundary
 
-`xsh-factory-v3` owns the factory kernel source, Deno SDK/host source, application declarations,
-migrations, tests, and future runtime evidence under its own ignored `var/` root. It is a cleanroom
-repository and must not import Factory V1 or V2 code or durable state.
+`xsh-factory-v3` owns the generic kernel, Deno SDK/host, XSH application
+declaration, migrations, tests, vendored Pi source, and ignored runtime roots.
+It does not import Factory V1/V2 code or durable state.
 
-`../xsh` is the product repository. It owns XSH source, documentation, tests, and its own Git
-history. It must never become the factory's database, artifact store, ticket buffer, Forum store,
-session transcript store, or workflow-state location.
+`../xsh` owns product source, product documentation, tests, and Git history.
+It is never the factory database, ticket buffer, transcript store, CAS, or
+workflow state. Factory work reaches it only through kernel-owned isolated
+worktrees and guarded local fast-forward delivery.
 
-The boundary is one-way:
+The dependency direction is deliberately one way:
 
 ```text
-applications/xsh -> @factory/sdk -> factoryd / Rust kernel -> local product checkout
+applications/xsh -> @factory/sdk -> factory-pi-host -> factoryd / Rust kernel -> ../xsh
 ```
 
-Generic Rust must compile and test without `applications/xsh`. The XSH application may import only
-the public `@factory/sdk` authoring surface; it may not import Rust source, open a PostgreSQL
-connection, access a kernel-owned CAS path, construct a Git commit, or start a Pi session. The live
-generic host will receive a sealed assignment packet and must not import application source.
+Rust must compile and test without `applications/xsh`. The XSH application may
+use only the public SDK authoring surface and declarative Markdown paths. It
+may not connect to PostgreSQL, access runtime/CAS paths, construct a commit,
+spawn a session, or inspect live kernel state. The actor host receives a sealed
+assignment packet and does not import application source at runtime.
 
-The checked dependency-direction tests enforce the source-level portion of this boundary. Future
-kernel admission will enforce it at runtime by accepting only the canonical closed bundle.
+`vendor/pi-headless` is a pinned submodule used to build local headless ESM
+artifacts. It is a supply-chain input, not a second factory control plane.

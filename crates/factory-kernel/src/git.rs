@@ -702,9 +702,30 @@ impl GitCustody {
         Ok(worktree)
     }
 
-    /// Captures a regression or candidate tree with a fresh temporary index;
-    /// the actor's own index stays untouched.
+    /// Captures a candidate tree with a fresh temporary index; the actor's own
+    /// index stays untouched. Candidate submission requires a material change,
+    /// so an unchanged tree is rejected here before any evidence is sealed.
     pub fn capture_tree(&self, worktree: &OwnedWorktree) -> Result<TreeCapture, GitCustodyError> {
+        self.capture_tree_inner(worktree, false)
+    }
+
+    /// Captures the pre-fix tree for an Engineering regression checkpoint.
+    /// A checkpoint normally happens before the actor edits the worktree, so
+    /// its exact source tree may equal the qualified base and its portable
+    /// patch may legitimately be empty. Candidate submission remains strict
+    /// through [`Self::capture_tree`].
+    pub fn capture_regression_tree(
+        &self,
+        worktree: &OwnedWorktree,
+    ) -> Result<TreeCapture, GitCustodyError> {
+        self.capture_tree_inner(worktree, true)
+    }
+
+    fn capture_tree_inner(
+        &self,
+        worktree: &OwnedWorktree,
+        allow_base_tree: bool,
+    ) -> Result<TreeCapture, GitCustodyError> {
         self.assert_worktree_head(worktree)?;
         let default_commit =
             self.commit(&worktree.repository_root, &worktree.branch.reference())?;
@@ -732,7 +753,16 @@ impl GitCustody {
             )?)?;
             let tree = self.write_tree("write captured tree", &worktree.path, Some(&index.path))?;
             if tree == worktree.base_tree {
-                return Err(GitCustodyError::EmptyTreeCapture);
+                if !allow_base_tree {
+                    return Err(GitCustodyError::EmptyTreeCapture);
+                }
+                return Ok(TreeCapture {
+                    base_tree: worktree.base_tree.clone(),
+                    tree,
+                    changed_paths: Vec::new(),
+                    binary_patch: Vec::new(),
+                    patch_digest: ContentDigest::of_bytes(&[]),
+                });
             }
             let changed_paths = self.changed_paths(&worktree.path, &worktree.base_tree, &tree)?;
             let binary_patch = self.binary_patch(&worktree.path, &worktree.base_tree, &tree)?;

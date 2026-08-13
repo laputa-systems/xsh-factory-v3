@@ -23,7 +23,7 @@ function jsonLine(value: unknown): Uint8Array {
   }
 }
 
-/** Appends every raw SDK event immediately to the assignment-local NDJSON stream. */
+/** Appends compact headless audit events to the assignment-local NDJSON stream. */
 export class TranscriptWriter {
   readonly path: string;
   #file: Deno.FsFile | undefined;
@@ -52,10 +52,11 @@ export class TranscriptWriter {
   }
 
   /**
-   * Retains ordered raw SDK events only while their exact NDJSON encoding
-   * fits the assigned bound. Pi may emit cumulative snapshots that dwarf the
-   * streamed text delta, so model-output accounting alone cannot safely cap
-   * this durable artifact.
+   * Retains ordered compact audit events only while their exact NDJSON
+   * encoding fits the assigned bound. The vendored Pi projection retains
+   * bounded model-visible text and tool diagnostics, while omitting
+   * interactive snapshots, provider thinking, and tree state; this is a
+   * final fault-containment bound rather than ordinary flow control.
    */
   async append(event: unknown): Promise<{ readonly truncated: boolean }> {
     if (this.#file === undefined) throw new Error("transcript is closed");

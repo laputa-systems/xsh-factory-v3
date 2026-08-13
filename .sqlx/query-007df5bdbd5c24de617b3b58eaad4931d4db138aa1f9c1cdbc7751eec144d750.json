@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.lifecycle, c.revision, c.delivery_target, c.cost_state,\n                    c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",\n                    ar.application_key, ar.ticket_low_water, ar.ticket_target,\n                    ar.ticket_maximum, ar.proposal_maximum\n             FROM factory.campaigns AS c\n             JOIN factory.application_revisions AS ar ON ar.id = c.application_revision_id\n             WHERE c.id = $1",
+  "query": "SELECT c.lifecycle, c.revision, c.delivery_target, c.cost_state,\n                    c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\",\n                    ar.id AS application_revision_id, ar.application_key,\n                    ar.ticket_low_water, ar.ticket_target,\n                    ar.ticket_maximum, ar.proposal_maximum\n             FROM factory.campaigns AS c\n             JOIN factory.application_revisions AS ar ON ar.id = c.application_revision_id\n             WHERE c.id = $1",
   "describe": {
     "columns": [
       {
@@ -55,6 +55,17 @@
       },
       {
         "ordinal": 5,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "application_key",
         "type_info": "Text",
         "origin": {
@@ -65,7 +76,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "ticket_low_water",
         "type_info": "Int4",
         "origin": {
@@ -76,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "ticket_target",
         "type_info": "Int4",
         "origin": {
@@ -87,7 +98,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "ticket_maximum",
         "type_info": "Int4",
         "origin": {
@@ -98,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "proposal_maximum",
         "type_info": "Int4",
         "origin": {
@@ -124,8 +135,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "5d57c4635fbe3d24ac0b8aed388ba60978e5e1185f7d5315b159823cc539a41b"
+  "hash": "007df5bdbd5c24de617b3b58eaad4931d4db138aa1f9c1cdbc7751eec144d750"
 }

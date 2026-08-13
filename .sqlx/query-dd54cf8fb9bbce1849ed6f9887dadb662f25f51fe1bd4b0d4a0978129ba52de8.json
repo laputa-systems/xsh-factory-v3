@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id FROM factory.ticket_revisions\n             WHERE application_revision_id = $1 AND reproducer_artifact_id = $2",
+  "query": "SELECT id FROM factory.ticket_revisions\n             WHERE application_revision_id = $1 AND reproducer_artifact_id = $2\n               AND lifecycle <> 4::SMALLINT",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       false
     ]
   },
-  "hash": "56f5b88c3ba82f2e45eca7b168b30673f9bb0527c824e4f91d90f897d42a63d7"
+  "hash": "dd54cf8fb9bbce1849ed6f9887dadb662f25f51fe1bd4b0d4a0978129ba52de8"
 }
