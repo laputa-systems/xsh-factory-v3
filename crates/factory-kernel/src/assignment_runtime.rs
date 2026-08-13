@@ -64,20 +64,44 @@ pub struct AssignmentMaterializationRequest {
     pub credential_environment_value: OsString,
 }
 
-/// Durable assignment/session result plus the exact disposable workspace
-/// owner. The daemon decides retention/cleanup after the terminal outcome;
-/// this direct seam never performs broad worktree pruning.
+/// Durable assignment/session result after its exact disposable inputs have
+/// been removed. Every durable artifact was sealed before this value returns.
 pub struct AssignmentLaunchOutcome {
     pub assignment_id: AssignmentId,
     pub assignment_revision: AggregateRevision,
     pub session: SessionRuntimeOutcome,
-    pub workspace: OwnedWorktree,
-    pub staging_root: PathBuf,
 }
 
-/// Provider-free composition failures. A staging/worktree may remain for
-/// forensic inspection when a later immutable seal or transition rejects;
-/// neither one is ever silently reused for a different assignment identity.
+/// Exact disposable filesystem resources for one assignment. They are never
+/// retained as forensic evidence: the immutable packet, actor seals, streams,
+/// transcript, candidate patch, and validation receipts are already in CAS.
+struct AssignmentRuntimeResources {
+    assignment_id: AssignmentId,
+    workspace: OwnedWorktree,
+    staging_root: PathBuf,
+}
+
+impl AssignmentRuntimeResources {
+    fn cleanup(self, git: &GitCustody, runtime_root: &Path) -> Result<(), AssignmentRuntimeError> {
+        let workspace = git
+            .cleanup_worktree(self.workspace)
+            .map_err(AssignmentRuntimeError::WorkspaceCleanup);
+        let staging =
+            remove_assignment_staging(runtime_root, self.assignment_id, &self.staging_root);
+        match (workspace, staging) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(workspace), Err(staging)) => Err(AssignmentRuntimeError::CleanupFailures {
+                workspace: workspace.to_string(),
+                staging: staging.to_string(),
+            }),
+        }
+    }
+}
+
+/// Provider-free composition failures. A failed launch removes its exact
+/// disposable workspace and staging root after preserving every completed
+/// immutable seal. Nothing is reused for another assignment identity.
 #[derive(Debug, Error)]
 pub enum AssignmentRuntimeError {
     #[error(transparent)]
@@ -88,6 +112,9 @@ pub enum AssignmentRuntimeError {
 
     #[error(transparent)]
     Git(#[from] GitCustodyError),
+
+    #[error("assignment worktree cleanup failed: {0}")]
+    WorkspaceCleanup(#[source] GitCustodyError),
 
     #[error(transparent)]
     WorkspaceRead(#[from] WorkspaceReadError),
@@ -123,6 +150,28 @@ pub enum AssignmentRuntimeError {
         #[source]
         source: io::Error,
     },
+
+    #[error(
+        "assignment staging root differs from its exact owned path: expected {expected}, observed {observed}"
+    )]
+    StagingRootMismatch {
+        expected: PathBuf,
+        observed: PathBuf,
+    },
+
+    #[error("assignment staging root is not a real directory: {path}")]
+    StagingRootNotDirectory { path: PathBuf },
+
+    #[error("assignment staging cleanup did not remove {path}")]
+    StagingCleanupIncomplete { path: PathBuf },
+
+    #[error("assignment launch failed: {launch}; disposable cleanup also failed: {cleanup}")]
+    LaunchCleanup { launch: String, cleanup: String },
+
+    #[error(
+        "assignment worktree cleanup failed: {workspace}; assignment staging cleanup failed: {staging}"
+    )]
+    CleanupFailures { workspace: String, staging: String },
 }
 
 /// Materializes and launches exactly one durable assignment. The resolver is
@@ -167,221 +216,245 @@ pub async fn materialize_and_launch_assignment(
         ));
     }
 
-    let workspace =
-        materialize_workspace(execution.git_custody().as_ref(), &context, assignment_id)?;
     let staging_root = create_assignment_staging(cas.runtime_root(), assignment_id)?;
-    let application = load_application_material(
-        store,
-        &process,
-        cas,
-        request.application_revision_id,
-        office_for_target(request.target),
-    )
-    .await?;
+    let workspace =
+        match materialize_workspace(execution.git_custody().as_ref(), &context, assignment_id) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                return Err(with_cleanup_failure(
+                    error,
+                    remove_assignment_staging(cas.runtime_root(), assignment_id, &staging_root),
+                ));
+            }
+        };
+    let resources = AssignmentRuntimeResources {
+        assignment_id,
+        workspace,
+        staging_root,
+    };
 
-    let required_reads = exact_required_reads(
-        &context.application_required_reads,
-        &context.ticket_contract_reads,
-        workspace.path(),
-    )?;
-    let required_manifest_bytes = canonical_required_manifest(&required_reads);
-    let required_manifest = register_kernel_bytes(
-        &process,
-        cas,
-        installed.kernel_build_id(),
-        assignment_id,
-        "required-read-manifest",
-        &required_manifest_bytes,
-    )
-    .await?;
-
-    let assignment_evidence = exact_assignment_evidence(request.target, &context)?;
-    let values = prompt_values(
-        assignment_id,
-        request.target,
-        &context,
-        &assignment_evidence,
-        &application.mission,
-    )?;
-    let system_prompt = render_declared_template(
-        &application.system_template,
-        &application.system_source,
-        &values,
-    )?;
-    let assignment_prompt = render_declared_template(
-        &application.assignment_template,
-        &application.assignment_source,
-        &values,
-    )?;
-    let system = register_kernel_bytes(
-        &process,
-        cas,
-        installed.kernel_build_id(),
-        assignment_id,
-        "system-prompt",
-        &system_prompt,
-    )
-    .await?;
-    let assignment_prompt_artifact = register_kernel_bytes(
-        &process,
-        cas,
-        installed.kernel_build_id(),
-        assignment_id,
-        "assignment-prompt",
-        &assignment_prompt,
-    )
-    .await?;
-
-    let campaign = current_campaign_material(
-        store,
-        request.campaign_id,
-        request.application_revision_id,
-        request.expected_campaign_revision,
-    )
-    .await?;
-    let runtime = installed.runtime_identity_for_provider(&application.profile.model.provider)?;
-    let workspace_root = absolute_path(workspace.path(), "workspace root")?;
-    let staging_absolute = absolute_path(&staging_root, "staging root")?;
-    let target = target_text(request.target, &context, &assignment_evidence)?;
-    let mut wire = assignment_wire(
-        assignment_id,
-        request.campaign_id,
-        request.application_revision_id,
-        installed.kernel_build_id(),
-        request.target,
-        target.clone(),
-        &context,
-        system.artifact_id,
-        assignment_prompt_artifact.artifact_id,
-        required_manifest.artifact_id,
-        &system_prompt,
-        &assignment_prompt,
-        workspace_root.as_str(),
-        staging_absolute.as_str(),
-        &application.profile,
-        &runtime,
-        &required_reads,
-        &assignment_evidence,
-        campaign.remaining,
-        campaign.revision,
-    )?;
-    let packet_digest = unsigned_assignment_packet_digest_v1(&wire)?;
-    wire.packet_digest = packet_digest.to_hex();
-    let packet_bytes = canonical_assignment_packet_json_v1(&wire)?.into_bytes();
-    let packet = typed_packet(
-        assignment_id,
-        request.campaign_id,
-        request.application_revision_id,
-        installed.kernel_build_id(),
-        request.target,
-        target,
-        system.artifact_id,
-        assignment_prompt_artifact.artifact_id,
-        required_manifest.artifact_id,
-        workspace_root,
-        staging_absolute,
-        application.profile.model.clone(),
-        application.profile.limits.clone(),
-        runtime,
-        required_reads.clone(),
-        assignment_evidence,
-        campaign.remaining,
-        campaign.revision,
-        packet_digest,
-    );
-    let packet_artifact = register_kernel_bytes(
-        &process,
-        cas,
-        installed.kernel_build_id(),
-        assignment_id,
-        "assignment-packet",
-        &packet_bytes,
-    )
-    .await?;
-    let assignment_receipt = process
-        .create_assignment(
+    let launch = async {
+        let application = load_application_material(
+            store,
+            &process,
             cas,
-            &CreateAssignment {
-                principal: request.principal,
-                command_id: request.command_id,
-                expected_campaign_revision: request.expected_campaign_revision,
-                identity,
-                packet: packet.clone(),
-                packet_bytes: packet_bytes.clone(),
-                packet_artifact: packet_artifact.seal,
-                required_read_manifest_artifact_id: required_manifest.artifact_id,
-                attempt_ordinal,
-            },
+            request.application_revision_id,
+            office_for_target(request.target),
         )
         .await?;
-    if assignment_receipt.assignment_id != assignment_id {
-        return Err(AssignmentRuntimeError::Application(
-            "assignment receipt changed the reserved identity".to_owned(),
-        ));
-    }
 
-    let spawn = installed.pi_host_spawn_spec_for_provider(
-        &application.profile.model.provider,
-        workspace.path().to_owned(),
-        0,
-        (
-            OsString::from(installed.openrouter_credential_environment()),
-            request.credential_environment_value,
-        ),
-    )?;
-    let supervision = ProcessSupervisionSpec::new(
-        staging_root.join(SESSION_STDOUT_RELATIVE_PATH),
-        staging_root.join(SESSION_STDERR_RELATIVE_PATH),
-        u64::from(application.profile.limits.output_byte_limit),
-        u64::from(application.profile.limits.output_byte_limit),
-        Duration::from_millis(application.profile.limits.wall_limit.get()),
-        TERMINATION_GRACE,
-    )?;
-    let candidate_quality_runtime = match request.target {
-        DurableAssignmentTarget::Product => None,
-        DurableAssignmentTarget::Engineering { .. } | DurableAssignmentTarget::Quality { .. } => {
-            Some(CandidateQualitySessionRuntime::new(
+        let required_reads = exact_required_reads(
+            &context.application_required_reads,
+            &context.ticket_contract_reads,
+            resources.workspace.path(),
+        )?;
+        let required_manifest_bytes = canonical_required_manifest(&required_reads);
+        let required_manifest = register_kernel_bytes(
+            &process,
+            cas,
+            installed.kernel_build_id(),
+            assignment_id,
+            "required-read-manifest",
+            &required_manifest_bytes,
+        )
+        .await?;
+
+        let assignment_evidence = exact_assignment_evidence(request.target, &context)?;
+        let values = prompt_values(
+            assignment_id,
+            request.target,
+            &context,
+            &assignment_evidence,
+            &application.mission,
+        )?;
+        let system_prompt = render_declared_template(
+            &application.system_template,
+            &application.system_source,
+            &values,
+        )?;
+        let assignment_prompt = render_declared_template(
+            &application.assignment_template,
+            &application.assignment_source,
+            &values,
+        )?;
+        let system = register_kernel_bytes(
+            &process,
+            cas,
+            installed.kernel_build_id(),
+            assignment_id,
+            "system-prompt",
+            &system_prompt,
+        )
+        .await?;
+        let assignment_prompt_artifact = register_kernel_bytes(
+            &process,
+            cas,
+            installed.kernel_build_id(),
+            assignment_id,
+            "assignment-prompt",
+            &assignment_prompt,
+        )
+        .await?;
+
+        let campaign = current_campaign_material(
+            store,
+            request.campaign_id,
+            request.application_revision_id,
+            request.expected_campaign_revision,
+        )
+        .await?;
+        let runtime =
+            installed.runtime_identity_for_provider(&application.profile.model.provider)?;
+        let workspace_root = absolute_path(resources.workspace.path(), "workspace root")?;
+        let staging_absolute = absolute_path(&resources.staging_root, "staging root")?;
+        let target = target_text(request.target, &context, &assignment_evidence)?;
+        let mut wire = assignment_wire(
+            assignment_id,
+            request.campaign_id,
+            request.application_revision_id,
+            installed.kernel_build_id(),
+            request.target,
+            target.clone(),
+            &context,
+            system.artifact_id,
+            assignment_prompt_artifact.artifact_id,
+            required_manifest.artifact_id,
+            &system_prompt,
+            &assignment_prompt,
+            workspace_root.as_str(),
+            staging_absolute.as_str(),
+            &application.profile,
+            &runtime,
+            &required_reads,
+            &assignment_evidence,
+            campaign.remaining,
+            campaign.revision,
+        )?;
+        let packet_digest = unsigned_assignment_packet_digest_v1(&wire)?;
+        wire.packet_digest = packet_digest.to_hex();
+        let packet_bytes = canonical_assignment_packet_json_v1(&wire)?.into_bytes();
+        let packet = typed_packet(
+            assignment_id,
+            request.campaign_id,
+            request.application_revision_id,
+            installed.kernel_build_id(),
+            request.target,
+            target,
+            system.artifact_id,
+            assignment_prompt_artifact.artifact_id,
+            required_manifest.artifact_id,
+            workspace_root,
+            staging_absolute,
+            application.profile.model.clone(),
+            application.profile.limits.clone(),
+            runtime,
+            required_reads.clone(),
+            assignment_evidence,
+            campaign.remaining,
+            campaign.revision,
+            packet_digest,
+        );
+        let packet_artifact = register_kernel_bytes(
+            &process,
+            cas,
+            installed.kernel_build_id(),
+            assignment_id,
+            "assignment-packet",
+            &packet_bytes,
+        )
+        .await?;
+        let assignment_receipt = process
+            .create_assignment(
+                cas,
+                &CreateAssignment {
+                    principal: request.principal,
+                    command_id: request.command_id,
+                    expected_campaign_revision: request.expected_campaign_revision,
+                    identity,
+                    packet: packet.clone(),
+                    packet_bytes: packet_bytes.clone(),
+                    packet_artifact: packet_artifact.seal,
+                    required_read_manifest_artifact_id: required_manifest.artifact_id,
+                    attempt_ordinal,
+                },
+            )
+            .await?;
+        if assignment_receipt.assignment_id != assignment_id {
+            return Err(AssignmentRuntimeError::Application(
+                "assignment receipt changed the reserved identity".to_owned(),
+            ));
+        }
+
+        let spawn = installed.pi_host_spawn_spec_for_provider(
+            &application.profile.model.provider,
+            resources.workspace.path().to_owned(),
+            0,
+            (
+                OsString::from(installed.openrouter_credential_environment()),
+                request.credential_environment_value,
+            ),
+        )?;
+        let supervision = ProcessSupervisionSpec::new(
+            resources.staging_root.join(SESSION_STDOUT_RELATIVE_PATH),
+            resources.staging_root.join(SESSION_STDERR_RELATIVE_PATH),
+            u64::from(application.profile.limits.output_byte_limit),
+            u64::from(application.profile.limits.output_byte_limit),
+            Duration::from_millis(application.profile.limits.wall_limit.get()),
+            TERMINATION_GRACE,
+        )?;
+        let candidate_quality_runtime = match request.target {
+            DurableAssignmentTarget::Product => None,
+            DurableAssignmentTarget::Engineering { .. }
+            | DurableAssignmentTarget::Quality { .. } => Some(CandidateQualitySessionRuntime::new(
                 store.decision_store(),
                 execution.git_custody(),
                 resolver,
-            ))
-        }
-    };
-    let session = launch_session(
-        &process,
-        &store.forum_store(),
-        &store.ticket_store(),
-        execution.command_runner(),
-        daemon,
-        cas,
-        SessionLaunchRequest {
-            principal: KERNEL_PRINCIPAL.to_owned(),
-            command_id: format!("session-launch-{}", assignment_id.get()),
-            expected_assignment_revision: ExpectedRevision::new(
-                assignment_receipt.resulting_revision,
-            ),
+            )),
+        };
+        let session = launch_session(
+            &process,
+            &store.forum_store(),
+            &store.ticket_store(),
+            execution.command_runner(),
+            daemon,
+            cas,
+            SessionLaunchRequest {
+                principal: KERNEL_PRINCIPAL.to_owned(),
+                command_id: format!("session-launch-{}", assignment_id.get()),
+                expected_assignment_revision: ExpectedRevision::new(
+                    assignment_receipt.resulting_revision,
+                ),
+                assignment_id,
+                packet_digest,
+                packet,
+                canonical_packet_bytes: packet_bytes,
+                packet_artifact: packet_artifact.seal,
+                spawn,
+                supervision,
+                workspace_root: resources.workspace.path().to_owned(),
+                expected_read_manifest_artifact_id: required_manifest.artifact_id,
+                required_reads,
+                candidate_quality_runtime,
+            },
+            installed.runtime(),
+        )
+        .await?;
+        Ok((assignment_receipt.resulting_revision, session))
+    }
+    .await;
+    let cleanup = resources.cleanup(execution.git_custody().as_ref(), cas.runtime_root());
+    match (launch, cleanup) {
+        (Ok((assignment_revision, session)), Ok(())) => Ok(AssignmentLaunchOutcome {
             assignment_id,
-            packet_digest,
-            packet,
-            canonical_packet_bytes: packet_bytes,
-            packet_artifact: packet_artifact.seal,
-            spawn,
-            supervision,
-            workspace_root: workspace.path().to_owned(),
-            expected_read_manifest_artifact_id: required_manifest.artifact_id,
-            required_reads,
-            candidate_quality_runtime,
-        },
-        installed.runtime(),
-    )
-    .await?;
-    Ok(AssignmentLaunchOutcome {
-        assignment_id,
-        assignment_revision: assignment_receipt.resulting_revision,
-        session,
-        workspace,
-        staging_root,
-    })
+            assignment_revision,
+            session,
+        }),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(launch), Err(cleanup)) => Err(AssignmentRuntimeError::LaunchCleanup {
+            launch: launch.to_string(),
+            cleanup: cleanup.to_string(),
+        }),
+    }
 }
 
 struct RegisteredKernelBytes {
@@ -444,7 +517,7 @@ fn create_assignment_staging(
         path: parent.clone(),
         source,
     })?;
-    let staging = parent.join(format!("assignment-{}", assignment_id.get()));
+    let staging = assignment_staging_path(runtime_root, assignment_id);
     fs::create_dir(&staging).map_err(|source| AssignmentRuntimeError::Io {
         operation: "create fresh assignment staging root",
         path: staging.clone(),
@@ -455,6 +528,68 @@ fn create_assignment_staging(
         path: staging,
         source,
     })
+}
+
+fn assignment_staging_path(runtime_root: &Path, assignment_id: AssignmentId) -> PathBuf {
+    runtime_root
+        .join("staging")
+        .join(format!("assignment-{}", assignment_id.get()))
+}
+
+/// Removes only the exact staging directory created for one assignment. CAS
+/// adoption has already made completed evidence independent of this directory.
+fn remove_assignment_staging(
+    runtime_root: &Path,
+    assignment_id: AssignmentId,
+    staging_root: &Path,
+) -> Result<(), AssignmentRuntimeError> {
+    let expected = assignment_staging_path(runtime_root, assignment_id);
+    if staging_root != expected {
+        return Err(AssignmentRuntimeError::StagingRootMismatch {
+            expected,
+            observed: staging_root.to_owned(),
+        });
+    }
+    let metadata = match fs::symlink_metadata(staging_root) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(AssignmentRuntimeError::Io {
+                operation: "inspect assignment staging root for cleanup",
+                path: staging_root.to_owned(),
+                source,
+            });
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(AssignmentRuntimeError::StagingRootNotDirectory {
+            path: staging_root.to_owned(),
+        });
+    }
+    fs::remove_dir_all(staging_root).map_err(|source| AssignmentRuntimeError::Io {
+        operation: "remove exact assignment staging root",
+        path: staging_root.to_owned(),
+        source,
+    })?;
+    if staging_root.exists() {
+        return Err(AssignmentRuntimeError::StagingCleanupIncomplete {
+            path: staging_root.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn with_cleanup_failure(
+    launch: AssignmentRuntimeError,
+    cleanup: Result<(), AssignmentRuntimeError>,
+) -> AssignmentRuntimeError {
+    match cleanup {
+        Ok(()) => launch,
+        Err(cleanup) => AssignmentRuntimeError::LaunchCleanup {
+            launch: launch.to_string(),
+            cleanup: cleanup.to_string(),
+        },
+    }
 }
 
 struct ApplicationMaterial {
@@ -1364,5 +1499,38 @@ mod tests {
         assert_eq!(reads[0].path.as_str(), "docs/contract.md");
         assert_eq!(reads[0].reason, "application orientation");
         fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn assignment_staging_cleanup_removes_only_the_exact_owned_assignment_root() {
+        let runtime = env::temp_dir().join(format!(
+            "factory-assignment-staging-cleanup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&runtime).unwrap();
+        let runtime = fs::canonicalize(runtime).unwrap();
+        let assignment = AssignmentId::new(7).unwrap();
+        let staging = create_assignment_staging(&runtime, assignment).unwrap();
+        fs::write(staging.join("unsealed-stream"), b"temporary bytes").unwrap();
+        let neighboring = runtime.join("staging").join("assignment-8");
+        fs::create_dir(&neighboring).unwrap();
+        fs::write(neighboring.join("keep"), b"another assignment").unwrap();
+
+        remove_assignment_staging(&runtime, assignment, &staging).unwrap();
+
+        assert!(
+            !staging.exists(),
+            "the terminal assignment staging root must be discarded"
+        );
+        assert_eq!(
+            fs::read(neighboring.join("keep")).unwrap(),
+            b"another assignment",
+            "cleanup must not touch a sibling assignment root"
+        );
+        fs::remove_dir_all(runtime).unwrap();
     }
 }

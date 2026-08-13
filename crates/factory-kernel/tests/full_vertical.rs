@@ -287,14 +287,15 @@ impl Fixture {
             .expect_assignment("Product", self.driver.run_next(&self.daemon).await)
             .await;
         assert_eq!(
-            product.outcome.session.terminal.cost,
+            product.session.terminal.cost,
             factory_protocol::TerminalCostV1::Known(MicroUsd::new(10))
         );
         assert_eq!(
-            product.outcome.session.terminal.session_state,
+            product.session.terminal.session_state,
             factory_protocol::SessionState::Succeeded,
             "Product terminal proves its packet/required-read gate before mutation",
         );
+        self.assert_actor_resources_released(&product, "actor");
         assert!(matches!(
             self.store
                 .ticket_scheduler()
@@ -306,8 +307,6 @@ impl Fixture {
                 ..
             }
         ));
-        self.cleanup_actor(product);
-
         // This bounded application-side read is the sole route from the
         // Product terminal to an external Architect decision. The actor never
         // supplied a ticket revision ID in its socket request.
@@ -351,19 +350,18 @@ impl Fixture {
             )
             .await;
         assert_eq!(
-            engineering.outcome.session.terminal.cost,
+            engineering.session.terminal.cost,
             factory_protocol::TerminalCostV1::Known(MicroUsd::new(10))
         );
         assert_eq!(
-            engineering.outcome.session.terminal.session_state,
+            engineering.session.terminal.session_state,
             factory_protocol::SessionState::Succeeded,
             "Engineering terminal proves its packet/required-read gate before mutation",
         );
-        let engineering_transcript_digest = ContentDigest::of_bytes(
-            &fs::read(engineering.outcome.staging_root.join("session.ndjson.gz"))
-                .expect("Engineering terminal transcript staged before exact seal"),
-        )
-        .to_hex();
+        self.assert_actor_resources_released(&engineering, "actor");
+        let engineering_transcript_digest = self
+            .transcript_digest(engineering.session.session.session_id)
+            .await;
 
         // Hard validation has persisted, but the actor's terminal transcript
         // is the required commit-provenance input.  No ref/commit may exist
@@ -403,8 +401,6 @@ impl Fixture {
             !ref_before_terminal_provenance.status.success(),
             "candidate.submit must not create a local candidate ref before its terminal transcript"
         );
-        self.cleanup_actor(engineering);
-
         // A durable recovery action may be needed before Quality. Bound the
         // resident passes so a future scheduling loop cannot hide here.
         let quality = {
@@ -417,7 +413,7 @@ impl Fixture {
                     .expect("resident downstream pass")
                 {
                     CampaignDriverOutcome::Assignment(outcome) => {
-                        launched_quality = Some(ActorLaunch { outcome });
+                        launched_quality = Some(outcome);
                         break;
                     }
                     CampaignDriverOutcome::HardValidationResumed
@@ -449,26 +445,15 @@ impl Fixture {
             "candidate commit must bind the actual sealed Engineering transcript, not packet bytes: {message}"
         );
         assert_eq!(
-            quality.outcome.session.terminal.cost,
+            quality.session.terminal.cost,
             factory_protocol::TerminalCostV1::Known(MicroUsd::new(10))
         );
         assert_eq!(
-            quality.outcome.session.terminal.session_state,
+            quality.session.terminal.session_state,
             factory_protocol::SessionState::Succeeded,
             "Quality terminal proves its packet/required-read gate before mutation",
         );
-        assert_eq!(
-            fs::read_to_string(quality.outcome.workspace.path().join("reproduce.sh"))
-                .expect("Quality exploratory edit remains in its disposable workspace"),
-            "#!/bin/sh\nprintf 'review-only edit\\n'\n",
-            "the review actor must actually dirty its isolated workspace",
-        );
-        let quality_workspace = quality.outcome.workspace.path().to_owned();
-        self.cleanup_actor(quality);
-        assert!(
-            !quality_workspace.exists(),
-            "Quality's exploratory edit must be discarded with its exact disposable workspace",
-        );
+        self.assert_actor_resources_released(&quality, "review");
 
         assert!(matches!(
             self.driver
@@ -588,7 +573,7 @@ impl Fixture {
         let product = self
             .expect_assignment("Product", self.driver.run_next(&self.daemon).await)
             .await;
-        self.cleanup_actor(product);
+        self.assert_actor_resources_released(&product, "actor");
 
         let ticket = self
             .store
@@ -625,7 +610,8 @@ impl Fixture {
                 self.driver.run_next(&self.daemon).await,
             )
             .await;
-        let engineering_session_id = engineering.outcome.session.session.session_id;
+        let engineering_session_id = engineering.session.session.session_id;
+        self.assert_actor_resources_released(&engineering, "actor");
         let status = self
             .store
             .ticket_store()
@@ -643,8 +629,6 @@ impl Fixture {
             action.candidate_id.get()
         );
         self.assert_candidate_unattached(&candidate_ref).await;
-        self.cleanup_actor(engineering);
-
         let inspection = sqlx::PgPool::connect(&test_database_url())
             .await
             .expect("focused terminal provenance inspection connection");
@@ -769,11 +753,56 @@ impl Fixture {
         );
     }
 
-    fn cleanup_actor(&self, launched: ActorLaunch) {
-        self.git
-            .cleanup_worktree(launched.outcome.workspace)
-            .expect("actor worktree cleanup");
-        let _ = fs::remove_dir_all(launched.outcome.staging_root);
+    fn assert_actor_resources_released(
+        &self,
+        assignment: &AssignmentLaunchOutcome,
+        worktree_kind: &str,
+    ) {
+        let workspace = self
+            .git
+            .runtime_root()
+            .join("worktrees")
+            .join(worktree_kind)
+            .join(format!("assignment-{}", assignment.assignment_id.get()));
+        let staging = self
+            .cas
+            .runtime_root()
+            .join("staging")
+            .join(format!("assignment-{}", assignment.assignment_id.get()));
+        assert!(
+            !workspace.exists(),
+            "terminal actor workspace must be removed: {}",
+            workspace.display()
+        );
+        assert!(
+            !staging.exists(),
+            "terminal actor staging root must be removed: {}",
+            staging.display()
+        );
+    }
+
+    async fn transcript_digest(&self, session_id: factory_protocol::SessionId) -> String {
+        let inspection = sqlx::PgPool::connect(&test_database_url())
+            .await
+            .expect("terminal transcript inspection connection");
+        let row = sqlx::query(
+            "SELECT artifact.digest
+               FROM factory.sessions session
+               JOIN factory.artifacts artifact ON artifact.id = session.transcript_artifact_id
+              WHERE session.id = $1",
+        )
+        .bind(session_id.get())
+        .fetch_one(&inspection)
+        .await
+        .expect("terminal transcript artifact");
+        inspection.close().await;
+        let bytes: Vec<u8> = row.get("digest");
+        ContentDigest::from_bytes(
+            bytes
+                .try_into()
+                .expect("transcript artifact digest is 32 bytes"),
+        )
+        .to_hex()
     }
 
     async fn seal_kernel(&self, label: &str, bytes: &[u8]) -> Sealed {
@@ -835,10 +864,6 @@ impl Sealed {
             byte_length: self.sealed.byte_length(),
         }
     }
-}
-
-struct ActorLaunch {
-    outcome: AssignmentLaunchOutcome,
 }
 
 const ACTOR_SOURCE: &str = r#"
@@ -1276,9 +1301,9 @@ impl Fixture {
         &self,
         action: &str,
         result: Result<CampaignDriverOutcome, factory_kernel::campaign_driver::CampaignDriverError>,
-    ) -> ActorLaunch {
+    ) -> AssignmentLaunchOutcome {
         match result.unwrap_or_else(|error| panic!("resident {action} pass failed: {error}")) {
-            CampaignDriverOutcome::Assignment(outcome) => ActorLaunch { outcome },
+            CampaignDriverOutcome::Assignment(outcome) => outcome,
             CampaignDriverOutcome::CampaignFailed {
                 campaign_id,
                 failure_detail,
