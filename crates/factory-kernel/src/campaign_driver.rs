@@ -251,10 +251,11 @@ impl CampaignDriver {
         let claim = scheduler
             .claim_ready_ticket(
                 DRIVER_PRINCIPAL,
-                &command_id(
-                    "claim",
+                &ticket_claim_command_id(
                     action.campaign_id,
                     action.expected_campaign_revision,
+                    action.ticket.ticket_revision_id,
+                    action.ticket.revision,
                 ),
                 action,
                 requalification,
@@ -566,6 +567,20 @@ fn assignment_command_id(
     }
 }
 
+fn ticket_claim_command_id(
+    campaign_id: CampaignId,
+    campaign_revision: factory_protocol::ExpectedRevision,
+    ticket_revision_id: factory_protocol::TicketRevisionId,
+    ticket_revision: AggregateRevision,
+) -> String {
+    format!(
+        "{}-ticket-revision-{}-tr{}",
+        command_id("claim", campaign_id, campaign_revision),
+        ticket_revision_id.get(),
+        ticket_revision.get(),
+    )
+}
+
 fn downstream_command_id(action: &str, context: DownstreamActionContext) -> String {
     format!(
         "campaign-{}-{}-attempt-{}-candidate-{}-ar{}-cr{}",
@@ -660,6 +675,36 @@ mod tests {
                 DurableAssignmentTarget::Engineering {
                     ticket_attempt_id: TicketAttemptId::new(8).expect("positive attempt"),
                 },
+            ),
+        );
+    }
+
+    #[test]
+    fn ticket_claim_idempotency_key_binds_the_sponsored_revision() {
+        let campaign = CampaignId::new(19).expect("positive campaign");
+        let revision = ExpectedRevision::new(AggregateRevision::from_persisted(2));
+        let first = ticket_claim_command_id(
+            campaign,
+            revision,
+            factory_protocol::TicketRevisionId::new(4).expect("positive ticket revision"),
+            AggregateRevision::from_persisted(7),
+        );
+        assert_eq!(
+            first,
+            ticket_claim_command_id(
+                campaign,
+                revision,
+                factory_protocol::TicketRevisionId::new(4).expect("positive ticket revision"),
+                AggregateRevision::from_persisted(7),
+            ),
+        );
+        assert_ne!(
+            first,
+            ticket_claim_command_id(
+                campaign,
+                revision,
+                factory_protocol::TicketRevisionId::new(4).expect("positive ticket revision"),
+                AggregateRevision::from_persisted(8),
             ),
         );
     }

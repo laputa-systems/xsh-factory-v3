@@ -53,8 +53,10 @@ an idempotency key bound to its campaign, immutable ticket-revision row, and
 current revision, so a retry cannot collide with sealed evidence from its
 earlier attempt. Assignment launch keys additionally bind the Engineering
 attempt (and Quality candidate when applicable), so a release retry cannot
-recover a prior packet/session pair. The raw session archive and typed terminal
-evidence remain available for diagnosis. If a daemon stops after sealing a
+recover a prior packet/session pair. Ticket-claim keys likewise bind that
+sponsored revision, so the claim transition cannot recover an earlier attempt.
+The raw session archive and typed terminal evidence remain available for
+diagnosis. If a daemon stops after sealing a
 complete current-head replay pair but before claiming the ticket, recovery
 verifies and reuses that exact pair; it never mixes a partial pair with a fresh
 observation.
