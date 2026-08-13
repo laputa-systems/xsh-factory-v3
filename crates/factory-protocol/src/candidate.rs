@@ -64,6 +64,10 @@ pub struct CandidatePacketV1 {
     pub regression_tree: RepositoryObjectIdV1,
     pub candidate_tree: RepositoryObjectIdV1,
     /// The portable binary patch proving the accepted pre-fix regression tree.
+    /// It may be empty when Product already captured the reproducer on the
+    /// pristine tree and Engineering's checkpoint introduces no test-only
+    /// delta. The command set, failed log, candidate patch, and hard
+    /// validation remain independently required.
     pub regression_patch: SealedArtifactReferenceV1,
     /// Kernel-owned targeted-command set and complete failure receipt for the
     /// accepted regression checkpoint.
@@ -83,7 +87,7 @@ impl CandidatePacketV1 {
     /// to that same exact candidate before it issues this packet.
     pub fn validate(&self) -> Result<(), ContractError> {
         self.regression_patch
-            .validate("regression binary patch", 16 * 1024 * 1024, false)?;
+            .validate("regression binary patch", 16 * 1024 * 1024, true)?;
         self.regression_command_set.validate(
             "regression checkpoint command set",
             256 * 1024,
@@ -228,6 +232,36 @@ fn validate_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ArtifactId, ContentDigest};
+
+    fn artifact(id: i64, byte: u8, byte_length: u64) -> SealedArtifactReferenceV1 {
+        SealedArtifactReferenceV1 {
+            artifact_id: ArtifactId::new(id).unwrap(),
+            digest: ContentDigest::from_bytes([byte; 32]),
+            byte_length,
+        }
+    }
+
+    fn candidate_packet(regression_patch_length: u64) -> CandidatePacketV1 {
+        CandidatePacketV1 {
+            candidate_id: CandidateId::new(1).unwrap(),
+            ticket_attempt_id: TicketAttemptId::new(2).unwrap(),
+            ticket_revision_id: TicketRevisionId::new(3).unwrap(),
+            base_commit: RepositoryObjectIdV1::parse("a".repeat(40)).unwrap(),
+            base_tree: RepositoryObjectIdV1::parse("b".repeat(40)).unwrap(),
+            regression_tree: RepositoryObjectIdV1::parse("c".repeat(40)).unwrap(),
+            candidate_tree: RepositoryObjectIdV1::parse("d".repeat(40)).unwrap(),
+            regression_patch: artifact(1, 1, regression_patch_length),
+            regression_command_set: artifact(2, 2, 1),
+            regression_log: artifact(3, 3, 1),
+            candidate_patch: artifact(4, 4, 1),
+            engineering_session_id: SessionId::new(4).unwrap(),
+            engineering_report: artifact(5, 5, 1),
+            hard_validation_id: ValidationId::new(5).unwrap(),
+            candidate_commit: RepositoryObjectIdV1::parse("e".repeat(40)).unwrap(),
+            candidate_revision: AggregateRevision::initial(),
+        }
+    }
 
     #[test]
     fn candidate_submission_is_bounded_and_never_requires_actor_sealed_prose() {
@@ -248,5 +282,10 @@ mod tests {
         assert!(RepositoryObjectIdV1::parse("a".repeat(40)).is_ok());
         assert!(RepositoryObjectIdV1::parse("A".repeat(40)).is_err());
         assert!(RepositoryObjectIdV1::parse("a".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn candidate_packet_preserves_an_empty_pristine_regression_checkpoint() {
+        assert!(candidate_packet(0).validate().is_ok());
     }
 }
