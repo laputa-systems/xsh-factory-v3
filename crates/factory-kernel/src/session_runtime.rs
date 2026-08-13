@@ -16,6 +16,7 @@ use std::{
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use factory_protocol::{
@@ -1832,7 +1833,11 @@ where
             return Err(SessionRuntimeError::Store(error));
         }
     };
-    let mut server = unbound_server.bind(identity);
+    let mut server = unbound_server
+        .bind(identity)
+        .with_assignment_read_deadline(Duration::from_millis(
+            request.packet.limits.wall_limit.get(),
+        ))?;
     let admission = admission_line(
         request.packet.assignment_id,
         session.session_id,
