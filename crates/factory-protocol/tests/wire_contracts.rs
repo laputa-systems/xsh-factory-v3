@@ -10,7 +10,7 @@ struct GoldenRequest {
     operation: String,
     client_command_id: String,
     expected_revision: u64,
-    staging_relative_path: String,
+    workspace_relative_path: String,
     byte_limit: u64,
 }
 
@@ -22,7 +22,7 @@ fn request_frame_matches_checked_in_wire_shape() {
         operation: wire::OP_ARTIFACT_SEAL_WORKSPACE_FILE.to_owned(),
         client_command_id: "cmd-1".to_owned(),
         expected_revision: 7,
-        staging_relative_path: "reports/result.json".to_owned(),
+        workspace_relative_path: "reports/result.json".to_owned(),
         byte_limit: 4096,
     };
     let payload = json::to_string(&request);

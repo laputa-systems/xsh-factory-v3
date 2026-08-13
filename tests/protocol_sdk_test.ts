@@ -30,7 +30,7 @@ Deno.test("TypeScript request frame matches the Rust golden payload", async () =
     operation: OPERATION.artifactSealWorkspaceFile,
     client_command_id: "cmd-1",
     expected_revision: 7,
-    staging_relative_path: "reports/result.json",
+    workspace_relative_path: "reports/result.json",
     byte_limit: 4096,
   });
   const payload = new TextDecoder().decode(decodeFrame(frame));
@@ -225,7 +225,7 @@ Deno.test("dropped response retry preserves command identity and payload exactly
   const call = {
     client_command_id: "stable-command",
     expected_revision: 7,
-    staging_relative_path: "reports/result.json",
+    workspace_relative_path: "reports/result.json",
     byte_limit: 4096,
   };
   await assertRejects(() => client.artifactSealWorkspaceFile(call), Error, "dropped");

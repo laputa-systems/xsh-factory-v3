@@ -342,7 +342,7 @@ impl ProcessStore {
 
     /// Seals canonical bytes produced inside the trusted kernel and records
     /// their immutable artifact identity through the ordinary audit path.
-    /// Actor files must use [`Self::adopt_and_register_staged_artifact`].
+    /// Actor files must use [`Self::adopt_and_register_actor_artifact`].
     pub(crate) async fn adopt_and_register_kernel_bytes(
         &self,
         cas: &CasStore,
@@ -377,23 +377,23 @@ impl ProcessStore {
         Ok((sealed, receipt))
     }
 
-    /// Adopts one bounded staging file and registers its immutable CAS identity
+    /// Adopts one bounded actor-owned file and registers its immutable CAS identity
     /// through the ordinary kernel artifact command. A failed registration may
     /// leave an unreferenced CAS object, but never a mutable or unverified row.
-    pub async fn adopt_and_register_staged_artifact(
+    pub async fn adopt_and_register_actor_artifact(
         &self,
         cas: &CasStore,
         principal: &str,
         command_id: &str,
         kernel_build_id: KernelBuildId,
-        staging_root: &std::path::Path,
+        source_root: &std::path::Path,
         relative_path: &std::path::Path,
         byte_limit: u64,
     ) -> Result<(CasArtifact, storage::ArtifactReceipt), StoreError> {
-        let sealed = cas.adopt(staging_root, relative_path)?;
+        let sealed = cas.adopt(source_root, relative_path)?;
         if byte_limit == 0 || sealed.byte_length() > byte_limit {
             return Err(crate::cas::CasError::SizeLimitExceeded {
-                path: staging_root.join(relative_path),
+                path: source_root.join(relative_path),
                 maximum: byte_limit,
                 observed: sealed.byte_length(),
             }

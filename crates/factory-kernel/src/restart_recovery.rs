@@ -362,7 +362,7 @@ async fn register_signed_staging_artifact(
     role: &str,
 ) -> Result<CasArtifact, RestartRecoveryError> {
     let (seal, _) = process
-        .adopt_and_register_staged_artifact(
+        .adopt_and_register_actor_artifact(
             cas,
             RECOVERY_PRINCIPAL,
             &format!("kernel-restart-session-{}-{role}", session.session_id.get()),

@@ -42,7 +42,7 @@ export function createCommonToolAdapters(
     ["workspace_search", "Search the assigned workspace."],
     ["workspace_list", "List the assigned workspace."],
     ["shell", "Run one assigned shell command in the workspace."],
-    ["artifact_seal", "Seal one approved staging file as assignment evidence."],
+    ["artifact_seal", "Seal one workspace file as immutable assignment evidence."],
     ["artifact_read", "Read one allowed sealed assignment evidence artifact."],
     ["product_submit_ticket", "Submit one assigned ticket proposal."],
     ["candidate_checkpoint_regression", "Submit one assigned regression checkpoint."],

@@ -21,8 +21,8 @@ use std::{
 
 use factory_protocol::{
     ArtifactId, AssignmentId, AssignmentPacketV1, ContentDigest, ExpectedRevision, MicroUsd,
-    ReadExactFileV1, RuntimeRelativePath, SessionId, StopReasonV1, TerminalOperationV1,
-    TerminalReportV1, UsageTotalsV1,
+    ReadExactFileV1, RepositoryRelativePath, RuntimeRelativePath, SessionId, StopReasonV1,
+    TerminalOperationV1, TerminalReportV1, UsageTotalsV1,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -847,7 +847,7 @@ impl KernelSessionRpc {
             .map_err(|_| invalid_rpc("session.seal_artifact", "staging path is invalid"))?;
         let (seal, receipt) = self
             .process
-            .adopt_and_register_staged_artifact(
+            .adopt_and_register_actor_artifact(
                 &self.cas,
                 &self.principal,
                 &request.client_command_id,
@@ -911,16 +911,16 @@ impl KernelSessionRpc {
                 "revision or byte limit is outside assignment authority",
             ));
         }
-        let relative = RuntimeRelativePath::parse(request.staging_relative_path)
-            .map_err(|_| invalid_rpc("artifact.seal_workspace_file", "staging path is invalid"))?;
+        let relative = RepositoryRelativePath::parse(request.workspace_relative_path)
+            .map_err(|_| invalid_rpc("artifact.seal_workspace_file", "workspace path is invalid"))?;
         let (seal, receipt) = self
             .process
-            .adopt_and_register_staged_artifact(
+            .adopt_and_register_actor_artifact(
                 &self.cas,
                 &self.principal,
                 &request.client_command_id,
                 self.packet.kernel_build_id,
-                Path::new(self.packet.staging_root.as_str()),
+                Path::new(self.packet.workspace_root.as_str()),
                 Path::new(relative.as_str()),
                 request.byte_limit,
             )
@@ -2282,7 +2282,7 @@ async fn adopt_runtime_artifact(
             }
         })?;
     let (seal, _) = process
-        .adopt_and_register_staged_artifact(
+        .adopt_and_register_actor_artifact(
             cas,
             &request.principal,
             &format!("kernel-session-{}-{role}", session_id.get()),

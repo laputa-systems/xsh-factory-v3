@@ -272,7 +272,7 @@ const TOOL_OPERATIONS: Readonly<Partial<Record<HostToolName, string>>> = {
 
 const TOOL_DESCRIPTIONS: Readonly<Partial<Record<HostToolName, string>>> = {
   workspace_read: "Read exact bytes from one path in the assigned workspace.",
-  artifact_seal: "Seal one approved staging file as assignment evidence.",
+  artifact_seal: "Seal one workspace file as immutable assignment evidence.",
   artifact_read: "Read one sealed upstream evidence item named in this assignment.",
   product_submit_ticket: "Submit one complete reproducible XSH defect proposal.",
   candidate_checkpoint_regression: "Capture and run the regression-only checkpoint.",
@@ -357,13 +357,13 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
       required: [
         "client_command_id",
         "expected_revision",
-        "staging_relative_path",
+        "workspace_relative_path",
         "byte_limit",
       ],
       properties: {
         client_command_id: { type: "string", minLength: 1, maxLength: 160 },
         expected_revision: { type: "integer", minimum: 0 },
-        staging_relative_path: { type: "string", minLength: 1 },
+        workspace_relative_path: { type: "string", minLength: 1 },
         byte_limit: { type: "integer", minimum: 1 },
       },
     };

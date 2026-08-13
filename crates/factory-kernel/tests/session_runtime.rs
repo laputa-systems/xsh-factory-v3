@@ -1409,11 +1409,11 @@ const completed = FAKE_TERMINAL_MODE === "completed" ||
   FAKE_TERMINAL_MODE === "completed_thousand_events";
 if (completed) {
   const evidenceName = "proposal-evidence.txt";
-  await Deno.writeTextFile(`${packet.staging_root}/${evidenceName}`, "sealed proposal evidence\n");
+  await Deno.writeTextFile(`${packet.workspace_root}/${evidenceName}`, "sealed proposal evidence\n");
   const evidence = await call("artifact.seal_workspace_file", {
     client_command_id: "fake-seal-proposal-evidence",
     expected_revision: admission.session_revision,
-    staging_relative_path: evidenceName,
+    workspace_relative_path: evidenceName,
     byte_limit: 1024,
   });
   if (!Number.isSafeInteger(evidence.artifact_id) || evidence.byte_length !== 25) {

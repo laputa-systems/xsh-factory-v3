@@ -313,7 +313,7 @@ read_request!(WorkspaceReadRequest {
     repository_relative_path: String,
 });
 mutating_request!(ArtifactSealWorkspaceFileRequest {
-    staging_relative_path: String,
+    workspace_relative_path: String,
     byte_limit: u64,
 });
 read_request!(ArtifactReadRequest {

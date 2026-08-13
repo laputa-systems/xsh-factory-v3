@@ -881,7 +881,7 @@ export interface WorkspaceReadResponse {
 }
 
 export interface ArtifactSealWorkspaceFileCall extends MutatingCall {
-  readonly staging_relative_path: string;
+  readonly workspace_relative_path: string;
   readonly byte_limit: number;
 }
 export interface ArtifactReadCall {

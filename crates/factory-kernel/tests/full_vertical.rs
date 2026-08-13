@@ -847,7 +847,7 @@ for (const evidence of packet.assignment_evidence) {
   if (read.digest !== evidence.digest || read.byte_length !== evidence.byte_length) throw new Error('assignment evidence mismatch');
   assignmentEvidence.set(evidence.role, dec.decode(Uint8Array.from(atob(read.content_base64), c => c.charCodeAt(0))));
 }
-async function seal(name: string, text: string) { await Deno.writeTextFile(`${packet.staging_root}/${name}`, text); const r = await call('artifact.seal_workspace_file', {client_command_id:`seal-${name}`, expected_revision:admission.session_revision, staging_relative_path:name, byte_limit:131072}); return {artifact_id:r.artifact_id,digest:r.digest,byte_length:r.byte_length}; }
+async function seal(name: string, text: string) { await Deno.writeTextFile(`${packet.workspace_root}/${name}`, text); const r = await call('artifact.seal_workspace_file', {client_command_id:`seal-${name}`, expected_revision:admission.session_revision, workspace_relative_path:name, byte_limit:131072}); return {artifact_id:r.artifact_id,digest:r.digest,byte_length:r.byte_length}; }
 if (ROLE === 'product') {
   const narrative = await seal('narrative.md', 'synthetic behavior remains incorrect\n');
   const evidence = await seal('evidence.md', 'reproducer proves observable divergence\n');

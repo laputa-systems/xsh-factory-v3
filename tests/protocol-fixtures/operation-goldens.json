@@ -48,7 +48,7 @@
       "operation": "artifact.seal_workspace_file",
       "client_command_id": "cmd-1",
       "expected_revision": 7,
-      "staging_relative_path": "reports/result.json",
+      "workspace_relative_path": "reports/result.json",
       "byte_limit": 4096
     },
     "artifact.read": {
