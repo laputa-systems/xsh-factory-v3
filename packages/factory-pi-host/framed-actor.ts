@@ -44,9 +44,14 @@ export class InheritedFrameTransport implements FrameTransport {
       const response = new Promise<Uint8Array>((resolve, reject) => {
         this.#waiting.push({ resolve, reject });
       });
-      this.#reader ??= this.#readResponses();
       try {
         await writeAll(this.#file, frame);
+        // Deno serializes operations on one FsFile resource. Starting the
+        // blocking response read first prevents the request write on an
+        // inherited full-duplex socket and deadlocks both peers. A socket
+        // buffers the response, so enqueue the waiter, write the request, and
+        // only then start the sole response reader.
+        this.#reader ??= this.#readResponses();
       } catch (error) {
         // `#markLost` rejects every queued response. Observe this response's
         // rejection here because the write error itself is the exchange's

@@ -33,6 +33,38 @@ class ShortWriteDuplex {
   close(): void {}
 }
 
+class SerializedResourceDuplex {
+  readonly written: Uint8Array[] = [];
+  readonly #response: Uint8Array;
+  #offset = 0;
+  #writeStarted = false;
+  readBeforeWrite = false;
+
+  constructor(response: Uint8Array) {
+    this.#response = response;
+  }
+
+  write(bytes: Uint8Array): number {
+    this.#writeStarted = true;
+    this.written.push(bytes.slice());
+    return bytes.byteLength;
+  }
+
+  read(target: Uint8Array): number | null {
+    if (!this.#writeStarted) {
+      this.readBeforeWrite = true;
+      throw new Error("serialized resource read started before request write");
+    }
+    if (this.#offset === this.#response.byteLength) return null;
+    const count = Math.min(target.byteLength, this.#response.byteLength - this.#offset);
+    target.set(this.#response.subarray(this.#offset, this.#offset + count));
+    this.#offset += count;
+    return count;
+  }
+
+  close(): void {}
+}
+
 Deno.test("inherited actor transport handles short writes and validates response identity", async () => {
   const response = encodeJsonFrame({
     protocol_version: 1,
@@ -60,6 +92,24 @@ Deno.test("inherited actor transport handles short writes and validates response
   );
   assertEquals(request.operation, "workspace.read");
   assertEquals(request.canonical_path, "AGENTS.md");
+});
+
+Deno.test("inherited full-duplex transport writes before reading one serialized FsFile", async () => {
+  const response = encodeJsonFrame({ operation: "test.response", accepted: true });
+  const file = new SerializedResourceDuplex(response);
+  const transport = new InheritedFrameTransport(file as unknown as Deno.FsFile);
+  assertEquals(
+    decodeJsonFrame(
+      await transport.exchange(encodeJsonFrame({ operation: "test.request", request: true })),
+      "test.response",
+    ),
+    { operation: "test.response", accepted: true },
+  );
+  assertEquals(file.readBeforeWrite, false);
+  assertEquals(decodeJsonFrame(merge(file.written), "test.request"), {
+    operation: "test.request",
+    request: true,
+  });
 });
 
 Deno.test("inherited actor transport stops on a truncated response", async () => {
