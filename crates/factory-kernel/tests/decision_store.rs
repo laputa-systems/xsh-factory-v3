@@ -187,6 +187,43 @@ fn candidate_submission_accepts_an_empty_checkpoint_patch_for_a_ticket_reproduce
     });
 }
 
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn candidate_submission_accepts_controller_recovery_evidence_from_a_newer_build() {
+    smol::block_on(async {
+        let mut fixture = Fixture::new().await;
+        let engineering = fixture.open_session(Office::Engineering).await;
+        // Artifacts are globally content-addressed, so their row records the
+        // first physical sealer. A recovered controller may create fresh
+        // kernel evidence under a newer installed build while the campaign
+        // and session remain pinned to their original admitted build.
+        let recovered_build = install_build(&fixture.store).await;
+        let recovered_report = register(
+            &fixture.store,
+            &recovered_build,
+            "recovered-engineering-report",
+            b"kernel-generated recovery evidence",
+        )
+        .await;
+        let mut command = fixture.candidate_command(
+            &engineering,
+            'b',
+            'd',
+            "candidate-recovered-controller-evidence",
+        );
+        command.engineering_report = recovered_report.reference();
+
+        let candidate = fixture
+            .store
+            .decision_store()
+            .submit_candidate(&command)
+            .await
+            .expect("exact recovered evidence remains admissible");
+        assert_eq!(candidate.state, factory_protocol::CandidateState::Submitted);
+        fixture.store.close().await;
+    });
+}
+
 struct Fixture {
     store: KernelStore,
     build: InstalledBuild,

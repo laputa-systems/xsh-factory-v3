@@ -66,6 +66,13 @@ even when the resident controller was rebuilt. The installed build is recorded
 separately by its qualification/install receipt; recovery does not silently
 rewrite in-flight campaign lineage.
 
+Artifact bytes are globally content-addressed. Their row records the first
+physical sealer, not exclusive campaign provenance, so final authority checks
+the exact sealed digest and byte length. Packet and validation operations still
+independently bind their kernel identity to the campaign; a deduplicated or
+recovery-produced artifact cannot be rejected merely because another build
+sealed identical bytes first.
+
 The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
 tool/protocol failure after a useful checkout can therefore lose an otherwise

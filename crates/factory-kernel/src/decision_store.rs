@@ -438,14 +438,13 @@ impl DecisionStore {
         {
             return Err(DecisionStoreError::CandidateBaseChanged);
         }
-        let build_id = attempt.kernel_build_database_id;
-        require_artifact(&mut tx, &command.changed_paths, build_id).await?;
-        require_artifact(&mut tx, &command.regression_patch, build_id).await?;
-        require_artifact(&mut tx, &command.regression_command_set, build_id).await?;
-        require_artifact(&mut tx, &command.regression_log, build_id).await?;
-        require_artifact(&mut tx, &command.candidate_patch, build_id).await?;
-        require_artifact(&mut tx, &command.engineering_report, build_id).await?;
-        require_artifact(&mut tx, &command.engineering_risks, build_id).await?;
+        require_artifact(&mut tx, &command.changed_paths).await?;
+        require_artifact(&mut tx, &command.regression_patch).await?;
+        require_artifact(&mut tx, &command.regression_command_set).await?;
+        require_artifact(&mut tx, &command.regression_log).await?;
+        require_artifact(&mut tx, &command.candidate_patch).await?;
+        require_artifact(&mut tx, &command.engineering_report).await?;
+        require_artifact(&mut tx, &command.engineering_risks).await?;
         require_session(
             &mut tx,
             command.engineering_session_id,
@@ -620,8 +619,8 @@ impl DecisionStore {
             command.scope.expected_office(),
         )
         .await?;
-        require_artifact(&mut tx, &command.command_set, build_database_id).await?;
-        require_artifact(&mut tx, &command.log, build_database_id).await?;
+        require_artifact(&mut tx, &command.command_set).await?;
+        require_artifact(&mut tx, &command.log).await?;
         if validation_exists(&mut tx, command.candidate_id, command.scope).await? {
             return Err(DecisionStoreError::ValidationAlreadyRecorded {
                 candidate_id: command.candidate_id,
@@ -888,24 +887,9 @@ impl DecisionStore {
             OFFICE_QUALITY,
         )
         .await?;
-        require_artifact(
-            &mut tx,
-            &command.submission.rationale,
-            attempt.kernel_build_database_id,
-        )
-        .await?;
-        require_artifact(
-            &mut tx,
-            &command.submission.risks,
-            attempt.kernel_build_database_id,
-        )
-        .await?;
-        require_artifact(
-            &mut tx,
-            &command.submission.additional_probes,
-            attempt.kernel_build_database_id,
-        )
-        .await?;
+        require_artifact(&mut tx, &command.submission.rationale).await?;
+        require_artifact(&mut tx, &command.submission.risks).await?;
+        require_artifact(&mut tx, &command.submission.additional_probes).await?;
         if review_exists(&mut tx, command.candidate_id).await? {
             return Err(DecisionStoreError::ReviewAlreadySubmitted {
                 candidate_id: command.candidate_id,
@@ -1247,12 +1231,7 @@ impl DecisionStore {
         if review.candidate_id != command.request.candidate_id {
             return Err(DecisionStoreError::ReviewCandidateMismatch);
         }
-        require_artifact(
-            &mut tx,
-            &command.request.rationale,
-            attempt.kernel_build_database_id,
-        )
-        .await?;
+        require_artifact(&mut tx, &command.request.rationale).await?;
         let rejected_review = review.verdict == REVIEW_REJECT;
         let override_is_exact =
             command.request.quality_rejection_override == Some(command.request.review_id);
@@ -1402,7 +1381,7 @@ impl DecisionStore {
         if !deliver_decision_exists(&mut tx, command.candidate_id).await? {
             return Err(DecisionStoreError::ArchitectDeliveryDecisionMissing);
         }
-        require_artifact(&mut tx, &command.receipt, attempt.kernel_build_database_id).await?;
+        require_artifact(&mut tx, &command.receipt).await?;
         let campaign = lock_campaign(&mut tx, attempt.campaign_id).await?;
         require_revision(command.expected_campaign_revision, campaign.revision)?;
         if campaign.lifecycle != CAMPAIGN_RUNNING {
@@ -1566,8 +1545,6 @@ pub enum DecisionStoreError {
     AttemptNotReleasable,
     #[error("artifact custody does not match the sealed reference")]
     ArtifactReferenceMismatch,
-    #[error("artifact was created by a build other than the attempt's pinned build")]
-    ArtifactBuildMismatch,
     #[error("validation kernel build does not match the campaign's pinned build")]
     ValidationBuildMismatch,
     #[error("session does not belong to this campaign, office, or viable lifecycle")]
@@ -2111,10 +2088,9 @@ async fn delivered_attempt_count(
 async fn require_artifact(
     tx: &mut Transaction<'_, Postgres>,
     reference: &SealedArtifactReferenceV1,
-    expected_build_database_id: i64,
 ) -> Result<(), DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT digest, byte_length, creating_kernel_build_id
+        "SELECT digest, byte_length
          FROM factory.artifacts WHERE id = $1",
         reference.artifact_id.get(),
     )
@@ -2123,15 +2099,11 @@ async fn require_artifact(
     .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
     let digest = row.digest;
     let byte_length = row.byte_length;
-    let build_id = row.creating_kernel_build_id;
     if digest.as_slice() != reference.digest.as_bytes()
         || u64::try_from(byte_length).map_err(|_| DecisionStoreError::CorruptState)?
             != reference.byte_length
     {
         return Err(DecisionStoreError::ArtifactReferenceMismatch);
-    }
-    if build_id != expected_build_database_id {
-        return Err(DecisionStoreError::ArtifactBuildMismatch);
     }
     Ok(())
 }

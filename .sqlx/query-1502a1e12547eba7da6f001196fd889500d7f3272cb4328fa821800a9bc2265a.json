@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT digest, byte_length, creating_kernel_build_id\n         FROM factory.artifacts WHERE id = $1",
+  "query": "SELECT digest, byte_length\n         FROM factory.artifacts WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -24,17 +24,6 @@
             "name": "byte_length"
           }
         }
-      },
-      {
-        "ordinal": 2,
-        "name": "creating_kernel_build_id",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "factory.artifacts",
-            "name": "creating_kernel_build_id"
-          }
-        }
       }
     ],
     "parameters": {
@@ -44,9 +33,8 @@
     },
     "nullable": [
       false,
-      false,
       false
     ]
   },
-  "hash": "dc51e6bb1a5da7f5f765f9e0bca808da78aab2088275db3946b5e638d5d0e17a"
+  "hash": "1502a1e12547eba7da6f001196fd889500d7f3272cb4328fa821800a9bc2265a"
 }
