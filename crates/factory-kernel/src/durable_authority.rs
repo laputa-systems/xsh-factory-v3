@@ -56,6 +56,9 @@ const ATTEMPT_HARD_VALIDATION: i16 = 1;
 const ATTEMPT_REWORK_VALIDATION: i16 = 5;
 const ATTEMPT_QUALITY: i16 = 2;
 const ATTEMPT_REWORK_QUALITY: i16 = 6;
+const CLAIM_REQUALIFICATION_PRINCIPAL: &str = "kernel-ticket-claim-requalification";
+const REGISTER_ARTIFACT_OPERATION: &str = "artifact.register";
+const ARTIFACT_AUDIT_SUBJECT: i16 = 3;
 
 /// The daemon's concrete trusted resolver.  It owns only kernel handles and
 /// has no API that accepts actor-provided repository, tree, commit, ticket,
@@ -284,6 +287,21 @@ impl DurableAuthorityResolver {
         let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
             .map_err(|error| error.to_string())?;
         let application = self.load_application(application_revision_id).await?;
+        let prefix = claim_requalification_command_prefix(
+            action.campaign_id.get(),
+            action.ticket.ticket_revision_id.get(),
+            action.ticket.revision.get(),
+        );
+        if let Some((first_actual_observation_artifact_id, second_actual_observation_artifact_id)) =
+            self.requalification_manifest_pair(&prefix).await?
+        {
+            return Ok(crate::ticket_store::CurrentHeadRequalification {
+                current_head_commit: application.repository.snapshot().base_commit().to_string(),
+                current_head_tree: application.repository.snapshot().base_tree().to_string(),
+                first_actual_observation_artifact_id,
+                second_actual_observation_artifact_id,
+            });
+        }
         let proposal_bytes = self
             .artifact_bytes(
                 ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?,
@@ -339,15 +357,10 @@ impl DurableAuthorityResolver {
         // requalification under that campaign's installed build. Scope the
         // idempotency namespace to both durable identities so the latter does
         // not collide with the former.
-        let prefix = claim_requalification_command_prefix(
-            action.campaign_id.get(),
-            action.ticket.ticket_revision_id.get(),
-            action.ticket.revision.get(),
-        );
         let first = seal_command_observation_manifest(
             &process,
             &self.cas,
-            "kernel-ticket-claim-requalification",
+            CLAIM_REQUALIFICATION_PRINCIPAL,
             &format!("{prefix}-first"),
             kernel_build_id,
             reproduction.first(),
@@ -356,7 +369,7 @@ impl DurableAuthorityResolver {
         let second = seal_command_observation_manifest(
             &process,
             &self.cas,
-            "kernel-ticket-claim-requalification",
+            CLAIM_REQUALIFICATION_PRINCIPAL,
             &format!("{prefix}-second"),
             kernel_build_id,
             reproduction.second(),
@@ -969,6 +982,59 @@ impl DurableAuthorityResolver {
                 artifact_id.get()
             )
         })
+    }
+
+    /// A daemon can stop after sealing both current-head replay manifests but
+    /// before it persists the ticket claim. A restarted driver must reuse that
+    /// complete, verified pair: raw command diagnostics can legitimately vary
+    /// between invocations, whereas the sealed status-only manifests are the
+    /// ticket's replay identity. A partial pair is a durable fault rather than
+    /// permission to mix old and new observations.
+    async fn requalification_manifest_pair(
+        &self,
+        command_prefix: &str,
+    ) -> Result<Option<(ArtifactId, ArtifactId)>, String> {
+        let first = self
+            .registered_claim_requalification_manifest(&format!("{command_prefix}-first-manifest"))
+            .await?;
+        let second = self
+            .registered_claim_requalification_manifest(&format!("{command_prefix}-second-manifest"))
+            .await?;
+        requalification_manifest_pair(first, second).map_err(str::to_owned)
+    }
+
+    async fn registered_claim_requalification_manifest(
+        &self,
+        command_id: &str,
+    ) -> Result<Option<ArtifactId>, String> {
+        let row = sqlx::query!(
+            "SELECT subject_id
+               FROM factory.audit_log
+              WHERE principal = $1 AND command_id = $2
+                AND operation = $3 AND subject_kind = $4",
+            CLAIM_REQUALIFICATION_PRINCIPAL,
+            command_id,
+            REGISTER_ARTIFACT_OPERATION,
+            ARTIFACT_AUDIT_SUBJECT,
+        )
+        .fetch_optional(&self.store.pool_for_authority())
+        .await
+        .map_err(db_error)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let artifact_id = ArtifactId::new(row.subject_id).map_err(|error| error.to_string())?;
+        self.store
+            .process_store()
+            .registered_artifact(&self.cas, artifact_id)
+            .await
+            .map_err(|error| {
+                format!(
+                    "requalification manifest artifact {} is unavailable: {error}",
+                    artifact_id.get()
+                )
+            })?;
+        Ok(Some(artifact_id))
     }
 
     async fn exact_bytes(
@@ -2221,6 +2287,17 @@ fn canonical_requalification_observations(
     (first, first)
 }
 
+fn requalification_manifest_pair(
+    first: Option<ArtifactId>,
+    second: Option<ArtifactId>,
+) -> Result<Option<(ArtifactId, ArtifactId)>, &'static str> {
+    match (first, second) {
+        (Some(first), Some(second)) => Ok(Some((first, second))),
+        (None, None) => Ok(None),
+        _ => Err("current-head requalification recovery found only one sealed manifest"),
+    }
+}
+
 fn full_suite_commands(bundle: &ApplicationBundleV1) -> Result<Vec<DeterministicCommand>, String> {
     bundle
         .validation_profiles
@@ -2273,7 +2350,10 @@ fn precondition(message: String) -> ArchitectTransitionResolutionError {
 mod tests {
     use factory_protocol::ArtifactId;
 
-    use super::{canonical_requalification_observations, claim_requalification_command_prefix};
+    use super::{
+        canonical_requalification_observations, claim_requalification_command_prefix,
+        requalification_manifest_pair,
+    };
 
     #[test]
     fn claim_requalification_keys_reuse_only_for_one_exact_sponsored_revision() {
@@ -2293,5 +2373,21 @@ mod tests {
             canonical_requalification_observations(first, second),
             (first, first)
         );
+    }
+
+    #[test]
+    fn requalification_recovery_reuses_only_a_complete_manifest_pair() {
+        let first = ArtifactId::new(41).expect("non-zero artifact id");
+        let second = ArtifactId::new(42).expect("non-zero artifact id");
+        assert_eq!(
+            requalification_manifest_pair(Some(first), Some(second)).expect("complete pair"),
+            Some((first, second)),
+        );
+        assert_eq!(
+            requalification_manifest_pair(None, None).expect("no prior pair"),
+            None,
+        );
+        assert!(requalification_manifest_pair(Some(first), None).is_err());
+        assert!(requalification_manifest_pair(None, Some(second)).is_err());
     }
 }

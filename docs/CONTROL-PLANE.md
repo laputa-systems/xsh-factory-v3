@@ -54,7 +54,10 @@ current revision, so a retry cannot collide with sealed evidence from its
 earlier attempt. Assignment launch keys additionally bind the Engineering
 attempt (and Quality candidate when applicable), so a release retry cannot
 recover a prior packet/session pair. The raw session archive and typed terminal
-evidence remain available for diagnosis.
+evidence remain available for diagnosis. If a daemon stops after sealing a
+complete current-head replay pair but before claiming the ticket, recovery
+verifies and reuses that exact pair; it never mixes a partial pair with a fresh
+observation.
 
 The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
