@@ -156,7 +156,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "7d87ad7f81c834e4e770a20efaaffb9e8289343dfe66308c00f7091f6d0d4b2d",
+        "93e73e897e39d4e47ba381841008ab665d6084a673400f3a72abce8de9da6e1a",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -170,13 +170,17 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "work_complete",
       ],
       model: researchReviewModel,
-      limits: { turn_limit: 24, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
+      // Product must inspect a real language implementation and prove a
+      // deterministic reproducer; 24 turns was exhausted before terminal
+      // submission in the first live campaign. The aggregate cost authority
+      // remains the hard spend bound.
+      limits: { turn_limit: 48, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
     },
     {
       office: "engineering",
       system_template: template(
         "templates/engineering-system.md",
-        "434e61364b69ed7c979275d9f6f30b15bb19f0d751cb7b5a3f108a02f9c5bbfc",
+        "f4f856900042bc84f6862b8605297064150dddb7054c49a3abf8a26fa99c7071",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -197,7 +201,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "quality",
       system_template: template(
         "templates/quality-system.md",
-        "3f907cb105580231ac04261b08e23b846d832d0ea6d92d4e340fa88299f36b68",
+        "de14293ac66d6496c73649f2fe9feea886e8a31caf81c6a98eb920b10e442a29",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(

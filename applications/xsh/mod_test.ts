@@ -25,14 +25,14 @@ const expectedTemplateDigests = {
   "templates/engineering-assignment.md":
     "3160178e4d7c5981d60522f174afa6b43cf275ff863a4b30bc497709a64122b5",
   "templates/engineering-system.md":
-    "434e61364b69ed7c979275d9f6f30b15bb19f0d751cb7b5a3f108a02f9c5bbfc",
+    "f4f856900042bc84f6862b8605297064150dddb7054c49a3abf8a26fa99c7071",
   "templates/mission.md": "238e6ad15801eba875197f4a96aed1345efab91df5728b35864d9ab7c2769bbb",
   "templates/product-assignment.md":
     "45af90aff658aaa330ee42e8fc54f7d2507eb2050d663facc1ffb13a1f7a5122",
-  "templates/product-system.md": "7d87ad7f81c834e4e770a20efaaffb9e8289343dfe66308c00f7091f6d0d4b2d",
+  "templates/product-system.md": "93e73e897e39d4e47ba381841008ab665d6084a673400f3a72abce8de9da6e1a",
   "templates/quality-assignment.md":
     "be05a0a0d56c8dca558d51b955324a52b0f02f5fab0c419dce74cc73f467965e",
-  "templates/quality-system.md": "3f907cb105580231ac04261b08e23b846d832d0ea6d92d4e340fa88299f36b68",
+  "templates/quality-system.md": "de14293ac66d6496c73649f2fe9feea886e8a31caf81c6a98eb920b10e442a29",
 } as const;
 
 const expectedOfficeTemplates: Readonly<Record<OfficeV1, readonly [string, string]>> = {
@@ -73,6 +73,9 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     for (const artifact of [profile.system_template, profile.assignment_template]) {
       const source = templateText(first, artifact.source_path);
       assertNeutral(artifact.source_path, source);
+      if (artifact.source_path.endsWith("-system.md")) {
+        assertExactRequiredReadInstructions(artifact.source_path, source);
+      }
       assertRenderedNeutral(
         artifact.source_path,
         source,
@@ -83,6 +86,17 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     }
   }
 });
+
+function assertExactRequiredReadInstructions(label: string, source: string): void {
+  for (const path of ["AGENTS.md", "docs/CHAPTER-01-why-xsh.md", "docs/TEST-MAP.md"]) {
+    if (!source.includes(`\`${path}\``)) {
+      throw new Error(`${label} does not name required workspace_read path ${path}`);
+    }
+  }
+  if (!source.includes("`workspace_read`") || !source.includes("through `bash`")) {
+    throw new Error(`${label} does not distinguish exact reads from shell inspection`);
+  }
+}
 
 function assertExactTemplateDeclaration(
   compiled: Awaited<ReturnType<typeof compileApplicationV1>>,

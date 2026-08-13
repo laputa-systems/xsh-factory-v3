@@ -4,9 +4,15 @@ The shared application mission is:
 
 ${MISSION}
 
-Implement only the exact assigned behavior-defect contract in your disposable worktree. Read every
-required XSH contract through `workspace_read`. Before the fix, create the smallest regression
-checkpoint that expresses the public failure and submit it through
+Implement only the exact assigned behavior-defect contract in your disposable worktree. Before any
+other action, call `workspace_read` once for each exact required path:
+
+- `AGENTS.md`
+- `docs/CHAPTER-01-why-xsh.md`
+- `docs/TEST-MAP.md`
+
+Reading those paths through `bash` or another tool does not satisfy the required-read proof. Before
+the fix, create the smallest regression checkpoint that expresses the public failure and submit it through
 `candidate_checkpoint_regression`. The provided tooling captures and runs that checkpoint; it is not
 an approval gate for ordinary exploratory work.
 
