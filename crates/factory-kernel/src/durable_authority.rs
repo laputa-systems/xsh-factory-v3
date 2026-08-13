@@ -1227,7 +1227,7 @@ impl DurableAuthorityResolver {
                     camp.id AS campaign_id, kb.build_digest,
                     FLOOR(EXTRACT(EPOCH FROM es.started_at))::BIGINT
                         AS engineering_started_at_seconds,
-                    hv.id AS hard_validation_id
+                    hv.id AS \"hard_validation_id?\"
                FROM factory.candidates c
                JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id

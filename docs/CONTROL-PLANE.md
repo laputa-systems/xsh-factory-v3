@@ -61,6 +61,11 @@ complete current-head replay pair but before claiming the ticket, recovery
 verifies and reuses that exact pair; it never mixes a partial pair with a fresh
 observation.
 
+A recovered assignment packet retains the campaign's admitted kernel identity
+even when the resident controller was rebuilt. The installed build is recorded
+separately by its qualification/install receipt; recovery does not silently
+rewrite in-flight campaign lineage.
+
 The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
 tool/protocol failure after a useful checkout can therefore lose an otherwise

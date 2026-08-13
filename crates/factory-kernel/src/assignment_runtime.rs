@@ -318,7 +318,7 @@ pub async fn materialize_and_launch_assignment(
             assignment_id,
             request.campaign_id,
             request.application_revision_id,
-            installed.kernel_build_id(),
+            assignment_packet_kernel_build(&campaign),
             request.target,
             target.clone(),
             &context,
@@ -343,7 +343,7 @@ pub async fn materialize_and_launch_assignment(
             assignment_id,
             request.campaign_id,
             request.application_revision_id,
-            installed.kernel_build_id(),
+            assignment_packet_kernel_build(&campaign),
             request.target,
             target,
             system.artifact_id,
@@ -870,6 +870,7 @@ fn render_declared_template(
 struct CampaignMaterial {
     revision: AggregateRevision,
     remaining: MicroUsd,
+    kernel_build_id: factory_protocol::KernelBuildId,
 }
 
 async fn current_campaign_material(
@@ -879,9 +880,11 @@ async fn current_campaign_material(
     expected: ExpectedRevision,
 ) -> Result<CampaignMaterial, AssignmentRuntimeError> {
     let row = sqlx::query!(
-        "SELECT revision, aggregate_budget_micro_usd, measured_cost_micro_usd,
-                application_revision_id, lifecycle, cost_state
-           FROM factory.campaigns WHERE id = $1",
+        "SELECT c.revision, c.aggregate_budget_micro_usd, c.measured_cost_micro_usd,
+                c.application_revision_id, c.lifecycle, c.cost_state, kb.build_digest
+           FROM factory.campaigns c
+           JOIN factory.kernel_builds kb ON kb.id = c.kernel_build_id
+          WHERE c.id = $1",
         campaign_id.get(),
     )
     .fetch_optional(&store.pool_for_authority())
@@ -913,10 +916,25 @@ async fn current_campaign_material(
             "campaign has no remaining assignment allowance".to_owned(),
         ));
     }
+    let kernel_build_id = factory_protocol::KernelBuildId::new(ContentDigest::from_bytes(
+        row.build_digest.as_slice().try_into().map_err(|_| {
+            AssignmentRuntimeError::Application("campaign kernel digest is corrupt".to_owned())
+        })?,
+    ));
     Ok(CampaignMaterial {
         revision,
         remaining: MicroUsd::new(remaining),
+        kernel_build_id,
     })
+}
+
+/// The packet is a campaign-lineage record. A recovered controller can be a
+/// newer installed build, but it must not silently rewrite the identity that
+/// was admitted with the campaign while materializing a fresh assignment.
+fn assignment_packet_kernel_build(
+    campaign: &CampaignMaterial,
+) -> factory_protocol::KernelBuildId {
+    campaign.kernel_build_id
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1607,5 +1625,21 @@ mod tests {
             "cleanup must not touch a sibling assignment root"
         );
         fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn assignment_packet_preserves_the_campaign_kernel_identity() {
+        let campaign_build =
+            factory_protocol::KernelBuildId::new(ContentDigest::of_bytes(b"campaign"));
+        let installed_build =
+            factory_protocol::KernelBuildId::new(ContentDigest::of_bytes(b"installed"));
+        let campaign = CampaignMaterial {
+            revision: AggregateRevision::initial(),
+            remaining: MicroUsd::new(1),
+            kernel_build_id: campaign_build,
+        };
+
+        assert_eq!(assignment_packet_kernel_build(&campaign), campaign_build);
+        assert_ne!(assignment_packet_kernel_build(&campaign), installed_build);
     }
 }

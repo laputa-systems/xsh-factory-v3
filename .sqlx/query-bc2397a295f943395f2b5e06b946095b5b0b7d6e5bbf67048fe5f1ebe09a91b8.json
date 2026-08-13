@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT revision, aggregate_budget_micro_usd, measured_cost_micro_usd,\n                application_revision_id, lifecycle, cost_state\n           FROM factory.campaigns WHERE id = $1",
+  "query": "SELECT c.revision, c.aggregate_budget_micro_usd, c.measured_cost_micro_usd,\n                c.application_revision_id, c.lifecycle, c.cost_state, kb.build_digest\n           FROM factory.campaigns c\n           JOIN factory.kernel_builds kb ON kb.id = c.kernel_build_id\n          WHERE c.id = $1",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,17 @@
             "name": "cost_state"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
       }
     ],
     "parameters": {
@@ -81,8 +92,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "0c02692bd33ac9689d4c234bf9751406d13830527a0277e9f430638811603fce"
+  "hash": "bc2397a295f943395f2b5e06b946095b5b0b7d6e5bbf67048fe5f1ebe09a91b8"
 }
