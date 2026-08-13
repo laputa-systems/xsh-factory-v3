@@ -161,6 +161,10 @@ only the explicit source root and bundle-relative path to the local daemon; Rust
 and every declared template, verifies their BLAKE3 identities, and adopts them into CAS. Neither the
 daemon nor a Pi session imports or evaluates `applications/xsh`.
 
+The first registration for a repository also creates the immutable repository binding declared by
+the admitted bundle in the same transaction and with its own audit receipt. Later application
+revisions must name the exact same repository key, canonical path, branch, and delivery mode.
+
 The generated `applications/xsh/bundle.v1.json` is ignored installation output. Register it with
 the canonical `applications/xsh` directory as `--source-root` and `bundle.v1.json` as
 `--bundle-relative-path`, so every declared `templates/*.md` path remains beneath that same root.

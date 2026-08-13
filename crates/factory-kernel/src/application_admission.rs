@@ -15,8 +15,9 @@ use sqlx::{Postgres, Transaction};
 
 use super::{
     ADMIT_APPLICATION_REVISION_OPERATION, APPLICATION_REVISION_SUBJECT, CasArtifact, CasStore,
-    KernelStore, StoreError, aggregate_revision_from_sql, find_idempotent_audit,
-    insert_audit_receipt, require_subject_kind,
+    KernelStore, REGISTER_REPOSITORY_OPERATION, REPOSITORY_SUBJECT, RegisterRepository, StoreError,
+    aggregate_revision_from_sql, find_idempotent_audit, insert_audit_receipt,
+    require_subject_kind,
 };
 use crate::storage::ApplicationRevisionReceipt;
 
@@ -59,7 +60,9 @@ impl KernelStore {
     /// Reads, parses, and admits an application bundle using only the
     /// assigned source root and CAS custody. All physical objects are sealed
     /// before the transaction; a later database failure therefore leaves only
-    /// safe, unreferenced append-only objects.
+    /// safe, unreferenced append-only objects. The first admitted application
+    /// for a repository atomically establishes the exact immutable binding
+    /// declared by its bundle; later admissions must match it.
     pub async fn admit_compiled_application(
         &self,
         cas: &CasStore,
@@ -120,25 +123,77 @@ impl KernelStore {
             });
         }
 
+        let repository_key = inputs.bundle.repository.repository_key.as_str();
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            repository_key
+        )
+        .execute(&mut *transaction)
+        .await?;
         let repository = sqlx::query!(
             "SELECT id, canonical_local_path, default_branch, delivery_mode
              FROM factory.repositories WHERE repository_key = $1",
-            inputs.bundle.repository.repository_key.as_str()
+            repository_key
         )
         .fetch_optional(&mut *transaction)
         .await?;
-        let Some(repository) = repository else {
-            return Err(StoreError::UnknownRepositoryBinding {
-                repository_key: inputs.bundle.repository.repository_key.clone(),
-            });
+        let repository_id = match repository {
+            Some(repository) => {
+                if repository.canonical_local_path
+                    != inputs.bundle.repository.canonical_local_path.as_str()
+                    || repository.default_branch != inputs.bundle.repository.default_branch
+                    || repository.delivery_mode != 0
+                {
+                    return Err(StoreError::RepositoryBindingMismatch);
+                }
+                repository.id
+            }
+            None => {
+                let repository_command = RegisterRepository {
+                    principal: command.principal.clone(),
+                    command_id: format!("application-repository-{}", fingerprint.to_hex()),
+                    expected_revision: ExpectedRevision::new(
+                        factory_protocol::AggregateRevision::initial(),
+                    ),
+                    repository_key: inputs.bundle.repository.repository_key.clone(),
+                    canonical_local_path: inputs
+                        .bundle
+                        .repository
+                        .canonical_local_path
+                        .as_str()
+                        .to_owned(),
+                    default_branch: inputs.bundle.repository.default_branch.clone(),
+                };
+                repository_command.validate()?;
+                let repository_revision = factory_protocol::AggregateRevision::initial().next()?;
+                let repository_id = sqlx::query_scalar!(
+                    "INSERT INTO factory.repositories (
+                         repository_key, canonical_local_path, default_branch,
+                         delivery_mode, revision
+                     ) VALUES ($1, $2, $3, 0, $4)
+                     RETURNING id",
+                    repository_command.repository_key,
+                    repository_command.canonical_local_path,
+                    repository_command.default_branch,
+                    i64::try_from(repository_revision.get())
+                        .map_err(|_| StoreError::RevisionOutOfRange)?,
+                )
+                .fetch_one(&mut *transaction)
+                .await?;
+                insert_audit_receipt(
+                    &mut transaction,
+                    &repository_command.principal,
+                    &repository_command.command_id,
+                    REGISTER_REPOSITORY_OPERATION,
+                    repository_command.fingerprint(),
+                    REPOSITORY_SUBJECT,
+                    repository_id,
+                    repository_revision,
+                )
+                .await?;
+                repository_id
+            }
         };
-        if repository.canonical_local_path != inputs.bundle.repository.canonical_local_path.as_str()
-            || repository.default_branch != inputs.bundle.repository.default_branch
-            || repository.delivery_mode != 0
-        {
-            return Err(StoreError::RepositoryBindingMismatch);
-        }
-        let repository_id = repository.id;
 
         let current = sqlx::query!(
             "SELECT ar.id, ar.aggregate_revision, ba.digest AS bundle_digest

@@ -18,7 +18,7 @@ use factory_kernel::{
     cas::CasStore,
     storage::{
         ActivateApplicationRevision, AdmitCompiledApplication, InstallKernelBuild, KernelStore,
-        RegisterArtifact, RegisterRepository, SCHEMA_IDENTITY,
+        RegisterArtifact, SCHEMA_IDENTITY,
     },
 };
 use factory_protocol::{
@@ -65,18 +65,6 @@ fn real_xsh_bundle_compiles_twice_and_admits_through_typed_cas_authority() {
         let cas = CasStore::new_with_seed(root.join("runtime"), 4 * 1024 * 1024, 17)
             .expect("create isolated CAS");
         let build = install_kernel_build(&store, &cas, &deno, &deno_version, &workspace_root).await;
-        store
-            .register_repository(&RegisterRepository {
-                principal: "operator".to_owned(),
-                command_id: unique("register-xsh-repository"),
-                expected_revision: ExpectedRevision::new(AggregateRevision::initial()),
-                repository_key: bundle.repository.repository_key.clone(),
-                canonical_local_path: bundle.repository.canonical_local_path.as_str().to_owned(),
-                default_branch: bundle.repository.default_branch.clone(),
-            })
-            .await
-            .expect("register the exact repository binding declared by XSH");
-
         let admitted = store
             .admit_compiled_application(
                 &cas,
@@ -91,7 +79,7 @@ fn real_xsh_bundle_compiles_twice_and_admits_through_typed_cas_authority() {
                 },
             )
             .await
-            .expect("admit exact Deno-emitted XSH bundle through CAS custody");
+            .expect("admit the XSH bundle and its first repository binding atomically");
         assert!(!admitted.was_idempotent_retry);
 
         activate_xsh_revision(
@@ -115,6 +103,15 @@ fn real_xsh_bundle_compiles_twice_and_admits_through_typed_cas_authority() {
             view.is_active,
             "typed activation must select the admitted XSH revision"
         );
+        assert!(
+            store
+                .audit_is_consistent()
+                .await
+                .expect("read application material-state audit consistency"),
+            "the derived repository binding must retain its own creation receipt"
+        );
+
+        assert_repository_binding_and_audit(&database_url, &bundle).await;
 
         assert_sealed_template_references(
             &database_url,
@@ -389,6 +386,50 @@ async fn activate_xsh_revision(
         .await
         .expect("activate exact admitted XSH revision");
     assert!(activation.is_active);
+}
+
+async fn assert_repository_binding_and_audit(
+    database_url: &str,
+    bundle: &ApplicationBundleV1,
+) {
+    let pool = PgPool::connect(database_url)
+        .await
+        .expect("open repository inspection connection");
+    let row = sqlx::query(
+        "SELECT r.id, r.canonical_local_path, r.default_branch, r.delivery_mode,
+                count(a.id) AS audit_count
+         FROM factory.repositories AS r
+         JOIN factory.audit_log AS a
+           ON a.subject_kind = 2 AND a.subject_id = r.id
+          AND a.operation = 'repository.register'
+         WHERE r.repository_key = $1
+         GROUP BY r.id",
+    )
+    .bind(bundle.repository.repository_key.as_str())
+    .fetch_one(&pool)
+    .await
+    .expect("read the atomically admitted repository binding and receipt");
+    assert_eq!(
+        row.try_get::<String, _>("canonical_local_path")
+            .expect("repository path"),
+        bundle.repository.canonical_local_path.as_str()
+    );
+    assert_eq!(
+        row.try_get::<String, _>("default_branch")
+            .expect("repository branch"),
+        bundle.repository.default_branch
+    );
+    assert_eq!(
+        row.try_get::<i16, _>("delivery_mode")
+            .expect("repository delivery mode"),
+        0
+    );
+    assert_eq!(
+        row.try_get::<i64, _>("audit_count")
+            .expect("repository audit count"),
+        1
+    );
+    pool.close().await;
 }
 
 async fn assert_sealed_template_references(
