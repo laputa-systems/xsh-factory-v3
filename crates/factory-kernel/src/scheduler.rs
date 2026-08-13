@@ -122,11 +122,22 @@ impl TicketScheduler {
         if !status.campaign_cost_known {
             return SchedulerNextAction::Blocked(SchedulerConstraint::AggregateCostFrozen);
         }
-        if !status.campaign_deadline_open {
-            return SchedulerNextAction::Blocked(SchedulerConstraint::CampaignDeadlineElapsed);
-        }
         if status.paid_session_active {
             return SchedulerNextAction::Blocked(SchedulerConstraint::PaidSessionActive);
+        }
+        if !status.campaign_deadline_open {
+            // A deadline stops paid discovery and implementation work. It
+            // must not strand a candidate that has already passed Quality and
+            // received the Architect's delivery decision: local delivery is
+            // deterministic, costs no provider budget, and is the durable
+            // closeout of work admitted before the deadline.
+            if status.downstream_attempt_count > 0
+                && let Some(action) = status.downstream_action
+                && action.stage == crate::ticket_store::DownstreamActionStage::DeliverAccepted
+            {
+                return SchedulerNextAction::ContinueDownstream(action);
+            }
+            return SchedulerNextAction::Blocked(SchedulerConstraint::CampaignDeadlineElapsed);
         }
         // The read projection pairs the downstream count with its exact FIFO
         // head. A disagreement must stop scheduling rather than skip a
@@ -536,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn cost_deadline_paid_session_and_delivery_target_are_hard_priorities() {
+    fn cost_and_paid_session_gates_precede_expired_campaign_closeout() {
         let complete = TicketBufferStatus {
             delivered_attempt_count: 2,
             campaign_cost_known: false,
@@ -569,6 +580,33 @@ mod tests {
         };
         assert_eq!(
             TicketScheduler::decide(&paid),
+            SchedulerNextAction::Blocked(SchedulerConstraint::PaidSessionActive)
+        );
+
+        let delivery = downstream_action(
+            crate::ticket_store::DownstreamActionStage::DeliverAccepted,
+            17,
+            10,
+            24,
+            5,
+        );
+        let expired_delivery = TicketBufferStatus {
+            campaign_deadline_open: false,
+            downstream_attempt_count: 1,
+            downstream_action: Some(delivery),
+            ..status()
+        };
+        assert_eq!(
+            TicketScheduler::decide(&expired_delivery),
+            SchedulerNextAction::ContinueDownstream(delivery),
+            "deadline expiry blocks paid work, not deterministic local delivery"
+        );
+        let expired_delivery_with_paid_session = TicketBufferStatus {
+            paid_session_active: true,
+            ..expired_delivery
+        };
+        assert_eq!(
+            TicketScheduler::decide(&expired_delivery_with_paid_session),
             SchedulerNextAction::Blocked(SchedulerConstraint::PaidSessionActive)
         );
     }
