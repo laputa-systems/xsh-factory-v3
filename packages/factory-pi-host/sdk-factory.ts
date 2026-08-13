@@ -107,7 +107,13 @@ async function createProductionModelRuntime(packet: PiAssignmentPacket): Promise
     if (apiKey === undefined || apiKey.length === 0) {
       throw new Error("selected provider environment credential is unavailable");
     }
-    await modelRuntime.setRuntimeApiKey(packet.model.provider, apiKey);
+    try {
+      await modelRuntime.setRuntimeApiKey(packet.model.provider, apiKey);
+    } finally {
+      // Pi now owns the process-local credential. Removing the environment
+      // source prevents later actor shell tools from inheriting the secret.
+      Deno.env.delete(credential.name);
+    }
   }
   return modelRuntime;
 }

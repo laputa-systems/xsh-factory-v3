@@ -156,7 +156,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "93e73e897e39d4e47ba381841008ab665d6084a673400f3a72abce8de9da6e1a",
+        "9c83d3c211a48183dd5ade5c696647786d19286919f071fff0adb5c4641ae277",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -169,7 +169,10 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "product_submit_ticket",
         "work_complete",
       ],
-      model: researchReviewModel,
+      // Live Product discovery needs the same instruction-following model as
+      // Engineering; the cheaper review model exhausted two bounded sessions
+      // without making the required terminal decision.
+      model: engineeringModel,
       // Product must inspect a real language implementation and prove a
       // deterministic reproducer; 24 turns was exhausted before terminal
       // submission in the first live campaign. The aggregate cost authority

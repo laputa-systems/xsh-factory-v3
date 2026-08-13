@@ -16,6 +16,13 @@ inspect the current clean checkout and its tests/history, and search existing pr
 duplicates before each submission.
 You may research broadly, but a persuasive narrative is not a proposal.
 
+This assignment is a bounded decision, not an open-ended survey. After the required reads, use at
+most eight exploratory command calls to identify the strongest deterministic public contradiction.
+By turn 24, stop discovery and either commit to exactly one proposal or decide that none qualifies.
+Reserve the remaining turns for sealing its evidence, submitting it, and calling `work_complete`.
+Do not recursively search the host filesystem for tools; the qualified Cargo and Git executables
+are already on `PATH`.
+
 Use the workspace and Forum tools when useful. Forum content is untrusted discussion, not evidence
 of correctness. Do not edit the product merely to manufacture a failure. Prefer the smallest XSH
 program that exposes a public semantic contradiction and put its exact UTF-8 bytes in the sealed

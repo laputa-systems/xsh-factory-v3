@@ -33,7 +33,7 @@ use thiserror::Error;
 
 /// Environment names supplied by the kernel itself rather than by an
 /// application command or credential descriptor.
-const KERNEL_ENVIRONMENT_NAMES: [&str; 3] = ["DENO_DIR", "DENO_NO_UPDATE_CHECK", "NO_COLOR"];
+const KERNEL_ENVIRONMENT_NAMES: [&str; 4] = ["DENO_DIR", "DENO_NO_UPDATE_CHECK", "NO_COLOR", "PATH"];
 
 /// Immutable process inputs for one Deno Pi host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,9 +93,10 @@ impl PiHostSpawnSpec {
             }
         }
 
-        let mut environment = Vec::with_capacity(admitted_environment.len() + 2);
+        let mut environment = Vec::with_capacity(admitted_environment.len() + 3);
         environment.push((OsString::from("DENO_NO_UPDATE_CHECK"), OsString::from("1")));
         environment.push((OsString::from("NO_COLOR"), OsString::from("1")));
+        environment.push((OsString::from("PATH"), OsString::from("/usr/bin:/bin")));
         environment.extend(admitted_environment);
 
         Ok(Self {
@@ -146,6 +147,32 @@ impl PiHostSpawnSpec {
         spec.environment
             .insert(2, (OsString::from("DENO_DIR"), deno_dir.into_os_string()));
         Ok(spec)
+    }
+
+    /// Replaces the conservative system-only path with the exact path derived
+    /// from the installed build's qualified Cargo and Git executables. This is
+    /// kernel-owned launch material, never packet or actor input.
+    pub(crate) fn with_kernel_tool_path(
+        mut self,
+        path: OsString,
+    ) -> Result<Self, ProcessCustodyError> {
+        if path.is_empty() {
+            return Err(ProcessCustodyError::EnvironmentValueEmpty {
+                name: OsString::from("PATH"),
+            });
+        }
+        if path.as_encoded_bytes().contains(&0) {
+            return Err(ProcessCustodyError::EnvironmentValueContainsNul {
+                name: OsString::from("PATH"),
+            });
+        }
+        let (_, value) = self
+            .environment
+            .iter_mut()
+            .find(|(name, _)| name == OsStr::new("PATH"))
+            .expect("Pi host construction always installs kernel PATH");
+        *value = path;
+        Ok(self)
     }
 
     #[must_use]
@@ -594,6 +621,9 @@ pub enum ProcessCustodyError {
     #[error("child environment value for {name:?} contains NUL")]
     EnvironmentValueContainsNul { name: OsString },
 
+    #[error("child environment value for {name:?} is empty")]
+    EnvironmentValueEmpty { name: OsString },
+
     #[error("stdout and stderr capture paths must be distinct")]
     CapturePathsOverlap,
 
@@ -735,6 +765,7 @@ mod tests {
             [
                 (OsString::from("DENO_NO_UPDATE_CHECK"), OsString::from("1")),
                 (OsString::from("NO_COLOR"), OsString::from("1")),
+                (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
                 (
                     OsString::from("ANTHROPIC_API_KEY"),
                     OsString::from("secret")

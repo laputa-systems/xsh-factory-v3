@@ -750,6 +750,7 @@ Deno.test("full-control SDK session constructs offline with the pinned catalog",
       },
     );
     assertEquals(typeof session.prompt, "function");
+    assertEquals(Deno.env.get("FAKE_PROVIDER_KEY"), undefined);
     session.dispose();
   } finally {
     Deno.env.delete("FAKE_PROVIDER_KEY");

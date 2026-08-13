@@ -11,6 +11,7 @@
 
 use std::{
     collections::BTreeSet,
+    env,
     ffi::{OsStr, OsString},
     fs,
     io::{self, Read},
@@ -365,6 +366,32 @@ impl InstalledApprovedToolsQualificationV1 {
         Ok(())
     }
 
+    fn actor_tool_path(&self) -> Result<OsString, InstalledRuntimeError> {
+        let cargo = self
+            .cargo
+            .path
+            .parent()
+            .ok_or(InstalledRuntimeError::ReceiptInvalid {
+                reason: "Cargo executable has no parent directory",
+            })?;
+        let git = self
+            .git
+            .path
+            .parent()
+            .ok_or(InstalledRuntimeError::ReceiptInvalid {
+                reason: "Git executable has no parent directory",
+            })?;
+        let mut directories = Vec::new();
+        for directory in [cargo, git, Path::new("/usr/bin"), Path::new("/bin")] {
+            if !directories.contains(&directory) {
+                directories.push(directory);
+            }
+        }
+        env::join_paths(directories).map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+            reason: "installed approved-tool path cannot be represented",
+        })
+    }
+
     fn command_runner(&self, deno: &Path) -> Result<CommandRunner, InstalledRuntimeError> {
         self.verify_installed_material()?;
         let tools = ApprovedToolExecutables::new(
@@ -648,7 +675,7 @@ impl InstalledKernelBuildReceiptV1 {
         if credential_environment.1.is_empty() {
             return Err(InstalledRuntimeError::CredentialEnvironmentMissing);
         }
-        PiHostSpawnSpec::new_for_assignment(
+        let spawn = PiHostSpawnSpec::new_for_assignment(
             self.runtime.deno_executable.clone(),
             self.runtime.host_entrypoint.clone(),
             self.runtime.deno_config.clone(),
@@ -657,8 +684,8 @@ impl InstalledKernelBuildReceiptV1 {
             actor_source_fd,
             self.runtime.deno_dir.clone(),
             vec![credential_environment],
-        )
-        .map_err(Into::into)
+        )?;
+        Ok(spawn.with_kernel_tool_path(self.approved_tools.actor_tool_path()?)?)
     }
 
     /// Encodes a bounded canonical receipt. This wire format is intentionally
@@ -2198,11 +2225,22 @@ fn verify_credential_environment(
         }
     }
 
+    if environment
+        .iter()
+        .filter(|(name, value)| name == OsStr::new("PATH") && !value.is_empty())
+        .count()
+        != 1
+    {
+        return Err(InstalledRuntimeError::RuntimeDrift {
+            evidence: "Pi host environment omits the kernel-owned approved-tool path",
+        });
+    }
+
     let selected_credential = match &packet.runtime.credential {
         factory_protocol::CredentialDescriptorV1::Environment { name } => Some(name.as_str()),
         factory_protocol::CredentialDescriptorV1::PiAuthStore { .. } => None,
     };
-    let fixed_names = ["DENO_NO_UPDATE_CHECK", "NO_COLOR", "DENO_DIR"];
+    let fixed_names = ["DENO_NO_UPDATE_CHECK", "NO_COLOR", "DENO_DIR", "PATH"];
     for (name, value) in environment {
         let Some(name) = name.to_str() else {
             return Err(InstalledRuntimeError::RuntimeDrift {
@@ -2664,6 +2702,20 @@ mod tests {
             .expect("build exact launch specification");
         let canonical_cache = fs::canonicalize(&fixture.cache).expect("canonical fixture cache");
         assert_eq!(spawn.deno_dir(), Some(canonical_cache.as_path()));
+        let actor_path = spawn
+            .environment()
+            .iter()
+            .find_map(|(name, value)| (name == OsStr::new("PATH")).then_some(value))
+            .expect("kernel-owned actor PATH");
+        let actor_directories = env::split_paths(actor_path).collect::<Vec<_>>();
+        assert!(actor_directories.contains(
+            &fs::canonicalize(fixture.cargo.parent().expect("Cargo parent"))
+                .expect("canonical Cargo parent")
+        ));
+        assert!(actor_directories.contains(
+            &fs::canonicalize(fixture.git.parent().expect("Git parent"))
+                .expect("canonical Git parent")
+        ));
         assert!(
             restored
                 .pi_host_spawn_spec_for_provider(
