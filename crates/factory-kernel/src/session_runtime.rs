@@ -9,7 +9,7 @@
 //! disappears.  No PID scan or process-name lookup is part of this path.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::OpenOptions,
     future::Future,
     io::Write as _,
@@ -40,10 +40,13 @@ use crate::{
     local_transport::{
         ActorConnectionBinding, ActorDisconnect, BoundActorFrame, LocalDaemon, LocalTransportError,
     },
-    process::{ProcessStore, SessionReceipt, StartSession, TerminalArtifactSeals, TerminalReceipt},
+    process::{
+        ProcessStore, ReconciledSessionCancellation, SessionReceipt, StartSession,
+        TerminalArtifactSeals, TerminalReceipt,
+    },
     process_custody::{
-        PiHostSpawnSpec, ProcessCustodyError, ProcessStopReason, ProcessSupervisionSpec,
-        SupervisedProcessOutcome,
+        PiHostSpawnSpec, ProcessCancellation, ProcessCustodyError, ProcessStopReason,
+        ProcessSupervisionSpec, SupervisedProcessOutcome,
     },
     product_runtime::{ExecuteProductProposal, execute_product_proposal},
     storage::StoreError,
@@ -60,6 +63,94 @@ const ARTIFACT_READ_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub const SESSION_STDOUT_RELATIVE_PATH: &str = "stdout.log";
 pub const SESSION_STDERR_RELATIVE_PATH: &str = "stderr.log";
 pub const SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH: &str = "session.ndjson";
+
+/// Daemon-local registry for the one admitted paid process. A cancellation
+/// selects by durable session ID, while the stored handle itself names no PID
+/// and can only stop the `SpawnedPiHost` that minted it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ActiveSessionCancellationRegistry {
+    entries: Arc<Mutex<BTreeMap<SessionId, ActiveSessionCancellationEntry>>>,
+}
+
+#[derive(Debug)]
+struct ActiveSessionCancellationEntry {
+    cancellation: ProcessCancellation,
+    reconciled: smol::channel::Receiver<ReconciledSessionCancellation>,
+}
+
+impl ActiveSessionCancellationRegistry {
+    fn register(
+        &self,
+        session_id: SessionId,
+        cancellation: ProcessCancellation,
+    ) -> Result<ActiveSessionCancellationCompletion, SessionRuntimeError> {
+        let (sender, receiver) = smol::channel::bounded(1);
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| SessionRuntimeError::CancellationRegistryPoisoned)?;
+        if entries.contains_key(&session_id) {
+            return Err(SessionRuntimeError::CancellationRegistryConflict { session_id });
+        }
+        entries.insert(
+            session_id,
+            ActiveSessionCancellationEntry {
+                cancellation,
+                reconciled: receiver,
+            },
+        );
+        drop(entries);
+        Ok(ActiveSessionCancellationCompletion {
+            session_id,
+            sender,
+            entries: Arc::clone(&self.entries),
+        })
+    }
+
+    pub(crate) async fn cancel_and_wait(
+        &self,
+        session_id: SessionId,
+    ) -> Result<ReconciledSessionCancellation, SessionRuntimeError> {
+        let reconciled = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| SessionRuntimeError::CancellationRegistryPoisoned)?;
+            let entry = entries
+                .get(&session_id)
+                .ok_or(SessionRuntimeError::ActiveSessionCancellationMissing { session_id })?;
+            entry.cancellation.request();
+            entry.reconciled.clone()
+        };
+        reconciled
+            .recv()
+            .await
+            .map_err(|_| SessionRuntimeError::CancellationReconciliationClosed { session_id })
+    }
+}
+
+struct ActiveSessionCancellationCompletion {
+    session_id: SessionId,
+    sender: smol::channel::Sender<ReconciledSessionCancellation>,
+    entries: Arc<Mutex<BTreeMap<SessionId, ActiveSessionCancellationEntry>>>,
+}
+
+impl ActiveSessionCancellationCompletion {
+    async fn finish(self, reconciliation: ReconciledSessionCancellation) {
+        let _ = self.sender.send(reconciliation).await;
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.remove(&self.session_id);
+        }
+    }
+}
+
+impl Drop for ActiveSessionCancellationCompletion {
+    fn drop(&mut self) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.remove(&self.session_id);
+        }
+    }
+}
 
 /// A mandatory verifier supplied by the daemon's installed-build authority.
 ///
@@ -324,6 +415,18 @@ pub enum SessionRuntimeError {
 
     #[error("session RPC state mutex was poisoned")]
     RpcStatePoisoned,
+
+    #[error("active-session cancellation registry mutex was poisoned")]
+    CancellationRegistryPoisoned,
+
+    #[error("session {session_id} already has an active cancellation handle")]
+    CancellationRegistryConflict { session_id: SessionId },
+
+    #[error("session {session_id} has no daemon-owned active cancellation handle")]
+    ActiveSessionCancellationMissing { session_id: SessionId },
+
+    #[error("session {session_id} cancellation closed before durable reconciliation")]
+    CancellationReconciliationClosed { session_id: SessionId },
 
     #[error("terminal proposal channel closed before reconciliation")]
     TerminalProposalChannelClosed,
@@ -928,9 +1031,14 @@ impl KernelSessionRpc {
                            FROM factory.candidates c
                            JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                            JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
+                           LEFT JOIN factory.validations qv ON qv.candidate_id = c.id
+                                AND qv.validation_scope = 1 AND qv.lifecycle = 1
+                           LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id
                           WHERE c.id = $1 AND c.ticket_attempt_id = $2
                             AND ta.campaign_id = $3 AND tr.application_revision_id = $4
-                            AND ta.stage IN (2, 6) AND c.lifecycle = 1
+                            AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL
+                            AND (ta.stage IN (2, 6)
+                                 OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))
                          UNION
                          SELECT c.changed_paths_artifact_id FROM factory.candidates c WHERE c.id = $1
                          UNION SELECT c.patch_artifact_id FROM factory.candidates c WHERE c.id = $1
@@ -988,8 +1096,14 @@ impl KernelSessionRpc {
                FROM factory.candidates c
                JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
+               LEFT JOIN factory.validations qv ON qv.candidate_id = c.id
+                    AND qv.validation_scope = 1 AND qv.lifecycle = 1
+               LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id
               WHERE c.id = $1 AND c.ticket_attempt_id = $2 AND ta.campaign_id = $3
-                AND tr.application_revision_id = $4 AND ta.stage IN (2, 6) AND c.lifecycle = 1",
+                AND tr.application_revision_id = $4
+                AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL
+                AND (ta.stage IN (2, 6)
+                     OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))",
             candidate.get(),
             attempt.get(),
             self.packet.campaign_id.get(),
@@ -1703,6 +1817,9 @@ where
             };
         }
     };
+    let cancellation_completion = daemon
+        .active_session_cancellations()
+        .register(session.session_id, cancellation.clone())?;
 
     let identity = match process
         .actor_connection_identity(session.session_id, &request.packet)
@@ -1817,11 +1934,17 @@ where
                     .map_err(|_| SessionRuntimeError::TransportResultChannelClosed)
             },
             async {
-                terminal_receiver
-                    .recv()
-                    .await
-                    .map(FirstStop::Terminal)
-                    .map_err(|_| SessionRuntimeError::TerminalProposalChannelClosed)
+                match terminal_receiver.recv().await {
+                    Ok(proposal) => Ok(FirstStop::Terminal(proposal)),
+                    // The terminal proposal is optional. Its sender is owned
+                    // by the transport task, so closure means the transport
+                    // or child outcome is the authoritative stop signal. Let
+                    // one of those sibling futures win instead of turning an
+                    // ordinary actor exit into an infrastructure failure.
+                    Err(_) => {
+                        std::future::pending::<Result<FirstStop, SessionRuntimeError>>().await
+                    }
+                }
             },
         ),
     )
@@ -1897,6 +2020,13 @@ where
         transport,
     )
     .await?;
+    cancellation_completion
+        .finish(ReconciledSessionCancellation {
+            campaign_id: request.packet.campaign_id,
+            session_id: session.session_id,
+            campaign_revision: terminal.campaign_revision,
+        })
+        .await;
     if let Some(proposal) = terminal_proposal {
         let response = json::to_string(&factory_protocol::OperationReceiptResponse {
             protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
@@ -2146,6 +2276,13 @@ fn infrastructure_stop_reason(
     process: ProcessStopReason,
     transport: SessionTransportStop,
 ) -> StopReasonV1 {
+    // An operator cancellation closes the actor descriptor as a consequence
+    // of terminating the exact owned group. Preserve the initiating custody
+    // reason instead of misclassifying that expected peer close as a daemon
+    // disconnect.
+    if process == ProcessStopReason::Cancelled {
+        return StopReasonV1::Cancelled;
+    }
     if transport == SessionTransportStop::PeerDisconnected {
         return StopReasonV1::DaemonDisconnected;
     }

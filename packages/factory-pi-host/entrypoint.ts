@@ -1,6 +1,7 @@
 import { MAX_ASSIGNMENT_PACKET_BYTES, readSessionAdmissionFrame } from "./transcript.ts";
 import { canonicalJson } from "../factory-sdk/protocol.ts";
 import { type PiHostDependencies, runAssignment } from "./host.ts";
+import { ASSIGNMENT_EVIDENCE_ROLES_V1 } from "./types.ts";
 import type {
   ArtifactSealer,
   AuthorityAdmissionFrame,
@@ -466,30 +467,6 @@ function assignmentEvidenceRole(
   value: unknown,
   field: string,
 ): PiAssignmentPacket["assignment_evidence"][number]["role"] {
-  return oneOf(value, [
-    "ticket_proposal",
-    "ticket_narrative",
-    "ticket_evidence",
-    "reproducer_command",
-    "reproducer_stdin",
-    "reproducer_expected_stdout",
-    "reproducer_expected_stderr",
-    "reproducer_first_actual_stdout",
-    "reproducer_first_actual_stderr",
-    "reproducer_second_actual_stdout",
-    "reproducer_second_actual_stderr",
-    "regression_patch",
-    "regression_command_set",
-    "regression_log",
-    "changed_paths",
-    "candidate_patch",
-    "engineering_report",
-    "engineering_risks",
-    "hard_validation_command_set",
-    "hard_validation_log",
-    "quality_additional_probes",
-    "quality_rationale",
-    "quality_risks",
-    "external_decision_rationale",
-  ], field) as PiAssignmentPacket["assignment_evidence"][number]["role"];
+  return oneOf(value, ASSIGNMENT_EVIDENCE_ROLES_V1, field) as
+    PiAssignmentPacket["assignment_evidence"][number]["role"];
 }

@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT bundle_artifact_id, mission_artifact_id,\n                product_research_system_template_artifact_id,\n                product_research_assignment_template_artifact_id,\n                engineering_system_template_artifact_id,\n                engineering_assignment_template_artifact_id,\n                quality_system_template_artifact_id,\n                quality_assignment_template_artifact_id\n           FROM factory.application_revisions WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bundle_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "bundle_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "mission_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "mission_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "product_research_system_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "product_research_system_template_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "product_research_assignment_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "product_research_assignment_template_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "engineering_system_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "engineering_system_template_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "engineering_assignment_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "engineering_assignment_template_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "quality_system_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "quality_system_template_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "quality_assignment_template_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "quality_assignment_template_artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c59f7947d5e1a983242ba6be5d300d4a172a4266f974c09a79d3a1be41e63d7f"
+}

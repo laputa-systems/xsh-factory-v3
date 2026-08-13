@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.revision AS attempt_revision, tr.id AS ticket_revision_id,\n                    tr.revision AS ticket_revision, tr.proposal_artifact_id,\n                    tr.reproducer_artifact_id, tr.expected_observation_artifact_id,\n                    tr.discovery_observation_artifact_id, t.id AS ticket_id\n               FROM factory.ticket_attempts ta\n               JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n               JOIN factory.tickets t ON t.id = tr.ticket_id\n              WHERE ta.id = $1 AND ta.campaign_id = $2 AND tr.application_revision_id = $3\n                AND ta.stage IN (0, 4)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "proposal_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "reproducer_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2c04e90974020655742ebfcace4ea58931c367410fdcca35d48c8eb63b993500"
+}

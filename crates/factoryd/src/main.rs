@@ -6,7 +6,7 @@
 //! HTTP listener.
 
 use std::{
-    env, io,
+    env, fs, io,
     path::{Path, PathBuf},
     process::ExitCode,
     sync::Arc,
@@ -214,6 +214,11 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     let store = KernelStore::connect(&args.database_url).await?;
     let result: Result<(), Box<dyn std::error::Error>> = async {
         store.migrate_and_verify().await?;
+
+        // `factoryctl` selects a build-specific cache beneath the runtime
+        // root. Installation is the one phase allowed to populate it; later
+        // daemon and assignment preflights are strictly cached-only.
+        fs::create_dir_all(&args.deno_dir)?;
 
         let runtime = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
             deno_executable: args.deno_executable.clone(),
@@ -587,7 +592,7 @@ mod tests {
             let binary = root.join("factoryd");
             fs::write(
                 &binary,
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.4\\n'; exit 0; fi\nif [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then for value in \"$@\"; do entrypoint=\"$value\"; done; printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"}]}' \"$entrypoint\" \"$entrypoint\"; exit 0; fi\nif { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\nexit 17\n",
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.4\\n'; exit 0; fi\nif [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then for value in \"$@\"; do entrypoint=\"$value\"; done; printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"}]}' \"$entrypoint\" \"$entrypoint\"; exit 0; fi\nif [ \"$1\" = \"cache\" ]; then exit 0; fi\nif { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\nexit 17\n",
             )
             .expect("fake Deno/kernel binary");
             let mut permissions = fs::metadata(&binary)

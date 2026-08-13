@@ -22,8 +22,9 @@ use factory_protocol::{
     AggregateRevision, ArchitectDecideCandidateRequest, ArchitectDecisionKindV1,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, CampaignId, CampaignReceiptResponse,
-    CampaignSessionCostResponse, CampaignStatusResponse, CandidateDecisionRequestV1, CandidateId,
-    ConflictResponse, ContractError, DownstreamArchitectDecisionEvidenceResponse,
+    CampaignSessionCostAggregateResponse, CampaignSessionCostResponse, CampaignStatusResponse,
+    CandidateDecisionRequestV1, CandidateId, ConflictResponse, ContractError,
+    DownstreamArchitectDecisionEvidenceResponse,
     DownstreamEvidenceResponse, DownstreamReviewEvidenceResponse,
     DownstreamValidationEvidenceResponse, ErrorResponse, ExpectedRevision, FrameError,
     OP_ARCHITECT_DECIDE_CANDIDATE, OP_ARCHITECT_RELEASE_TICKET_ATTEMPT,
@@ -40,11 +41,15 @@ use crate::{
         CandidateDecisionReceipt, DecideCandidate, DecisionStore, DecisionStoreError,
         ReleaseReceipt, ReleaseTicketAttempt, SponsorTicket, SponsorshipReceipt,
     },
-    process::{CampaignReceipt, CancelCampaign, ProcessStore, StartCampaign},
+    process::{
+        CampaignCancellationAdmission, CampaignReceipt, CancelCampaign, ProcessStore,
+        StartCampaign,
+    },
     scheduler::{SchedulerConstraint, SchedulerNextAction, TicketScheduler},
     storage::StoreError,
     ticket_store::CurrentHeadRequalification,
     ticket_store::TicketStore,
+    session_runtime::{ActiveSessionCancellationRegistry, SessionRuntimeError},
 };
 
 type DecisionFuture<'a, T> =
@@ -546,6 +551,7 @@ impl OperatorCampaignCapability {
 pub(crate) struct CampaignOperatorRpc {
     process: ProcessStore,
     tickets: TicketStore,
+    active_sessions: ActiveSessionCancellationRegistry,
 }
 
 impl CampaignOperatorRpc {
@@ -553,8 +559,13 @@ impl CampaignOperatorRpc {
         _capability: OperatorCampaignCapability,
         process: ProcessStore,
         tickets: TicketStore,
+        active_sessions: ActiveSessionCancellationRegistry,
     ) -> Self {
-        Self { process, tickets }
+        Self {
+            process,
+            tickets,
+            active_sessions,
+        }
     }
 
     /// Dispatches one typed campaign operation. Campaign status is a pair of
@@ -633,11 +644,23 @@ impl CampaignOperatorRpc {
             .campaign_session_costs(campaign_id, None, 20)
             .await
             .map_err(CampaignOperationRejection::Store)?;
+        let product_identity = self
+            .process
+            .campaign_product_identity(campaign_id)
+            .await
+            .map_err(CampaignOperationRejection::Store)?;
+        let session_cost_aggregates = self
+            .process
+            .campaign_session_cost_aggregates(campaign_id)
+            .await
+            .map_err(CampaignOperationRejection::Store)?;
         Ok(campaign_status_response(
             request.request_id,
             campaign,
             &buffer,
+            product_identity,
             &session_costs,
+            &session_cost_aggregates,
         ))
     }
 
@@ -648,17 +671,32 @@ impl CampaignOperatorRpc {
             OP_OPERATOR_CANCEL_CAMPAIGN,
         )
         .map_err(CampaignOperationRejection::Frame)?;
-        let receipt = self
+        let command = CancelCampaign {
+            principal: request.principal,
+            command_id: request.client_command_id,
+            expected_revision: expected_revision(request.expected_revision),
+            campaign_id: CampaignId::new(request.campaign_id)
+                .map_err(CampaignOperationRejection::Contract)?,
+        };
+        let receipt = match self
             .process
-            .cancel_campaign(&CancelCampaign {
-                principal: request.principal,
-                command_id: request.client_command_id,
-                expected_revision: expected_revision(request.expected_revision),
-                campaign_id: CampaignId::new(request.campaign_id)
-                    .map_err(CampaignOperationRejection::Contract)?,
-            })
+            .admit_campaign_cancellation(&command)
             .await
-            .map_err(CampaignOperationRejection::Store)?;
+            .map_err(CampaignOperationRejection::Store)?
+        {
+            CampaignCancellationAdmission::Completed(receipt) => receipt,
+            CampaignCancellationAdmission::ActiveSession { session_id } => {
+                let reconciled = self
+                    .active_sessions
+                    .cancel_and_wait(session_id)
+                    .await
+                    .map_err(CampaignOperationRejection::Session)?;
+                self.process
+                    .finish_campaign_cancellation(&command, reconciled)
+                    .await
+                    .map_err(CampaignOperationRejection::Store)?
+            }
+        };
         Ok(campaign_receipt_response(
             request.request_id,
             OP_OPERATOR_CANCEL_CAMPAIGN,
@@ -681,6 +719,7 @@ enum CampaignOperationRejection {
     Frame(FrameError),
     Contract(ContractError),
     Store(StoreError),
+    Session(SessionRuntimeError),
 }
 
 impl CampaignOperationRejection {
@@ -701,6 +740,12 @@ impl CampaignOperationRejection {
                 request_id,
                 operation,
                 campaign_store_error_code(&error),
+                &error.to_string(),
+            ),
+            Self::Session(error) => error_response(
+                request_id,
+                operation,
+                "campaign_cancellation_failed",
                 &error.to_string(),
             ),
             Self::Contract(error) => error_response(
@@ -743,7 +788,9 @@ fn campaign_status_response(
     request_id: String,
     campaign: crate::process::CampaignStatus,
     buffer: &crate::ticket_store::TicketBufferStatus,
+    product_identity: crate::process::CampaignProductIdentity,
     session_costs: &[crate::process::SessionCostBreakdown],
+    session_cost_aggregates: &[crate::process::SessionCostAggregate],
 ) -> Vec<u8> {
     let (measured_cost_state, measured_cost_micro_usd, remaining_budget_micro_usd) =
         campaign_cost_projection(campaign.measured_cost, campaign.aggregate_budget);
@@ -822,6 +869,10 @@ fn campaign_status_response(
         deadline_unix_millis: campaign.deadline_unix_millis,
         delivery_target: campaign.delivery_target,
         failure_reason: campaign.failure_reason,
+        base_commit: product_identity.base_commit,
+        candidate_tree: product_identity.candidate_tree,
+        candidate_commit: product_identity.candidate_commit,
+        delivered_commit: product_identity.delivered_commit,
         delivered_attempt_count: buffer.delivered_attempt_count,
         ready_ticket_count: buffer.ready_count,
         proposed_ticket_count: buffer.proposed_count,
@@ -856,6 +907,20 @@ fn campaign_status_response(
                     cost_micro_usd,
                     elapsed_millis: session.elapsed_millis,
                 }
+            })
+            .collect(),
+        session_cost_aggregates: session_cost_aggregates
+            .iter()
+            .map(|aggregate| CampaignSessionCostAggregateResponse {
+                office: office_name(aggregate.office).to_owned(),
+                model_provider: aggregate.model_provider.clone(),
+                model_id: aggregate.model_id.clone(),
+                outcome: session_state_name(aggregate.outcome).to_owned(),
+                session_count: aggregate.session_count,
+                accounted_cost_micro_usd: aggregate.accounted_cost_micro_usd,
+                pending_cost_session_count: aggregate.pending_cost_session_count,
+                unknown_cost_session_count: aggregate.unknown_cost_session_count,
+                exceeded_cost_session_count: aggregate.exceeded_cost_session_count,
             })
             .collect(),
     })

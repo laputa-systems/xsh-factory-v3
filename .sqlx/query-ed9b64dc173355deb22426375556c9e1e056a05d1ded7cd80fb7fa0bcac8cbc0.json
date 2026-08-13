@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.campaigns SET measured_cost_micro_usd = $1, cost_state = $2, lifecycle = $3, failure_reason = $4, revision = $5 WHERE id = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int2",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed9b64dc173355deb22426375556c9e1e056a05d1ded7cd80fb7fa0bcac8cbc0"
+}

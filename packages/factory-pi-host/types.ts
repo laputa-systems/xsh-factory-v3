@@ -52,32 +52,37 @@ export interface RequiredReadAssertion {
 
 /** Closed upstream evidence named in a signed assignment packet. The host
  * passes this exact identity to `artifact.read`; text in TARGET is only a
- * readable rendering of the same packet facts. */
-export type AssignmentEvidenceRoleV1 =
-  | "ticket_proposal"
-  | "ticket_narrative"
-  | "ticket_evidence"
-  | "reproducer_command"
-  | "reproducer_stdin"
-  | "reproducer_expected_stdout"
-  | "reproducer_expected_stderr"
-  | "reproducer_first_actual_stdout"
-  | "reproducer_first_actual_stderr"
-  | "reproducer_second_actual_stdout"
-  | "reproducer_second_actual_stderr"
-  | "regression_patch"
-  | "regression_command_set"
-  | "regression_log"
-  | "changed_paths"
-  | "candidate_patch"
-  | "engineering_report"
-  | "engineering_risks"
-  | "hard_validation_command_set"
-  | "hard_validation_log"
-  | "quality_additional_probes"
-  | "quality_rationale"
-  | "quality_risks"
-  | "external_decision_rationale";
+ * readable rendering of the same packet facts. These wire labels are also
+ * rendered into worker-visible evidence maps, so keep them product/task
+ * vocabulary rather than exposing the surrounding authority structure. */
+export const ASSIGNMENT_EVIDENCE_ROLES_V1 = [
+  "ticket_proposal",
+  "ticket_narrative",
+  "ticket_evidence",
+  "reproducer_command",
+  "reproducer_stdin",
+  "reproducer_expected_stdout",
+  "reproducer_expected_stderr",
+  "reproducer_first_actual_stdout",
+  "reproducer_first_actual_stderr",
+  "reproducer_second_actual_stdout",
+  "reproducer_second_actual_stderr",
+  "regression_patch",
+  "regression_command_set",
+  "regression_log",
+  "changed_paths",
+  "candidate_patch",
+  "engineering_report",
+  "engineering_risks",
+  "hard_validation_command_set",
+  "hard_validation_log",
+  "quality_additional_probes",
+  "quality_rationale",
+  "quality_risks",
+  "external_decision_rationale",
+] as const;
+
+export type AssignmentEvidenceRoleV1 = typeof ASSIGNMENT_EVIDENCE_ROLES_V1[number];
 
 export interface AssignmentEvidenceReferenceV1 {
   readonly role: AssignmentEvidenceRoleV1;

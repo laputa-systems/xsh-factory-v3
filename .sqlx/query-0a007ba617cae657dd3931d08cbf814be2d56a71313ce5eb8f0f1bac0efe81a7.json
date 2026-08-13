@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, ticket_attempt_id, base_commit, candidate_tree, lifecycle, revision,\n                candidate_commit\n         FROM factory.candidates WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "ticket_attempt_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "candidate_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_commit"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0a007ba617cae657dd3931d08cbf814be2d56a71313ce5eb8f0f1bac0efe81a7"
+}

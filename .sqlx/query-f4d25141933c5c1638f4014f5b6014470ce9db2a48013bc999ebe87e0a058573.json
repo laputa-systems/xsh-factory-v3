@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ticket_revision_id, ticket_attempt_id, candidate_id\n         FROM factory.architect_decisions WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "ticket_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "ticket_attempt_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "candidate_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f4d25141933c5c1638f4014f5b6014470ce9db2a48013bc999ebe87e0a058573"
+}

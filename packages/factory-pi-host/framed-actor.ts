@@ -263,6 +263,39 @@ const TOOL_OPERATIONS: Readonly<Partial<Record<HostToolName, string>>> = {
   forum_post: "forum.post",
 };
 
+const TOOL_DESCRIPTIONS: Readonly<Partial<Record<HostToolName, string>>> = {
+  workspace_read: "Read exact bytes from one path in the assigned workspace.",
+  artifact_seal: "Seal one approved staging file as assignment evidence.",
+  artifact_read: "Read one sealed upstream evidence item named in this assignment.",
+  product_submit_ticket: "Submit one complete reproducible XSH defect proposal.",
+  candidate_checkpoint_regression: "Capture and run the regression-only checkpoint.",
+  candidate_submit: "Submit the completed XSH change for exact validation.",
+  quality_run_full_suite: "Run the assigned full validation suite on the exact candidate.",
+  quality_submit_review: "Submit the independent review of the exact candidate.",
+  work_complete: "Complete this assignment without another proposal.",
+  forum_read: "Read assigned discussion material.",
+  forum_write: "Write assigned discussion material.",
+  forum_search: "Search discussion history with bounded filters and continuation.",
+  forum_list_topics: "List discussion topics by recent activity.",
+  forum_list_threads: "List threads in one discussion topic by recent activity.",
+  forum_read_thread: "Read a bounded chronological page of discussion posts.",
+  forum_create_topic: "Create one persistent discussion topic.",
+  forum_create_thread: "Create one persistent thread beneath a discussion topic.",
+  forum_post: "Append an immutable discussion post, reply, correction, or supersession.",
+};
+
+const FORUM_POST_KINDS = [
+  "Note",
+  "Question",
+  "Finding",
+  "Proposal",
+  "Challenge",
+  "Correction",
+  "DecisionLink",
+] as const;
+
+const EMPTY_INPUT_SCHEMA = { type: "object", additionalProperties: false } as const;
+
 /** Converts admitted tool names into assigned operation-specific wrappers. */
 export function createFramedToolAdapters(
   client: FramedActorClient,
@@ -278,61 +311,286 @@ export function createFramedToolAdapters(
         .includes(name)
     ) return [];
     if (operation === undefined) throw new Error(`no framed operation for ${name}`);
+    const description = TOOL_DESCRIPTIONS[name];
+    if (description === undefined) throw new Error(`no model-visible description for ${name}`);
     return [{
       name,
       sdk_definition: {
-        description: `Assigned ${name} operation.`,
-        input_schema: name === "workspace_read"
-          ? {
-            type: "object",
-            additionalProperties: false,
-            required: ["repository_relative_path"],
-            properties: {
-              repository_relative_path: { type: "string", minLength: 1 },
-            },
+        description,
+        input_schema: modelToolInputSchema(name),
+        invoke: async (input: unknown) => {
+          try {
+            const result = await client.call(operation, modelToolWireInput(name, input));
+            return modelVisibleToolResult(name, result);
+          } catch {
+            // Wire and authority diagnostics remain in host/kernel evidence.
+            // A model sees only a task-level failure, never internal service
+            // names, lifecycle identities, or transport wording.
+            throw new Error(`The assigned ${name} operation failed.`);
           }
-          : name === "artifact_seal"
-          ? {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "client_command_id",
-              "expected_revision",
-              "staging_relative_path",
-              "byte_limit",
-            ],
-            properties: {
-              client_command_id: { type: "string", minLength: 1, maxLength: 160 },
-              expected_revision: { type: "integer", minimum: 0 },
-              staging_relative_path: { type: "string", minLength: 1 },
-              byte_limit: { type: "integer", minimum: 1 },
-            },
-          }
-          : name === "artifact_read"
-          ? {
-            type: "object",
-            additionalProperties: false,
-            required: ["artifact_id", "expected_digest"],
-            properties: {
-              artifact_id: { type: "integer", minimum: 1 },
-              expected_digest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-            },
-          }
-          : name === "product_submit_ticket"
-          ? PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1
-          : name === "candidate_checkpoint_regression"
-          ? CANDIDATE_CHECKPOINT_REGRESSION_INPUT_SCHEMA_V1
-          : name === "candidate_submit"
-          ? CANDIDATE_SUBMIT_INPUT_SCHEMA_V1
-          : name === "quality_run_full_suite"
-          ? QUALITY_RUN_FULL_SUITE_INPUT_SCHEMA_V1
-          : name === "quality_submit_review"
-          ? QUALITY_SUBMIT_REVIEW_INPUT_SCHEMA_V1
-          : { type: "object", additionalProperties: false },
-        invoke: (input: unknown) => client.call(operation, input),
+        },
       },
     }];
   });
+}
+
+function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unknown>> {
+  if (name === "workspace_read") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["repository_relative_path"],
+      properties: { repository_relative_path: { type: "string", minLength: 1 } },
+    };
+  }
+  if (name === "artifact_seal") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "client_command_id",
+        "expected_revision",
+        "staging_relative_path",
+        "byte_limit",
+      ],
+      properties: {
+        client_command_id: { type: "string", minLength: 1, maxLength: 160 },
+        expected_revision: { type: "integer", minimum: 0 },
+        staging_relative_path: { type: "string", minLength: 1 },
+        byte_limit: { type: "integer", minimum: 1 },
+      },
+    };
+  }
+  if (name === "artifact_read") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["artifact_id", "expected_digest"],
+      properties: {
+        artifact_id: { type: "integer", minimum: 1 },
+        expected_digest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      },
+    };
+  }
+  if (name === "product_submit_ticket") return PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1;
+  if (name === "candidate_checkpoint_regression") {
+    return CANDIDATE_CHECKPOINT_REGRESSION_INPUT_SCHEMA_V1;
+  }
+  if (name === "candidate_submit") return CANDIDATE_SUBMIT_INPUT_SCHEMA_V1;
+  if (name === "quality_run_full_suite") return QUALITY_RUN_FULL_SUITE_INPUT_SCHEMA_V1;
+  if (name === "quality_submit_review") return QUALITY_SUBMIT_REVIEW_INPUT_SCHEMA_V1;
+  if (name === "forum_list_topics") return forumListSchema();
+  if (name === "forum_list_threads") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["topic_id", "limit"],
+      properties: {
+        topic_id: { type: "integer", minimum: 1 },
+        cursor: { type: ["string", "null"], maxLength: 512 },
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+      },
+    };
+  }
+  if (name === "forum_search") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["query", "limit"],
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 4096 },
+        topic_id: { type: ["integer", "null"], minimum: 1 },
+        thread_id: { type: ["integer", "null"], minimum: 1 },
+        post_kind: { enum: [...FORUM_POST_KINDS, null] },
+        created_after_micros: { type: ["integer", "null"], minimum: 0 },
+        created_before_micros: { type: ["integer", "null"], minimum: 0 },
+        cursor: { type: ["string", "null"], maxLength: 512 },
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+      },
+    };
+  }
+  if (name === "forum_read_thread") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["thread_id", "limit"],
+      properties: {
+        thread_id: { type: "integer", minimum: 1 },
+        after_post_id: { type: ["integer", "null"], minimum: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+      },
+    };
+  }
+  if (name === "forum_create_topic") {
+    return forumMutationSchema({
+      name: { type: "string", minLength: 1, maxLength: 160 },
+      description: { type: "string", maxLength: 4096 },
+    }, ["name", "description"]);
+  }
+  if (name === "forum_create_thread") {
+    return forumMutationSchema({
+      topic_id: { type: "integer", minimum: 1 },
+      title: { type: "string", minLength: 1, maxLength: 240 },
+    }, ["topic_id", "title"]);
+  }
+  if (name === "forum_post") {
+    return forumMutationSchema({
+      thread_id: { type: "integer", minimum: 1 },
+      kind: { enum: FORUM_POST_KINDS },
+      body: { type: "string", maxLength: 16_384 },
+      reply_to: { type: ["integer", "null"], minimum: 1 },
+      supersedes: { type: ["integer", "null"], minimum: 1 },
+      attachments: {
+        type: "array",
+        maxItems: 8,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["artifact_id", "label"],
+          properties: {
+            artifact_id: { type: "integer", minimum: 1 },
+            label: { type: "string", maxLength: 160 },
+          },
+        },
+      },
+    }, ["thread_id", "kind", "body"]);
+  }
+  return EMPTY_INPUT_SCHEMA;
+}
+
+function forumListSchema(): Readonly<Record<string, unknown>> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["limit"],
+    properties: {
+      cursor: { type: ["string", "null"], maxLength: 512 },
+      limit: { type: "integer", minimum: 1, maximum: 20 },
+    },
+  };
+}
+
+function forumMutationSchema(
+  properties: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["client_command_id", "expected_revision", ...required],
+    properties: {
+      client_command_id: { type: "string", minLength: 1, maxLength: 160 },
+      expected_revision: { type: "integer", minimum: 0 },
+      ...properties,
+    },
+  };
+}
+
+function modelToolWireInput(name: HostToolName, input: unknown): unknown {
+  const value = object(input) ?? {};
+  if (name === "forum_list_topics") {
+    return { cursor: value.cursor ?? "", limit: value.limit };
+  }
+  if (name === "forum_list_threads") {
+    return { topic_id: value.topic_id, cursor: value.cursor ?? "", limit: value.limit };
+  }
+  if (name === "forum_search") {
+    const kind = value.post_kind;
+    return {
+      query: value.query,
+      topic_id: value.topic_id ?? null,
+      thread_id: value.thread_id ?? null,
+      author_office: null,
+      post_kind: kind == null ? null : FORUM_POST_KINDS.indexOf(kind as never),
+      created_after_micros: value.created_after_micros ?? null,
+      created_before_micros: value.created_before_micros ?? null,
+      cursor: value.cursor ?? "",
+      limit: value.limit,
+    };
+  }
+  if (name === "forum_read_thread") {
+    return {
+      thread_id: value.thread_id,
+      after_post_id: value.after_post_id ?? 0,
+      limit: value.limit,
+    };
+  }
+  if (name === "forum_post") {
+    return {
+      ...value,
+      kind: FORUM_POST_KINDS.indexOf(value.kind as never),
+      reply_to: value.reply_to ?? null,
+      supersedes: value.supersedes ?? null,
+      attachments: value.attachments ?? [],
+    };
+  }
+  return input;
+}
+
+const HIDDEN_MODEL_RESULT_FIELDS = new Set([
+  "protocol_version",
+  "request_id",
+  "operation",
+  "audit_id",
+  "aggregate_revision",
+  "author_kind",
+]);
+const HIDDEN_MODEL_RESULT_FIELD_VOCABULARY =
+  /(?:^|_)(?:architect|campaign|company|control_plane|daemon|director|factory|kernel|office|sponsor)(?:_|$)/u;
+
+/** Removes transport receipts and organizational attribution while retaining
+ * the task evidence a worker actually needs. Text bodies and sealed file
+ * contents remain byte-for-byte evidence and are never rewritten here. */
+export function modelVisibleToolResult(name: HostToolName, value: unknown): unknown {
+  const visible = stripHiddenModelResultFields(value);
+  if (
+    [
+      "product_submit_ticket",
+      "work_complete",
+      "forum_create_topic",
+      "forum_create_thread",
+      "forum_post",
+    ].includes(name) && isEmptyRecord(visible)
+  ) return { accepted: true };
+  if (
+    (name === "forum_search" || name === "forum_read_thread") &&
+    visible !== null && typeof visible === "object" && !Array.isArray(visible)
+  ) {
+    const page = visible as Record<string, unknown>;
+    const items = Array.isArray(page.items)
+      ? page.items.map((item) => {
+        if (item === null || typeof item !== "object" || Array.isArray(item)) return item;
+        const record = item as Record<string, unknown>;
+        const kind = record.kind;
+        return {
+          ...record,
+          ...(typeof kind === "number" && FORUM_POST_KINDS[kind] !== undefined
+            ? { kind: FORUM_POST_KINDS[kind] }
+            : {}),
+        };
+      })
+      : page.items;
+    return { ...page, items };
+  }
+  return visible;
+}
+
+function stripHiddenModelResultFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripHiddenModelResultFields);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) =>
+        !HIDDEN_MODEL_RESULT_FIELDS.has(key) &&
+        !HIDDEN_MODEL_RESULT_FIELD_VOCABULARY.test(key)
+      )
+      .map(([key, item]) => [key, stripHiddenModelResultFields(item)]),
+  );
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === 0;
 }
 
 /**

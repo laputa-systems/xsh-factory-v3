@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.stage, tr.proposal_artifact_id, tr.reproducer_artifact_id,\n                            tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id\n                       FROM factory.ticket_attempts ta\n                       JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                      WHERE ta.id = $1 AND ta.campaign_id = $2\n                        AND tr.application_revision_id = $3 AND ta.stage IN (0, 4)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stage",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "proposal_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "reproducer_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "976daaa813b9c15151f54dfacd5bcdc7cb118707b20e75801d8f7f9e5f7ae56b"
+}

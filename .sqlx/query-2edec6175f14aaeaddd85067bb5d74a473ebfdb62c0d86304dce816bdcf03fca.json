@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT to_regclass('factory.application_revision_templates')::TEXT\n             AS \"relation?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "relation?",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2edec6175f14aaeaddd85067bb5d74a473ebfdb62c0d86304dce816bdcf03fca"
+}

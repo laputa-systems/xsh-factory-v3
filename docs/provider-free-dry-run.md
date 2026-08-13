@@ -50,7 +50,9 @@ drops a database. Before invoking it, the operator must provide all of the follo
 PostgreSQL/filesystem administration:
 
 - `FACTORY_ACCEPTANCE_POSTGRES_URL`: one exact `factory_test_v3_<digits>` database for the ordinary
-  serial PostgreSQL, ticket, decision, and SQLx checks;
+  serial PostgreSQL (including ticket authority) and SQLx checks;
+- `FACTORY_ACCEPTANCE_DECISION_URL`: a distinct exact `factory_test_v3_<digits>` database for the
+  candidate-to-delivery decision authority judge;
 - `FACTORY_ACCEPTANCE_XSH_BUNDLE_URL`: a distinct, fresh exact
   `factory_test_v3_<digits>` database for the real XSH compile-twice and typed Rust/CAS/activation
   boundary judge;
@@ -60,18 +62,21 @@ PostgreSQL/filesystem administration:
 - the source database/runtime root and blank restore database/runtime root required by the backup
   variables in the next section.
 
-The target runs `make check`, then the ordinary PostgreSQL subset, ticket/decision judges, SQLx
-metadata check, real XSH bundle admission, generic vertical, and backup/restore qualification in
-that order. The XSH bundle and generic vertical deliberately receive their own fresh databases: the
-first migrates and activates the actual compiled application, while the second asserts one unseeded
+The target validates that those four exact database names are pairwise distinct, then runs `make
+check`, the ordinary PostgreSQL subset, decision judge, SQLx metadata check, real XSH bundle
+admission, generic vertical, and backup/restore qualification in that order. Ticket authority is
+already covered by the ordinary PostgreSQL subset; there is no separate ticket-acceptance database.
+The XSH bundle and generic vertical deliberately receive their own fresh databases: the first
+migrates and activates the actual compiled application, while the second asserts one unseeded
 Product proposal and exactly three sessions. Ordinary fixtures would invalidate both facts. The
 backup target separately requires an exact blank `factory_restore_v3_<digits>` clone. These
 boundaries prove isolation rather than hiding shared state behind a broad cleanup command.
 
 ```sh
 FACTORY_ACCEPTANCE_POSTGRES_URL='postgresql://USER@localhost/factory_test_v3_<digits>' \
-FACTORY_ACCEPTANCE_XSH_BUNDLE_URL='postgresql://USER@localhost/factory_test_v3_<other-digits>' \
-FACTORY_ACCEPTANCE_VERTICAL_URL='postgresql://USER@localhost/factory_test_v3_<other-digits>' \
+FACTORY_ACCEPTANCE_DECISION_URL='postgresql://USER@localhost/factory_test_v3_<different-digits>' \
+FACTORY_ACCEPTANCE_XSH_BUNDLE_URL='postgresql://USER@localhost/factory_test_v3_<third-digits>' \
+FACTORY_ACCEPTANCE_VERTICAL_URL='postgresql://USER@localhost/factory_test_v3_<fourth-digits>' \
 FACTORY_BACKUP_SOURCE_DATABASE_URL='postgresql://USER@localhost/factory_v3_live' \
 FACTORY_BACKUP_SOURCE_RUNTIME_ROOT='/absolute/path/to/live-runtime' \
 FACTORY_BACKUP_RESTORE_DATABASE_URL='postgresql://USER@localhost/factory_restore_v3_<digits>' \
@@ -130,14 +135,17 @@ The check invokes `pg_dump --format=custom`, `pg_restore --exit-on-error` into t
 and the ignored Rust restore-integrity judge. That judge rechecks schema identity, audit/material
 consistency, every artifact's canonical CAS object/digest/length, and reloads the restored current
 installed-build receipt to requalify its local host source, tools, and frozen Deno cache. The Deno
-wrapper fingerprints bounded logical schema, audit, artifact, installed-material, and sequence
-summaries for the source and clone databases, plus the source/clone CAS trees, with SHA-256 before
-and after. It deliberately excludes physical relation/database sizes: PostgreSQL MVCC and indexes
-may grow during the clone-only corruption probes even after their logical values are repaired. The
-source must not change and the clone must return to the restored logical state after those probes. It refuses
-shared PostgreSQL host/port/database targets, shared runtime roots, symlinks/non-regular CAS
-entries, a nonempty target root, a database containing user relations/types/functions, or an
-existing dump file.
+wrapper fingerprints stable logical schema shape and identity, exact SQLx migration rows, every
+logical table row, and exact sequence values for the source and clone databases, plus every
+source/clone CAS path, byte length, and file digest, with SHA-256 before and after. It first requires
+the restored database and CAS to equal the source pair. It deliberately excludes deparsed DDL
+parentheses, physical relation/index sizes, tuple locations, and MVCC counters: PostgreSQL may
+normalize the first during restore, while the latter may change during clone-only corruption probes
+even after every logical value is repaired. The source pair must remain unchanged, and the clone
+must return to the exact restored logical/CAS state after the probes. It refuses shared PostgreSQL
+host/port/database targets, overlapping runtime roots (including canonical path aliases),
+symlinks/non-regular CAS entries, a nonempty target root, a database containing user
+relations/types/functions, or an existing dump file.
 
 ## Real XSH prerequisite qualification
 
@@ -195,7 +203,7 @@ populated it:
 EXPLAIN (ANALYZE, BUFFERS, SETTINGS, SUMMARY)
 SELECT id
 FROM factory.forum_posts
-WHERE search_vector @@ websearch_to_tsquery('simple', 'unique scale marker');
+WHERE search_vector @@ websearch_to_tsquery('simple', 'quasar1729 swan');
 
 SELECT
   pg_relation_size('factory.forum_posts_search_gin'::regclass) AS post_gin_bytes,
@@ -203,10 +211,11 @@ SELECT
   pg_total_relation_size('factory.forum_posts'::regclass) AS post_total_bytes;
 ```
 
-Capture the `Execution Time`, planning time, buffer hits/reads, and three byte values in the dry-run
-evidence. The plan should use the post GIN index for the selective query. A sequential scan after
-`ANALYZE` and a warm cache is a diagnosis to resolve, not a reason to silently weaken the query-plan
-judge.
+Capture the natural plan's `Execution Time`, planning time, buffer hits/reads, and three byte values
+in the dry-run evidence. The typed query-plan judge separately uses `SET LOCAL enable_seqscan=off`
+and must reach `forum_posts_search_gin`. If the natural planner selects a sequential scan after
+`ANALYZE` and a warm cache, record and compare both paths; do not silently report the forced plan as
+natural or weaken the query-plan judge.
 
 For a same-session memory observation, an operator with the necessary PostgreSQL privilege may run
 this _after_ the `EXPLAIN` in that same `psql` connection:
@@ -218,6 +227,35 @@ FROM pg_backend_memory_contexts;
 
 This is diagnostic-only. It must not become a privileged daemon requirement, a persisted metric, or
 a fixed memory limit until a measured environment demands one.
+
+### Recorded Forum scale evidence — 2026-08-13
+
+Collected at `2026-08-13T02:07:20Z` on macOS 26.5.2 (`25F84`), arm64 Apple M1 Pro, 10 logical
+CPUs, and 32 GiB RAM, using PostgreSQL 18.4 (Homebrew). The exact fresh disposable database was
+`factory_test_v3_178658669747647`. The ignored typed judge
+`forum_store_database_tests::forum_search_cursor_and_snippet_are_stable_after_activity_changes`
+passed in 1.17 seconds and left 1,028 posts: three initial fixtures, 1,024 scale-corpus posts, and
+one post-activity cursor fixture. Exactly 16 posts matched `quasar1729 swan` in either word order.
+
+After `ANALYZE` and one warm selective count in the same `psql` session, the unforced `EXPLAIN
+(ANALYZE, BUFFERS, SETTINGS, SUMMARY)` chose a sequential scan: 16 rows, 1,012 removed, 29 shared
+buffer hits, 0 reads, 0.060 ms planning with 4 planning-buffer hits, and 0.110 ms execution. No
+nondefault setting appeared in the plan; relevant server settings were `shared_buffers=128MB`,
+`effective_cache_size=4GB`, `work_mem=4MB`, `random_page_cost=4`, and
+`effective_io_concurrency=16`.
+
+The judge's separate read-only reachability diagnostic uses `SET LOCAL enable_seqscan=off`. Under
+that exact setting the measured plan was a bitmap index scan on `forum_posts_search_gin` followed by
+a bitmap heap scan: 16 rows, 21 index-buffer hits, 14 exact heap blocks, 35 total execution-buffer
+hits, 0 reads, 1.812 ms planning with 175 planning-buffer hits, and 0.380 ms execution. On this
+small fully cached 29-page heap, the natural sequential plan was faster; the forced diagnostic
+proves the GIN path is valid without misreporting it as the natural cost choice.
+
+The GIN index was 163,840 bytes, the heap was 237,568 bytes, and the table including indexes and
+TOAST was 622,592 bytes. The privileged same-session `pg_backend_memory_contexts` observation
+succeeded after the natural plan: 2,173,592 total bytes and 1,334,024 used bytes. These are
+machine-specific observations, not persisted metrics or acceptance ceilings. The disposable
+database was dropped after capture.
 
 ## Transcript and write-amplification evidence
 
@@ -239,7 +277,7 @@ operate only on synthetic state.
 | Drill                             | Focused judge                                                                                                                                                       | Required result                                                                                                                                              |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Daemon crash / partial transcript | `cargo test -p factory-kernel --test process_lifecycle daemon_restart_reconciles_exact_group_and_freezes_unknown_cost_without_resume -- --ignored --test-threads=1` | Reconcile only the recorded PGID, preserve a structurally readable partial transcript when available, mark cost unknown, freeze admission, and never resume. |
-| Explicit cancellation             | `cargo test -p factory-kernel --test process_lifecycle tranche5_lifecycle_judges -- --ignored --test-threads=1`                                                     | Cancellation refuses a running session until process custody ends, then records a terminal campaign without rolling back evidence.                           |
+| Explicit cancellation             | `cargo test -p factory-kernel --test session_runtime operator_cancellation_stops_and_reconciles_the_exact_live_fake_actor -- --ignored --test-threads=1`           | The operator closes admission, terminates and directly waits only the exact active process group, preserves terminal evidence, then durably cancels the campaign. |
 | Unknown cost                      | `cargo test -p factory-kernel --test session_runtime real_deno_fake_actor_unknown_cost_fails_closed_without_a_resume -- --ignored --test-threads=1`                 | One fresh actor session becomes terminal, campaign cost is `Unknown`, and no second paid admission succeeds.                                                 |
 | 1,000 transcript events           | `cargo test -p factory-kernel --test session_runtime real_deno_fake_actor_with_one_thousand_events_has_bounded_postgres_writes -- --ignored --test-threads=1`       | Real Deno fake actor seals 1,000 NDJSON events and the durable row delta stays bounded.                                                                      |
 | Dirty product checkout            | `cargo test -p factory-kernel --test git_custody qualification_rejects_dirty_and_moved_primary_head`                                                                | Qualification fails closed before a worktree or candidate is created.                                                                                        |
@@ -344,7 +382,7 @@ Seeded Product task authorized: no
 Pinned provider/model profiles reviewed (Product, Engineering, Quality):
 Required XSH reads and full-suite argv reviewed:
 Provider-free qualification receipt and date:
-Forum scale diagnostic evidence location:
+Forum scale diagnostic evidence location: docs/provider-free-dry-run.md#recorded-forum-scale-evidence--2026-08-13
 Backup/CAS/installed-build manifest location:
 
 Architect sponsorship authority confirmed: yes/no

@@ -70,6 +70,7 @@ Deno.test("XSH Product policy exposes the bounded buffer and repeatable proposal
   assert(product !== undefined);
   assert(product.tools.includes("product_submit_ticket"));
   assert(product.tools.includes("work_complete"));
+  assert(!product.tools.includes("artifact_read"));
   for (
     const tool of [
       "workspace_read",

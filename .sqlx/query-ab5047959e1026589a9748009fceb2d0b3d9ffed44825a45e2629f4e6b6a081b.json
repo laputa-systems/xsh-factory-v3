@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.base_commit, c.candidate_tree, tr.proposal_artifact_id,\n                            tr.ticket_id, tr.id AS ticket_revision_id, v.id AS validation_id\n                       FROM factory.candidates c\n                       JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n                       JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                       JOIN factory.validations v ON v.candidate_id = c.id\n                            AND v.validation_scope = 0 AND v.lifecycle = 1\n                       LEFT JOIN factory.validations qv ON qv.candidate_id = c.id\n                            AND qv.validation_scope = 1 AND qv.lifecycle = 1\n                       LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id\n                      WHERE c.id = $1 AND c.ticket_attempt_id = $2\n                        AND ta.campaign_id = $3 AND tr.application_revision_id = $4\n                        AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL\n                        AND (ta.stage IN (2, 6)\n                             OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "proposal_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "validation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ab5047959e1026589a9748009fceb2d0b3d9ffed44825a45e2629f4e6b6a081b"
+}

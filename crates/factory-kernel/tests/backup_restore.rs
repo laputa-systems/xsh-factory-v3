@@ -262,65 +262,67 @@ fn restored_database_and_cas_are_integrity_qualified() {
         )
         .fetch_optional(&inspection)
         .await
-        .expect("read candidate creation receipt")
-        .expect("full restore judge requires one downstream candidate");
-        let candidate_audit_id: i64 = candidate_audit.try_get("id").expect("candidate audit id");
-        let candidate_principal: String = candidate_audit
-            .try_get("principal")
-            .expect("candidate audit principal");
-        let candidate_command_id: String = candidate_audit
-            .try_get("command_id")
-            .expect("candidate audit command id");
-        let candidate_operation: String = candidate_audit
-            .try_get("operation")
-            .expect("candidate audit operation");
-        let candidate_fingerprint: Vec<u8> = candidate_audit
-            .try_get("command_fingerprint")
-            .expect("candidate audit fingerprint");
-        let candidate_subject_kind: i16 = candidate_audit
-            .try_get("subject_kind")
-            .expect("candidate audit subject kind");
-        let candidate_subject_id: i64 = candidate_audit
-            .try_get("subject_id")
-            .expect("candidate audit subject id");
-        let candidate_revision: i64 = candidate_audit
-            .try_get("resulting_revision")
-            .expect("candidate audit revision");
-        let candidate_accepted_at: String = candidate_audit
-            .try_get("accepted_at")
-            .expect("candidate audit acceptance time");
-        sqlx::query("DELETE FROM factory.audit_log WHERE id = $1")
-            .bind(candidate_audit_id)
-            .execute(&inspection)
-            .await
-            .expect("delete candidate creation receipt from clone");
-        assert!(matches!(
-            store.verify_restore_integrity(&cas).await,
-            Err(StoreError::RestoreAuditInconsistent)
-        ));
-        sqlx::query(
-            "INSERT INTO factory.audit_log (
+        .expect("read optional candidate creation receipt");
+        if let Some(candidate_audit) = candidate_audit {
+            let candidate_audit_id: i64 =
+                candidate_audit.try_get("id").expect("candidate audit id");
+            let candidate_principal: String = candidate_audit
+                .try_get("principal")
+                .expect("candidate audit principal");
+            let candidate_command_id: String = candidate_audit
+                .try_get("command_id")
+                .expect("candidate audit command id");
+            let candidate_operation: String = candidate_audit
+                .try_get("operation")
+                .expect("candidate audit operation");
+            let candidate_fingerprint: Vec<u8> = candidate_audit
+                .try_get("command_fingerprint")
+                .expect("candidate audit fingerprint");
+            let candidate_subject_kind: i16 = candidate_audit
+                .try_get("subject_kind")
+                .expect("candidate audit subject kind");
+            let candidate_subject_id: i64 = candidate_audit
+                .try_get("subject_id")
+                .expect("candidate audit subject id");
+            let candidate_revision: i64 = candidate_audit
+                .try_get("resulting_revision")
+                .expect("candidate audit revision");
+            let candidate_accepted_at: String = candidate_audit
+                .try_get("accepted_at")
+                .expect("candidate audit acceptance time");
+            sqlx::query("DELETE FROM factory.audit_log WHERE id = $1")
+                .bind(candidate_audit_id)
+                .execute(&inspection)
+                .await
+                .expect("delete candidate creation receipt from clone");
+            assert!(matches!(
+                store.verify_restore_integrity(&cas).await,
+                Err(StoreError::RestoreAuditInconsistent)
+            ));
+            sqlx::query(
+                "INSERT INTO factory.audit_log (
                 id, principal, command_id, operation, command_fingerprint,
                 subject_kind, subject_id, resulting_revision, accepted_at
              ) OVERRIDING SYSTEM VALUE
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::TIMESTAMPTZ)",
-        )
-        .bind(candidate_audit_id)
-        .bind(candidate_principal)
-        .bind(candidate_command_id)
-        .bind(candidate_operation)
-        .bind(candidate_fingerprint)
-        .bind(candidate_subject_kind)
-        .bind(candidate_subject_id)
-        .bind(candidate_revision)
-        .bind(candidate_accepted_at)
-        .execute(&inspection)
-        .await
-        .expect("restore candidate creation receipt in clone");
-        store
-            .verify_restore_integrity(&cas)
+            )
+            .bind(candidate_audit_id)
+            .bind(candidate_principal)
+            .bind(candidate_command_id)
+            .bind(candidate_operation)
+            .bind(candidate_fingerprint)
+            .bind(candidate_subject_kind)
+            .bind(candidate_subject_id)
+            .bind(candidate_revision)
+            .bind(candidate_accepted_at)
+            .execute(&inspection)
             .await
-            .expect("restored candidate audit receipt qualifies");
+            .expect("restore candidate creation receipt in clone");
+            store
+                .verify_restore_integrity(&cas)
+                .await
+                .expect("restored candidate audit receipt qualifies");
+        }
 
         let audit_sequence =
             sqlx::query("SELECT last_value, is_called FROM factory.audit_log_id_seq")

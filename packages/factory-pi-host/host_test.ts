@@ -5,6 +5,7 @@ import { ModelRuntime } from "@pi/coding-agent";
 import {
   type ArtifactSealer,
   type ArtifactSealReceipt,
+  ASSIGNMENT_EVIDENCE_ROLES_V1,
   builtinPiToolNames,
   createCommonToolAdapters,
   createEphemeralCredentialStore,
@@ -118,20 +119,42 @@ Deno.test("model-visible tool descriptors hide control-plane vocabulary", () => 
     "quality_run_full_suite",
     "quality_submit_review",
     "work_complete",
+    "forum_search",
+    "forum_list_topics",
+    "forum_list_threads",
+    "forum_read_thread",
+    "forum_create_topic",
+    "forum_create_thread",
+    "forum_post",
   ]);
   const forum = createForumTools(new ForumAdapter(noTransport));
+  const common = createCommonToolAdapters({
+    artifact_seal: () => Promise.resolve({ accepted: true }),
+    artifact_read: () => Promise.resolve({ content_base64: "" }),
+  });
   const forbidden =
-    /\b(?:architect|campaign|company|cto|daemon|department|director|employee|factory|kernel|manager|office|organization|sponsor)\b/iu;
-  for (const tool of [...framed, ...forum]) {
+    /\b(?:architect|campaign|company|control[- ]plane|cto|daemon|department|director|employee|factory|kernel|manager|office|organization|sponsor)\b/iu;
+  for (const tool of [...framed, ...forum, ...common]) {
     const descriptor = "sdk_definition" in tool ? tool.sdk_definition : tool;
     const visible = JSON.stringify({
       name: tool.name,
       description: descriptor.description,
       input_schema: descriptor.input_schema,
     });
-    const match = forbidden.exec(visible);
+    const match = forbidden.exec(visible.replaceAll("_", " ").replaceAll("-", " "));
     if (match !== null) {
       throw new Error(`${tool.name} exposes control-plane vocabulary ${JSON.stringify(match[0])}`);
+    }
+  }
+});
+
+Deno.test("model-visible evidence labels use only task vocabulary", () => {
+  const forbidden =
+    /\b(?:architect|campaign|company|control[- ]plane|daemon|department|director|factory|kernel|office|sponsor)\b/iu;
+  for (const role of ASSIGNMENT_EVIDENCE_ROLES_V1) {
+    const match = forbidden.exec(role.replaceAll("_", " "));
+    if (match !== null) {
+      throw new Error(`assignment evidence role exposes ${JSON.stringify(match[0])}`);
     }
   }
 });
@@ -632,6 +655,56 @@ Deno.test("host adapters are converted to the live Pi tool ABI", async () => {
   assertEquals(seen, { path: "staging/file" });
   assertEquals(result.content, [{ type: "text", text: '{"artifact_id":7}' }]);
   assertEquals(result.details, { artifact_id: 7 });
+
+  assertThrows(
+    () =>
+      toPiToolDefinition({
+        name: "artifact_seal",
+        sdk_definition: {
+          description: "Send bytes to the daemon.",
+          input_schema: { type: "object", additionalProperties: false },
+          invoke: () => Promise.resolve({ accepted: true }),
+        },
+      }),
+    Error,
+    "internal vocabulary",
+  );
+
+  const hiddenResult = toPiToolDefinition({
+    name: "artifact_seal",
+    sdk_definition: {
+      description: "Seal assignment evidence.",
+      input_schema: { type: "object", additionalProperties: false },
+      invoke: () => Promise.resolve({ campaign_id: 7 }),
+    },
+  });
+  await assertRejects(
+    () => hiddenResult.execute("call-2", {}, undefined, undefined, {} as never),
+    Error,
+    "internal metadata",
+  );
+});
+
+Deno.test("artifact reading requires sealed upstream assignment evidence", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-product-artifact-read-" });
+  const source = packet(root, false, false);
+  await assertRejects(
+    () =>
+      runAssignment(
+        {
+          ...source,
+          office: "product_research",
+          ticket_attempt_id: null,
+          candidate_id: null,
+          tools: ["artifact_read", "work_complete"],
+          legal_terminal_operations: ["work_complete"],
+          assignment_evidence: [],
+        },
+        deps(new FakeFactory([])),
+      ),
+    Error,
+    "requires sealed upstream assignment evidence",
+  );
 });
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -845,7 +918,7 @@ Deno.test("real Pi SDK faux provider completes a sealed host assignment through 
         {
           name: "workspace_read",
           sdk_definition: {
-            description: "daemon-bound exact workspace read",
+            description: "exact workspace read",
             input_schema: {
               type: "object",
               additionalProperties: false,
@@ -1071,7 +1144,7 @@ Deno.test("Candidate and Quality terminal tools call their daemon adapter before
       custom_tools: [{
         name: operation,
         sdk_definition: {
-          description: "daemon terminal",
+          description: "submit terminal result",
           input_schema: { type: "object", additionalProperties: false },
           invoke: (input: unknown) => {
             calls.push(JSON.stringify(input));
@@ -1111,7 +1184,7 @@ Deno.test("failed Candidate daemon terminal is not captured for session terminal
       custom_tools: [{
         name: "candidate_submit",
         sdk_definition: {
-          description: "daemon terminal",
+          description: "submit terminal result",
           input_schema: { type: "object", additionalProperties: false },
           invoke: () => Promise.reject(new Error("durable rejection")),
         },

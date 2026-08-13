@@ -1,0 +1,248 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH downstream AS (\n                 SELECT ta.id, ta.revision, ta.stage, ta.created_at,\n                        tr.revision AS ticket_revision\n                 FROM factory.ticket_attempts AS ta\n                 JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id\n                 JOIN factory.application_revisions AS ticket_application\n                   ON ticket_application.id = tr.application_revision_id\n                 WHERE ticket_application.application_key = $1\n                   AND ta.stage BETWEEN $2 AND $3\n             )\n             SELECT (SELECT count(*)::BIGINT FROM downstream) AS \"count!\",\n                    head.id AS \"ticket_attempt_id?\",\n                    head.revision AS \"ticket_attempt_revision?\",\n                    head.ticket_revision AS \"ticket_revision?\",\n                    head.stage AS \"ticket_attempt_stage?\",\n                    candidate.id AS \"candidate_id?\",\n                    candidate.revision AS \"candidate_revision?\",\n                    candidate.lifecycle AS \"candidate_lifecycle?\",\n                    candidate.candidate_commit AS \"candidate_commit?\",\n                    candidate.candidate_commit IS NOT NULL AS \"candidate_commit_present?\",\n                    validation.id AS \"validation_id?\",\n                    validation.lifecycle AS \"validation_lifecycle?\",\n                    validation.log_artifact_id AS \"validation_log_artifact_id?\",\n                    review.id AS \"quality_review_id?\",\n                    review.revision AS \"review_revision?\",\n                    review.verdict AS \"review_verdict?\",\n                    review.rationale_artifact_id AS \"review_rationale_artifact_id?\",\n                    decision.id AS \"architect_decision_id?\",\n                    decision.decision_kind AS \"architect_decision_kind?\",\n                    decision.rationale_artifact_id AS \"architect_decision_rationale_artifact_id?\"\n             FROM (SELECT 1) AS singleton\n             LEFT JOIN LATERAL (\n                 SELECT id, revision, stage, ticket_revision\n                 FROM downstream\n                 ORDER BY created_at ASC, id ASC\n                 LIMIT 1\n             ) AS head ON TRUE\n             LEFT JOIN LATERAL (\n                 SELECT id, revision, lifecycle, candidate_commit\n                 FROM factory.candidates\n                 WHERE ticket_attempt_id = head.id\n                 ORDER BY created_at DESC, id DESC\n                 LIMIT 1\n             ) AS candidate ON TRUE\n             LEFT JOIN LATERAL (\n                 SELECT id, lifecycle, log_artifact_id\n                 FROM factory.validations\n                 WHERE candidate_id = candidate.id\n                 ORDER BY created_at DESC, id DESC\n                 LIMIT 1\n             ) AS validation ON TRUE\n             LEFT JOIN factory.reviews AS review ON review.candidate_id = candidate.id\n             LEFT JOIN LATERAL (\n                 SELECT id, decision_kind, rationale_artifact_id\n                 FROM factory.architect_decisions\n                 WHERE candidate_id = candidate.id\n                 ORDER BY created_at DESC, id DESC\n                 LIMIT 1\n             ) AS decision ON TRUE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_attempt_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ticket_attempt_revision?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ticket_revision?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ticket_attempt_stage?",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "candidate_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "candidate_revision?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "candidate_lifecycle?",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "candidate_commit?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "candidate_commit_present?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "validation_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "validation_lifecycle?",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "validation_log_artifact_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "quality_review_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "review_revision?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "review_verdict?",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "verdict"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "review_rationale_artifact_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "rationale_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "architect_decision_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "architect_decision_kind?",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "decision_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "architect_decision_rationale_artifact_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "rationale_artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a46cf59790810bee995e7146ece51d820542c1a65ddb002fc8a8896ba68a0d43"
+}

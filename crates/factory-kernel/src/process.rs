@@ -37,6 +37,10 @@ const SESSION_RUNNING: i16 = 1;
 const COST_KNOWN: i16 = 0;
 const COST_UNKNOWN: i16 = 1;
 const COST_EXCEEDED: i16 = 2;
+const CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM: usize = 18;
+const UNKNOWN_TERMINAL_COST_FAILURE_REASON: &str = "terminal session cost is unknown";
+const EXCEEDED_TERMINAL_COST_FAILURE_REASON: &str =
+    "terminal session exceeded the campaign cost limit";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StartCampaign {
@@ -66,14 +70,36 @@ pub struct CampaignReceipt {
 
 /// Operator-authorized campaign cancellation. Cancellation is a durable
 /// aggregate transition, not a test cleanup shortcut: it requires the
-/// current campaign revision, refuses while a paid session is running, and
-/// records one idempotent audit receipt.
+/// current campaign revision and records one idempotent audit receipt. The
+/// operator RPC may first use that exact revision to close admission for an
+/// active session, then complete this command after ordinary session
+/// reconciliation advances the campaign by exactly one revision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CancelCampaign {
     pub principal: String,
     pub command_id: String,
     pub expected_revision: ExpectedRevision,
     pub campaign_id: CampaignId,
+}
+
+/// The only nonterminal outcome of cancellation admission. The session ID is
+/// selected from the locked campaign state, never from operator input, and is
+/// used solely to find the daemon-owned cancellation handle for that process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CampaignCancellationAdmission {
+    Completed(CampaignReceipt),
+    ActiveSession { session_id: SessionId },
+}
+
+/// Proof passed back from the live session runtime after it has directly
+/// waited the exact owned process and committed its terminal evidence. This is
+/// crate-private because only the daemon's active-session coordinator may
+/// bridge an admitted operator cancellation across that reconciliation step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReconciledSessionCancellation {
+    pub campaign_id: CampaignId,
+    pub session_id: SessionId,
+    pub campaign_revision: AggregateRevision,
 }
 
 /// Kernel-owned infrastructure/process failure transition. This is not an
@@ -196,6 +222,17 @@ pub struct CampaignStatus {
     pub failure_reason: Option<String>,
 }
 
+/// Concise immutable Git identities for the newest campaign work and newest
+/// delivery. A claimed base exists before candidate submission; the other
+/// candidate fields appear only as their durable facts are admitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CampaignProductIdentity {
+    pub base_commit: Option<String>,
+    pub candidate_tree: Option<String>,
+    pub candidate_commit: Option<String>,
+    pub delivered_commit: Option<String>,
+}
+
 /// One bounded, read-only row in a campaign's provider-cost breakdown.
 /// Grouping these rows by office/model/outcome is presentation; the terminal
 /// session fact remains the single source of its cost identity.
@@ -212,6 +249,22 @@ pub struct SessionCostBreakdown {
     /// derives it from its own clock, so a daemon restart cannot invent an
     /// elapsed duration or turn a status read into a write.
     pub elapsed_millis: Option<u64>,
+}
+
+/// Complete spend aggregation for one office/model/outcome tuple. The
+/// application revision pins one model per office, bounding one campaign to
+/// three offices times six session outcomes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCostAggregate {
+    pub office: Office,
+    pub model_provider: String,
+    pub model_id: String,
+    pub outcome: SessionState,
+    pub session_count: u32,
+    pub accounted_cost_micro_usd: u64,
+    pub pending_cost_session_count: u32,
+    pub unknown_cost_session_count: u32,
+    pub exceeded_cost_session_count: u32,
 }
 
 /// A terminal evidence capability. Its fields are private so a caller cannot
@@ -808,10 +861,10 @@ impl ProcessStore {
         })
     }
 
-    pub async fn cancel_campaign(
+    pub(crate) async fn admit_campaign_cancellation(
         &self,
         command: &CancelCampaign,
-    ) -> Result<CampaignReceipt, StoreError> {
+    ) -> Result<CampaignCancellationAdmission, StoreError> {
         validate_command(&command.principal, &command.command_id)?;
         let fingerprint = fingerprint_cancel_campaign(command);
         let mut tx = self.pool.begin().await?;
@@ -821,7 +874,7 @@ impl ProcessStore {
             let campaign_id = CampaignId::new(receipt.subject_id)?;
             let pins = campaign_pinning(&mut tx, campaign_id).await?;
             tx.commit().await?;
-            return Ok(CampaignReceipt {
+            return Ok(CampaignCancellationAdmission::Completed(CampaignReceipt {
                 campaign_id,
                 resulting_revision: receipt.resulting_revision,
                 kernel_build_id: pins.kernel_build_id,
@@ -829,7 +882,7 @@ impl ProcessStore {
                 repository_id: pins.repository_id,
                 audit_log_id: receipt.audit_log_id,
                 was_idempotent_retry: true,
-            });
+            }));
         }
         let campaign = sqlx::query!(
             "SELECT lifecycle, revision FROM factory.campaigns WHERE id = $1 FOR UPDATE",
@@ -852,49 +905,98 @@ impl ProcessStore {
                 campaign_id: command.campaign_id,
             });
         }
-        if sqlx::query_scalar!(
+        if let Some(session_id) = sqlx::query_scalar!(
             "SELECT id FROM factory.sessions WHERE campaign_id = $1 AND lifecycle = $2 LIMIT 1",
             command.campaign_id.get(),
             SESSION_RUNNING
         )
         .fetch_optional(&mut *tx)
         .await?
-        .is_some()
+        .map(SessionId::new)
+        .transpose()?
         {
-            return Err(StoreError::CampaignHasRunningSession {
+            tx.commit().await?;
+            return Ok(CampaignCancellationAdmission::ActiveSession { session_id });
+        }
+        let receipt = cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint)
+            .await?;
+        tx.commit().await?;
+        Ok(CampaignCancellationAdmission::Completed(receipt))
+    }
+
+    pub(crate) async fn finish_campaign_cancellation(
+        &self,
+        command: &CancelCampaign,
+        reconciled: ReconciledSessionCancellation,
+    ) -> Result<CampaignReceipt, StoreError> {
+        validate_command(&command.principal, &command.command_id)?;
+        if reconciled.campaign_id != command.campaign_id
+            || reconciled.campaign_revision != command.expected_revision.get().next()?
+        {
+            return Err(StoreError::InvalidProcessCommand {
+                field: "reconciled cancellation session",
+            });
+        }
+        let fingerprint = fingerprint_cancel_campaign(command);
+        let mut tx = self.pool.begin().await?;
+        lock_process_transaction(&mut tx).await?;
+        if let Some(receipt) = find_audit(&mut tx, command, CAMPAIGN_CANCEL, fingerprint).await? {
+            require_subject(&receipt, CAMPAIGN_SUBJECT)?;
+            let pins = campaign_pinning(&mut tx, command.campaign_id).await?;
+            tx.commit().await?;
+            return Ok(CampaignReceipt {
+                campaign_id: command.campaign_id,
+                resulting_revision: receipt.resulting_revision,
+                kernel_build_id: pins.kernel_build_id,
+                application_revision_id: pins.application_revision_id,
+                repository_id: pins.repository_id,
+                audit_log_id: receipt.audit_log_id,
+                was_idempotent_retry: true,
+            });
+        }
+        let campaign = sqlx::query!(
+            "SELECT lifecycle, revision FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+            command.campaign_id.get()
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::UnknownCampaign {
+            campaign_id: command.campaign_id,
+        })?;
+        let current_revision = storage::aggregate_revision_from_sql_for_process(campaign.revision)?;
+        if campaign.lifecycle != RUNNING {
+            return Err(StoreError::CampaignClosed {
                 campaign_id: command.campaign_id,
             });
         }
-        let resulting_revision = current_revision.next()?;
-        sqlx::query!(
-            "UPDATE factory.campaigns SET lifecycle = 3, revision = $1 WHERE id = $2",
-            i64::try_from(resulting_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?,
-            command.campaign_id.get()
-        )
-        .execute(&mut *tx)
-        .await?;
-        let audit_log_id = insert_audit(
-            &mut tx,
-            &command.principal,
-            &command.command_id,
-            CAMPAIGN_CANCEL,
-            fingerprint,
-            CAMPAIGN_SUBJECT,
-            command.campaign_id.get(),
-            resulting_revision,
-        )
-        .await?;
-        let pins = campaign_pinning(&mut tx, command.campaign_id).await?;
+        if current_revision != reconciled.campaign_revision {
+            return Err(StoreError::RevisionConflict {
+                expected: ExpectedRevision::new(reconciled.campaign_revision),
+                current: current_revision,
+            });
+        }
+        // `ReconciledSessionCancellation` is minted only after the session
+        // runtime has directly waited this exact daemon-owned child and
+        // committed its terminal evidence. Rechecking a caller-selectable row
+        // here would weaken that capability boundary and add no authority.
+        let receipt = cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint)
+            .await?;
         tx.commit().await?;
-        Ok(CampaignReceipt {
-            campaign_id: command.campaign_id,
-            resulting_revision,
-            kernel_build_id: pins.kernel_build_id,
-            application_revision_id: pins.application_revision_id,
-            repository_id: pins.repository_id,
-            audit_log_id,
-            was_idempotent_retry: false,
-        })
+        Ok(receipt)
+    }
+
+    pub async fn cancel_campaign(
+        &self,
+        command: &CancelCampaign,
+    ) -> Result<CampaignReceipt, StoreError> {
+        match self.admit_campaign_cancellation(command).await? {
+            CampaignCancellationAdmission::Completed(receipt) => Ok(receipt),
+            CampaignCancellationAdmission::ActiveSession { .. } => {
+                Err(StoreError::CampaignHasRunningSession {
+                    campaign_id: command.campaign_id,
+                })
+            }
+        }
     }
 
     /// Closes a running campaign after a daemon-owned failed Product path.
@@ -1635,12 +1737,25 @@ impl ProcessStore {
                 measured.saturating_add(value.get()),
                 FAILED,
             ),
+            // An operator cancellation first terminates and reconciles the
+            // exact active child, then commits the campaign cancellation. Keep
+            // this brief bridge state running but cost-frozen so the scheduler
+            // cannot admit another paid session before that typed command
+            // completes. Other unknown-cost outcomes fail immediately.
+            TerminalCostV1::Unknown if report.stop_reason == StopReasonV1::Cancelled => {
+                (COST_UNKNOWN, None, measured, session.campaign_lifecycle)
+            }
             TerminalCostV1::Unknown => (COST_UNKNOWN, None, measured, FAILED),
         };
         let state = session_state(report.stop_reason);
         let receipt_cost = match (next_cost_state, cost_value, cost) {
             (COST_EXCEEDED, Some(value), _) => TerminalCostV1::Exceeded(MicroUsd::new(value)),
             (_, _, value) => value,
+        };
+        let campaign_failure_reason = match (campaign_lifecycle, next_cost_state) {
+            (FAILED, COST_UNKNOWN) => Some(UNKNOWN_TERMINAL_COST_FAILURE_REASON),
+            (FAILED, COST_EXCEEDED) => Some(EXCEEDED_TERMINAL_COST_FAILURE_REASON),
+            _ => None,
         };
         let next_revision = current_revision.next()?;
         let usage = evidence.usage.map(usage_sql).transpose()?;
@@ -1691,7 +1806,7 @@ impl ProcessStore {
         sqlx::query!("UPDATE factory.assignments SET lifecycle = $1, revision = revision + 1 WHERE id = $2 AND lifecycle = $3", assignment_state_code(state), session.assignment_id, SESSION_RUNNING).execute(&mut *tx).await?;
         let campaign_revision =
             storage::aggregate_revision_from_sql_for_process(session.campaign_revision)?.next()?;
-        sqlx::query!("UPDATE factory.campaigns SET measured_cost_micro_usd = $1, cost_state = $2, lifecycle = $3, revision = $4 WHERE id = $5", i64::try_from(next_measured).map_err(|_| StoreError::RevisionOutOfRange)?, next_cost_state.max(session.campaign_cost_state), campaign_lifecycle, i64::try_from(campaign_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?, session.campaign_id).execute(&mut *tx).await?;
+        sqlx::query!("UPDATE factory.campaigns SET measured_cost_micro_usd = $1, cost_state = $2, lifecycle = $3, failure_reason = $4, revision = $5 WHERE id = $6", i64::try_from(next_measured).map_err(|_| StoreError::RevisionOutOfRange)?, next_cost_state.max(session.campaign_cost_state), campaign_lifecycle, campaign_failure_reason, i64::try_from(campaign_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?, session.campaign_id).execute(&mut *tx).await?;
         let audit_log_id = insert_audit(
             &mut tx,
             principal,
@@ -1783,6 +1898,58 @@ impl ProcessStore {
         })
     }
 
+    /// Returns the latest claimed/candidate identity together with the most
+    /// recent completed delivery. This is a zero-write status projection;
+    /// detailed candidate evidence remains on the navigation endpoint.
+    pub async fn campaign_product_identity(
+        &self,
+        campaign_id: CampaignId,
+    ) -> Result<CampaignProductIdentity, StoreError> {
+        let row = sqlx::query!(
+            "WITH latest_attempt AS (
+                 SELECT id, claimed_commit
+                 FROM factory.ticket_attempts
+                 WHERE campaign_id = $1
+                 ORDER BY id DESC
+                 LIMIT 1
+             ), latest_candidate AS (
+                 SELECT candidate.base_commit, candidate.candidate_tree,
+                        candidate.candidate_commit
+                 FROM factory.candidates AS candidate
+                 JOIN latest_attempt AS attempt
+                   ON attempt.id = candidate.ticket_attempt_id
+                 ORDER BY candidate.id DESC
+                 LIMIT 1
+             ), latest_delivery AS (
+                 SELECT delivery.resulting_commit
+                 FROM factory.deliveries AS delivery
+                 JOIN factory.candidates AS candidate
+                   ON candidate.id = delivery.candidate_id
+                 JOIN factory.ticket_attempts AS attempt
+                   ON attempt.id = candidate.ticket_attempt_id
+                 WHERE attempt.campaign_id = $1
+                 ORDER BY delivery.id DESC
+                 LIMIT 1
+             )
+             SELECT COALESCE(
+                        (SELECT base_commit FROM latest_candidate),
+                        (SELECT claimed_commit FROM latest_attempt)
+                    ) AS \"base_commit?\",
+                    (SELECT candidate_tree FROM latest_candidate) AS \"candidate_tree?\",
+                    (SELECT candidate_commit FROM latest_candidate) AS \"candidate_commit?\",
+                    (SELECT resulting_commit FROM latest_delivery) AS \"delivered_commit?\"",
+            campaign_id.get(),
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(CampaignProductIdentity {
+            base_commit: row.base_commit,
+            candidate_tree: row.candidate_tree,
+            candidate_commit: row.candidate_commit,
+            delivered_commit: row.delivered_commit,
+        })
+    }
+
     /// Pages the exact terminal/session facts used for office, assignment,
     /// model, and outcome spend reporting. It is deliberately read-only and
     /// bounded; callers continue with the last returned `SessionId`.
@@ -1849,6 +2016,65 @@ impl ProcessStore {
             .collect()
     }
 
+    /// Aggregates every session in the campaign without truncating spend at
+    /// the recent-session display bound. The immutable application profile
+    /// limits the result to eighteen office/model/outcome tuples.
+    pub async fn campaign_session_cost_aggregates(
+        &self,
+        campaign_id: CampaignId,
+    ) -> Result<Vec<SessionCostAggregate>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT office, model_provider, model_id, lifecycle,
+                    COUNT(*)::BIGINT AS \"session_count!\",
+                    COALESCE(SUM(cost_micro_usd), 0)::BIGINT
+                        AS \"accounted_cost_micro_usd!\",
+                    COUNT(*) FILTER (WHERE cost_state IS NULL)::BIGINT
+                        AS \"pending_cost_session_count!\",
+                    COUNT(*) FILTER (WHERE cost_state = $2)::BIGINT
+                        AS \"unknown_cost_session_count!\",
+                    COUNT(*) FILTER (WHERE cost_state = $3)::BIGINT
+                        AS \"exceeded_cost_session_count!\"
+             FROM factory.sessions
+             WHERE campaign_id = $1
+             GROUP BY office, model_provider, model_id, lifecycle
+             ORDER BY office ASC, model_provider ASC, model_id ASC, lifecycle ASC",
+            campaign_id.get(),
+            COST_UNKNOWN,
+            COST_EXCEEDED,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() > CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM {
+            return Err(StoreError::CorruptLifecycleColumn);
+        }
+        rows.into_iter()
+            .map(|row| {
+                Ok(SessionCostAggregate {
+                    office: office_from_code(row.office)?,
+                    model_provider: row.model_provider,
+                    model_id: row.model_id,
+                    outcome: session_state_from_code(row.lifecycle)?,
+                    session_count: u32::try_from(row.session_count)
+                        .map_err(|_| StoreError::CorruptCostColumn)?,
+                    accounted_cost_micro_usd: u64::try_from(row.accounted_cost_micro_usd)
+                        .map_err(|_| StoreError::CorruptCostColumn)?,
+                    pending_cost_session_count: u32::try_from(
+                        row.pending_cost_session_count,
+                    )
+                    .map_err(|_| StoreError::CorruptCostColumn)?,
+                    unknown_cost_session_count: u32::try_from(
+                        row.unknown_cost_session_count,
+                    )
+                    .map_err(|_| StoreError::CorruptCostColumn)?,
+                    exceeded_cost_session_count: u32::try_from(
+                        row.exceeded_cost_session_count,
+                    )
+                    .map_err(|_| StoreError::CorruptCostColumn)?,
+                })
+            })
+            .collect()
+    }
+
     pub async fn process_audit_count(&self) -> Result<i64, StoreError> {
         Ok(sqlx::query_scalar!("SELECT count(*)::BIGINT AS \"count!\" FROM factory.audit_log WHERE operation IN ($1, $2, $3, $4, $5)", CAMPAIGN_START, CAMPAIGN_CANCEL, ASSIGNMENT_CREATE, SESSION_START, SESSION_TERMINAL).fetch_one(&self.pool).await?)
     }
@@ -1871,6 +2097,43 @@ impl ProcessStore {
         let audits = self.process_audit_count().await?;
         Ok((assignments, sessions, artifacts, audits))
     }
+}
+
+async fn cancel_campaign_in_transaction(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    command: &CancelCampaign,
+    current_revision: AggregateRevision,
+    fingerprint: ContentDigest,
+) -> Result<CampaignReceipt, StoreError> {
+    let resulting_revision = current_revision.next()?;
+    sqlx::query!(
+        "UPDATE factory.campaigns SET lifecycle = 3, revision = $1 WHERE id = $2",
+        i64::try_from(resulting_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?,
+        command.campaign_id.get()
+    )
+    .execute(&mut **tx)
+    .await?;
+    let audit_log_id = insert_audit(
+        tx,
+        &command.principal,
+        &command.command_id,
+        CAMPAIGN_CANCEL,
+        fingerprint,
+        CAMPAIGN_SUBJECT,
+        command.campaign_id.get(),
+        resulting_revision,
+    )
+    .await?;
+    let pins = campaign_pinning(tx, command.campaign_id).await?;
+    Ok(CampaignReceipt {
+        campaign_id: command.campaign_id,
+        resulting_revision,
+        kernel_build_id: pins.kernel_build_id,
+        application_revision_id: pins.application_revision_id,
+        repository_id: pins.repository_id,
+        audit_log_id,
+        was_idempotent_retry: false,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1961,12 +2224,17 @@ async fn validate_assignment_target_in_transaction(
                    FROM factory.candidates c
                    JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
+                   LEFT JOIN factory.validations qv ON qv.candidate_id = c.id
+                        AND qv.validation_scope = 1 AND qv.lifecycle = 1
+                   LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id
                   WHERE c.id = $1
                     AND c.ticket_attempt_id = $2
                     AND ta.campaign_id = $3
                     AND tr.application_revision_id = $4
-                    AND ta.stage IN (2, 6)
-                  FOR KEY SHARE",
+                    AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL
+                    AND (ta.stage IN (2, 6)
+                         OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))
+                  FOR KEY SHARE OF c, ta, tr",
             candidate_id.get(),
             ticket_attempt_id.get(),
             packet.campaign_id.get(),

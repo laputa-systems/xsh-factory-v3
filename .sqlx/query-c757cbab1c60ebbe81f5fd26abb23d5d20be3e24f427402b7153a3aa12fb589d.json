@@ -1,0 +1,239 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.id, ta.campaign_id, c.kernel_build_id AS kernel_build_database_id,\n                ta.ticket_revision_id, ta.stage, ta.candidate_ordinal, ta.rework_ordinal,\n                ta.released_at IS NOT NULL AS \"released!\", ta.revision AS attempt_revision,\n                ta.claimed_commit, ta.claimed_tree,\n                tr.ticket_id, tr.lifecycle AS ticket_revision_lifecycle,\n                tr.revision AS ticket_revision_aggregate_revision,\n                tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id,\n                t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,\n                t.current_ticket_revision_id\n         FROM factory.ticket_attempts ta\n         JOIN factory.campaigns c ON c.id = ta.campaign_id\n         JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n         JOIN factory.tickets t ON t.id = tr.ticket_id\n         WHERE ta.id = $1\n         FOR UPDATE OF ta, tr, t, c",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kernel_build_database_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "ticket_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "stage",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "candidate_ordinal",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "candidate_ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "rework_ordinal",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "rework_ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "released!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "claimed_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "claimed_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "claimed_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "claimed_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "ticket_revision_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "ticket_revision_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "ticket_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "ticket_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "current_ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "current_ticket_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c757cbab1c60ebbe81f5fd26abb23d5d20be3e24f427402b7153a3aa12fb589d"
+}

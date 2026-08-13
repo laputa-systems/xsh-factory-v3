@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.ticket_attempts\n             SET candidate_ordinal = $1, stage = $2, revision = $3 WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "422d1950daca2f6d6748d8c188882b4fd39df8e49d38aa59f6393caff4d299f1"
+}

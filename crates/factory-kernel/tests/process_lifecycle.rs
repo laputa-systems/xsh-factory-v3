@@ -334,25 +334,6 @@ fn tranche5_lifecycle_judges() {
             second_while_running,
             Err(factory_kernel::storage::StoreError::PaidSessionAlreadyRunning)
         ));
-        let cancel_while_running = process
-            .cancel_campaign(&CancelCampaign {
-                principal: "architect".to_owned(),
-                command_id: unique("cancel-while-running"),
-                expected_revision: ExpectedRevision::new(
-                    first
-                        .assignment
-                        .resulting_campaign_revision
-                        .next()
-                        .expect("campaign revision"),
-                ),
-                campaign_id: campaign.campaign_id,
-            })
-            .await;
-        assert!(matches!(
-            cancel_while_running,
-            Err(factory_kernel::storage::StoreError::CampaignHasRunningSession { .. })
-        ));
-
         let first_evidence = fixture
             .evidence(&process, &first, first_session.session_id, 1)
             .await;
@@ -782,6 +763,10 @@ fn daemon_restart_reconciles_exact_group_and_freezes_unknown_cost_without_resume
         assert_eq!(
             status.measured_cost,
             factory_protocol::TerminalCostV1::Unknown
+        );
+        assert_eq!(
+            status.failure_reason.as_deref(),
+            Some("terminal session cost is unknown")
         );
 
         fixture.daemon.shutdown().await.expect("daemon shutdown");

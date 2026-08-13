@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT office, model_provider, model_id, lifecycle,\n                    COUNT(*)::BIGINT AS \"session_count!\",\n                    COALESCE(SUM(cost_micro_usd), 0)::BIGINT\n                        AS \"accounted_cost_micro_usd!\",\n                    COUNT(*) FILTER (WHERE cost_state IS NULL)::BIGINT\n                        AS \"pending_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $2)::BIGINT\n                        AS \"unknown_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $3)::BIGINT\n                        AS \"exceeded_cost_session_count!\"\n             FROM factory.sessions\n             WHERE campaign_id = $1\n             GROUP BY office, model_provider, model_id, lifecycle\n             ORDER BY office ASC, model_provider ASC, model_id ASC, lifecycle ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "office",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "office"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "model_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "model_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "model_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "session_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "accounted_cost_micro_usd!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "pending_cost_session_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "unknown_cost_session_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "exceeded_cost_session_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0d69f5bc5aa52c8c9e5d104c240b0299bda3cb897b95266da2cb5df0366a07f1"
+}

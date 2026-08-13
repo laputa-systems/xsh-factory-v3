@@ -1,4 +1,3 @@
 /target/
 /var/
 /applications/xsh/bundle.v1.json
-.sqlx/query-*

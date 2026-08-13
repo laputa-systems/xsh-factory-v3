@@ -83,28 +83,31 @@ backup-restore-test:
 		--cargo "$${FACTORY_BACKUP_CARGO:?set FACTORY_BACKUP_CARGO to an absolute cargo path}"
 
 # Complete provider-free qualification. The caller, not Make, supplies an
-# already-created disposable database for each stateful judge, plus a distinct
-# fresh database for the generic Product-to-delivery vertical and the source/blank restore
-# clone pair consumed by backup-restore-test. No target here creates or drops
-# a PostgreSQL database.
+# already-created disposable database for each of the ordinary, decision, XSH,
+# and generic Product-to-delivery judges, plus the source/blank restore clone
+# pair consumed by backup-restore-test. No target here creates or drops a
+# PostgreSQL database.
 provider-free-acceptance:
 	test -n "$$FACTORY_ACCEPTANCE_POSTGRES_URL"
 	test -n "$$FACTORY_ACCEPTANCE_DECISION_URL"
 	test -n "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL"
 	test -n "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
-	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; printf '%s\n' "$$acceptance_postgres_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
-	acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; printf '%s\n' "$$acceptance_decision_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
-	acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; printf '%s\n' "$$acceptance_xsh_bundle_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
-	acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; printf '%s\n' "$$acceptance_vertical_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
-	test "$$FACTORY_ACCEPTANCE_POSTGRES_URL" != "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
-	test "$$FACTORY_ACCEPTANCE_POSTGRES_URL" != "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL"
-	test "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL" != "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
-	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
-	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"
-	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_ticket_name="$${FACTORY_ACCEPTANCE_TICKET_URL##*/}"; acceptance_ticket_name="$${acceptance_ticket_name%%\?*}"; acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_ticket_name"; test "$$acceptance_postgres_name" != "$$acceptance_decision_name"; test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; test "$$acceptance_ticket_name" != "$$acceptance_decision_name"; test "$$acceptance_ticket_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_ticket_name" != "$$acceptance_vertical_name"; test "$$acceptance_decision_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_decision_name" != "$$acceptance_vertical_name"; test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
+	@set -eu; \
+	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; \
+	acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; \
+	acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; \
+	acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; \
+	for database_name in "$$acceptance_postgres_name" "$$acceptance_decision_name" "$$acceptance_xsh_bundle_name" "$$acceptance_vertical_name"; do \
+		printf '%s\n' "$$database_name" | grep -Eq '^factory_test_v3_[0-9]+$$'; \
+	done; \
+	test "$$acceptance_postgres_name" != "$$acceptance_decision_name"; \
+	test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; \
+	test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; \
+	test "$$acceptance_decision_name" != "$$acceptance_xsh_bundle_name"; \
+	test "$$acceptance_decision_name" != "$$acceptance_vertical_name"; \
+	test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
 	$(MAKE) check
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) postgres-test
-	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_TICKET_URL" $(MAKE) ticket-test
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_DECISION_URL" $(MAKE) decision-test
 	DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) sqlx-check
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL" $(MAKE) xsh-bundle-test

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT application_revision_id\n               FROM factory.campaigns\n              WHERE id = $1 AND lifecycle = 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "application_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f3b867e18e570de35459424769784c8bf588bdf6b5a2fa5fda245ec440555ebd"
+}

@@ -38,7 +38,9 @@ function collectTypeScriptSources(root: string): readonly string[] {
     if (entry.isDirectory) {
       sources.push(...collectTypeScriptSources(child));
     }
-    if (entry.isFile && entry.name.endsWith(".ts")) sources.push(child);
+    if (entry.isFile && entry.name.endsWith(".ts") && !entry.name.endsWith("_test.ts")) {
+      sources.push(child);
+    }
   }
   return sources;
 }

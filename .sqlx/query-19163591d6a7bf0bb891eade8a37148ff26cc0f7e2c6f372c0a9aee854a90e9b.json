@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.candidates SET candidate_commit = $1, candidate_ref = $2, revision = $3\n             WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19163591d6a7bf0bb891eade8a37148ff26cc0f7e2c6f372c0a9aee854a90e9b"
+}

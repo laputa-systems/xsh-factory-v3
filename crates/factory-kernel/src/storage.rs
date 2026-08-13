@@ -730,10 +730,13 @@ impl KernelStore {
         })
     }
 
-    /// Checks that every independently created durable authority row has
-    /// exactly one matching creation receipt. This is deliberately broader
-    /// than audit-to-subject validation: a receipt can point to a real row
-    /// while a copied database has lost the row's original creation proof.
+    /// Checks that every independently created durable authority row has its
+    /// matching creation receipt. Non-artifact facts have exactly one;
+    /// content-addressed artifact rows may have multiple audited registration
+    /// commands when later principals reuse the same immutable bytes. This is
+    /// deliberately broader than audit-to-subject validation: a receipt can
+    /// point to a real row while a copied database has lost the row's original
+    /// creation proof.
     /// Child rows born inside a parent transition (tickets and Forum
     /// attachments) are excluded because they do not mint their own command.
     /// It is a read-only material-state/audit consistency probe.
@@ -826,7 +829,8 @@ impl KernelStore {
                   AND audit.subject_id = fact.id
                   AND audit.operation = fact.operation
                  GROUP BY fact.subject_kind, fact.id
-                 HAVING count(audit.id) <> 1
+                 HAVING count(audit.id) = 0
+                     OR (fact.subject_kind <> $7::SMALLINT AND count(audit.id) <> 1)
              ) AS \"consistent!\"",
             KERNEL_BUILD_SUBJECT,
             INSTALL_KERNEL_BUILD_OPERATION,

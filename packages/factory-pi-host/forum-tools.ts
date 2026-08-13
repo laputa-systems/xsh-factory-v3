@@ -126,7 +126,10 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           description: { type: "string", maxLength: 4096 },
         },
       },
-      invoke: (input) => adapter.createTopic(input as ForumCreateTopicInput),
+      invoke: async (input) => {
+        await adapter.createTopic(input as ForumCreateTopicInput);
+        return { accepted: true };
+      },
     },
     {
       name: "forum_create_thread",
@@ -142,7 +145,10 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           title: { type: "string", maxLength: 240 },
         },
       },
-      invoke: (input) => adapter.createThread(input as ForumCreateThreadInput),
+      invoke: async (input) => {
+        await adapter.createThread(input as ForumCreateThreadInput);
+        return { accepted: true };
+      },
     },
     {
       name: "forum_post",
@@ -172,15 +178,18 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           attachments: { type: "array", maxItems: 8 },
         },
       },
-      invoke: (input) => adapter.post(input as ForumPostInput),
+      invoke: async (input) => {
+        await adapter.post(input as ForumPostInput);
+        return { accepted: true };
+      },
     },
   ];
 }
 
 /**
- * Rust retains author-office attribution for durable audit and operator
- * surfaces.  This actor adapter deliberately discards that institutional
- * metadata from every Forum result before it can enter a model transcript.
+ * Durable storage retains author attribution for audit and operator surfaces.
+ * This actor adapter deliberately discards that organizational metadata from
+ * every Forum result before it can enter a model transcript.
  */
 function stripAuthorOffice(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripAuthorOffice);
@@ -188,7 +197,7 @@ function stripAuthorOffice(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   return Object.fromEntries(
     Object.entries(record)
-      .filter(([key]) => key !== "author_office")
+      .filter(([key]) => key !== "author_office" && key !== "author_kind")
       .map(([key, item]) => [key, stripAuthorOffice(item)]),
   );
 }

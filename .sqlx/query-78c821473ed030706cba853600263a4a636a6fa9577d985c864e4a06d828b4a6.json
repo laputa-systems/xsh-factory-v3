@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id\n                   FROM factory.candidates c\n                   JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n                   JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                   LEFT JOIN factory.validations qv ON qv.candidate_id = c.id\n                        AND qv.validation_scope = 1 AND qv.lifecycle = 1\n                   LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id\n                  WHERE c.id = $1\n                    AND c.ticket_attempt_id = $2\n                    AND ta.campaign_id = $3\n                    AND tr.application_revision_id = $4\n                    AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL\n                    AND (ta.stage IN (2, 6)\n                         OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))\n                  FOR KEY SHARE OF c, ta, tr",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "78c821473ed030706cba853600263a4a636a6fa9577d985c864e4a06d828b4a6"
+}

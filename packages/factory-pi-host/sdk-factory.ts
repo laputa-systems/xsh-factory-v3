@@ -28,6 +28,7 @@ export function createSdkPiSessionFactory(): PiSessionFactory {
 /** Converts our provider-neutral adapter shape into Pi 0.84.1's live tool ABI. */
 export function toPiToolDefinition(adapter: PiToolAdapter): ToolDefinition {
   const descriptor = adapter.sdk_definition;
+  assertModelVisibleToolDescriptor(adapter);
   return {
     name: adapter.name,
     label: adapter.name,
@@ -35,6 +36,7 @@ export function toPiToolDefinition(adapter: PiToolAdapter): ToolDefinition {
     parameters: descriptor.input_schema,
     execute: async (_toolCallId, params) => {
       const details = await descriptor.invoke(params);
+      assertModelVisibleResultStructure(details);
       const text = JSON.stringify(details);
       return {
         content: [{ type: "text", text: text === undefined ? "null" : text }],
@@ -42,6 +44,39 @@ export function toPiToolDefinition(adapter: PiToolAdapter): ToolDefinition {
       };
     },
   };
+}
+
+const MODEL_HIDDEN_VOCABULARY =
+  /\b(?:architect|campaign|compan(?:y|ies)|control\s+plane|cto|daemon|department|director|employee|factory|institution(?:s|al|ally)?|kernel|manager|office|organization(?:s|al|ally)?|sponsor(?:ed|ship)?)\b/iu;
+
+/** Tool metadata is sent in every provider request. Reject a descriptor that
+ * turns internal organization or runtime structure into a worker metaphor. */
+export function assertModelVisibleToolDescriptor(adapter: PiToolAdapter): void {
+  const visible = JSON.stringify({
+    name: adapter.name,
+    description: adapter.sdk_definition.description,
+    input_schema: adapter.sdk_definition.input_schema,
+  }).replaceAll("_", " ").replaceAll("-", " ");
+  if (MODEL_HIDDEN_VOCABULARY.test(visible)) {
+    throw new Error("custom tool metadata contains unavailable internal vocabulary");
+  }
+}
+
+/** Result payload text is evidence and must remain untouched. Structural keys,
+ * however, are host-authored model context and cannot expose internal roles or
+ * lifecycle identities. */
+function assertModelVisibleResultStructure(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertModelVisibleResultStructure(item);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (MODEL_HIDDEN_VOCABULARY.test(key.replaceAll("_", " ").replaceAll("-", " "))) {
+      throw new Error("tool result contains unavailable internal metadata");
+    }
+    assertModelVisibleResultStructure(item);
+  }
 }
 
 export async function createSdkSession(

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.revision AS candidate_revision, ta.revision AS attempt_revision,\n                        tr.revision AS ticket_revision\n                   FROM factory.candidates c\n                   JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n                   JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                   JOIN factory.reviews r ON r.candidate_id = c.id\n                  WHERE c.id = $1 AND r.id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d0b9040df5e7f2b7cf87a9df1b38cdde3d9ef9ec7f5a89fcbba8ad4f6681b3fc"
+}

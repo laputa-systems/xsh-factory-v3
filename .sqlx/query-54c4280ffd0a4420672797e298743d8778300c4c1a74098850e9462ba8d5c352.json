@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)::BIGINT AS \"count!\"\n             FROM information_schema.tables\n             WHERE table_schema = 'factory' AND table_type = 'BASE TABLE'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "54c4280ffd0a4420672797e298743d8778300c4c1a74098850e9462ba8d5c352"
+}

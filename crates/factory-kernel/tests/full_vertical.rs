@@ -46,6 +46,7 @@ use factory_protocol::{
     TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1, ValidationWireV1,
     canonical_application_bundle_json_v1, canonical_command_profile_json_v1,
 };
+use sqlx::Row;
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
@@ -55,6 +56,72 @@ fn provider_free_generic_vertical_delivers_one_local_commit() {
     smol::block_on(async {
         let fixture = Fixture::new().await;
         fixture.run().await;
+        fixture.close().await;
+    });
+}
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for one disposable PostgreSQL database"]
+fn candidate_attachment_requires_complete_successful_engineering_terminal_provenance() {
+    smol::block_on(async {
+        let fixture = Fixture::new().await;
+        fixture
+            .reject_invalid_engineering_terminal_provenance()
+            .await;
+        fixture.close().await;
+    });
+}
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for one disposable PostgreSQL database"]
+fn missing_provider_credential_terminalizes_product_without_a_retry_loop() {
+    smol::block_on(async {
+        let fixture = Fixture::new().await;
+        let driver = CampaignDriver::with_credential_lookup(
+            fixture.store.clone(),
+            fixture.cas.clone(),
+            fixture.installed.clone(),
+            fixture
+                .installed
+                .execution_tools(&fixture.root.join("missing-credential-git-runtime"))
+                .expect("installed execution tools"),
+            Arc::clone(&fixture.resolver),
+            |_| None,
+        );
+        assert!(matches!(
+            driver
+                .run_next(&fixture.daemon)
+                .await
+                .expect("credential failure becomes a durable outcome"),
+            CampaignDriverOutcome::CampaignFailed { .. }
+        ));
+        assert!(matches!(
+            driver
+                .run_next(&fixture.daemon)
+                .await
+                .expect("terminal campaign is quiescent"),
+            CampaignDriverOutcome::NoRunningCampaign
+        ));
+        let campaign = fixture
+            .process
+            .campaign_status(fixture.campaign.campaign_id)
+            .await
+            .expect("failed campaign status");
+        assert_eq!(campaign.state, factory_protocol::CampaignState::Failed);
+        assert!(
+            campaign
+                .failure_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("credential environment"))
+        );
+        assert!(
+            fixture
+                .process
+                .campaign_session_costs(fixture.campaign.campaign_id, None, 10)
+                .await
+                .expect("no paid sessions")
+                .is_empty()
+        );
         fixture.close().await;
     });
 }
@@ -70,6 +137,7 @@ struct Fixture {
     process: ProcessStore,
     git: Arc<GitCustody>,
     resolver: Arc<DurableAuthorityResolver>,
+    installed: InstalledKernelBuildReceiptV1,
     driver: CampaignDriver,
     daemon: LocalDaemon,
     daemon_root: PathBuf,
@@ -81,6 +149,10 @@ impl Fixture {
     async fn new() -> Self {
         let root = std::env::temp_dir().join(unique("factory-v3-full-vertical"));
         fs::create_dir_all(&root).expect("fixture root");
+        // macOS exposes its temporary root through `/var`, while Git reports
+        // the same directory through canonical `/private/var`. Keep the
+        // application binding and repository custody on one exact path.
+        let root = fs::canonicalize(root).expect("canonical fixture root");
         let repository = root.join("product");
         let git_path = system_git();
         git(
@@ -193,6 +265,7 @@ impl Fixture {
             process,
             git,
             resolver,
+            installed,
             driver,
             daemon,
             daemon_root,
@@ -225,6 +298,7 @@ impl Fixture {
                 ..
             }
         ));
+        self.cleanup_actor(product);
 
         // This bounded application-side read is the sole route from the
         // Product terminal to an external Architect decision. The actor never
@@ -321,6 +395,7 @@ impl Fixture {
             !ref_before_terminal_provenance.status.success(),
             "candidate.submit must not create a local candidate ref before its terminal transcript"
         );
+        self.cleanup_actor(engineering);
 
         // A durable recovery action may be needed before Quality. Bound the
         // resident passes so a future scheduling loop cannot hide here.
@@ -373,6 +448,18 @@ impl Fixture {
             quality.outcome.session.terminal.session_state,
             factory_protocol::SessionState::Succeeded,
             "Quality terminal proves its packet/required-read gate before mutation",
+        );
+        assert_eq!(
+            fs::read_to_string(quality.outcome.workspace.path().join("reproduce.sh"))
+                .expect("Quality exploratory edit remains in its disposable workspace"),
+            "#!/bin/sh\nprintf 'review-only edit\\n'\n",
+            "the review actor must actually dirty its isolated workspace",
+        );
+        let quality_workspace = quality.outcome.workspace.path().to_owned();
+        self.cleanup_actor(quality);
+        assert!(
+            !quality_workspace.exists(),
+            "Quality's exploratory edit must be discarded with its exact disposable workspace",
         );
 
         assert!(matches!(
@@ -432,8 +519,8 @@ impl Fixture {
             self.driver
                 .run_next(&self.daemon)
                 .await
-                .expect("resident campaign completion"),
-            CampaignDriverOutcome::CampaignCompleted { .. }
+                .expect("resident post-delivery quiescence"),
+            CampaignDriverOutcome::NoRunningCampaign
         ));
 
         let campaign = self
@@ -442,6 +529,7 @@ impl Fixture {
             .await
             .expect("completed campaign status");
         assert_eq!(campaign.state, factory_protocol::CampaignState::Completed);
+        assert_eq!(campaign.aggregate_budget, MicroUsd::new(500_000));
         assert_eq!(
             campaign.measured_cost,
             factory_protocol::TerminalCostV1::Known(MicroUsd::new(30))
@@ -452,9 +540,17 @@ impl Fixture {
             .await
             .expect("bounded cost breakdown");
         assert_eq!(costs.len(), 3);
-        assert!(costs.iter().all(
-            |row| row.cost == Some(factory_protocol::TerminalCostV1::Known(MicroUsd::new(10)))
-        ));
+        assert_eq!(
+            costs.iter().map(|row| row.office).collect::<Vec<_>>(),
+            vec![
+                factory_protocol::Office::ProductResearch,
+                factory_protocol::Office::Engineering,
+                factory_protocol::Office::Quality,
+            ],
+        );
+        assert!(costs.iter().all(|row| {
+            row.cost == Some(factory_protocol::TerminalCostV1::Known(MicroUsd::new(10)))
+        }));
         assert_eq!(
             git_stdout(&self.repository, &self.git_path, &["remote"]).trim(),
             ""
@@ -479,12 +575,191 @@ impl Fixture {
             "all retained CAS and audit facts must remain mutually consistent",
         );
 
-        for launched in [product, engineering, quality] {
-            self.git
-                .cleanup_worktree(launched.outcome.workspace)
-                .expect("actor worktree cleanup");
-            let _ = fs::remove_dir_all(launched.outcome.staging_root);
-        }
+    }
+
+    async fn reject_invalid_engineering_terminal_provenance(&self) {
+        let product = self
+            .expect_assignment("Product", self.driver.run_next(&self.daemon).await)
+            .await;
+        self.cleanup_actor(product);
+
+        let ticket = self
+            .store
+            .ticket_store()
+            .live_ticket_proposal_artifacts(self.application)
+            .await
+            .expect("live product proposal")
+            .into_iter()
+            .next()
+            .expect("one unseeded ticket");
+        let sponsorship_rationale = self
+            .seal_kernel("negative-architect-sponsor-rationale", b"valuable product fix\n")
+            .await;
+        self.store
+            .decision_store()
+            .sponsor_ticket(&SponsorTicket {
+                command_id: unique("negative-architect-sponsor"),
+                expected_ticket_revision: ExpectedRevision::new(ticket_revision(&ticket)),
+                decision: SponsorshipDecisionV1 {
+                    ticket_revision_id: ticket.ticket_revision_id,
+                    rationale: sponsorship_rationale.reference(),
+                    principal: ArchitectPrincipalV1::parse("architect").expect("architect"),
+                },
+            })
+            .await
+            .expect("external sponsor");
+
+        let engineering = self
+            .expect_assignment(
+                "claim and Engineering",
+                self.driver.run_next(&self.daemon).await,
+            )
+            .await;
+        let engineering_session_id = engineering.outcome.session.session.session_id;
+        let status = self
+            .store
+            .ticket_store()
+            .ticket_buffer_status(self.campaign.campaign_id)
+            .await
+            .expect("candidate attachment status");
+        let action = status.downstream_action.expect("candidate attach action");
+        assert_eq!(
+            action.stage,
+            factory_kernel::ticket_store::DownstreamActionStage::CandidateCommitAttachRequired
+        );
+        let candidate_ref = format!(
+            "refs/heads/factory/{}/{}",
+            ticket.ticket_id.get(),
+            action.candidate_id.get()
+        );
+        self.assert_candidate_unattached(&candidate_ref).await;
+        self.cleanup_actor(engineering);
+
+        let inspection = sqlx::PgPool::connect(&test_database_url())
+            .await
+            .expect("focused terminal provenance inspection connection");
+        let original = sqlx::query(
+            "SELECT lifecycle, cost_state, cost_micro_usd,
+                    required_read_expected_count, required_read_satisfied_count
+               FROM factory.sessions WHERE id = $1",
+        )
+        .bind(engineering_session_id.get())
+        .fetch_one(&inspection)
+        .await
+        .expect("successful Engineering terminal row");
+        let lifecycle: i16 = original.get("lifecycle");
+        let cost_state: i16 = original.get("cost_state");
+        let cost_micro_usd: Option<i64> = original.get("cost_micro_usd");
+        let expected_reads: Option<i32> = original.get("required_read_expected_count");
+        let satisfied_reads: Option<i32> = original.get("required_read_satisfied_count");
+        assert_eq!(lifecycle, 2, "fixture begins with a succeeded terminal");
+        assert_eq!(cost_state, 0, "fixture begins with known cost");
+        assert_eq!(expected_reads, Some(2));
+        assert_eq!(satisfied_reads, Some(2));
+
+        sqlx::query("UPDATE factory.sessions SET lifecycle = 3 WHERE id = $1")
+            .bind(engineering_session_id.get())
+            .execute(&inspection)
+            .await
+            .expect("simulate a non-succeeded Engineering terminal");
+        self.assert_attachment_refused(action, "non-succeeded Engineering terminal", &candidate_ref)
+            .await;
+
+        sqlx::query(
+            "UPDATE factory.sessions
+                SET lifecycle = $1, cost_state = 1, cost_micro_usd = NULL
+              WHERE id = $2",
+        )
+        .bind(lifecycle)
+        .bind(engineering_session_id.get())
+        .execute(&inspection)
+        .await
+        .expect("simulate unknown Engineering cost");
+        self.assert_attachment_refused(action, "unknown Engineering cost", &candidate_ref)
+            .await;
+
+        sqlx::query(
+            "UPDATE factory.sessions
+                SET cost_state = $1, cost_micro_usd = $2,
+                    required_read_expected_count = NULL,
+                    required_read_satisfied_count = NULL
+              WHERE id = $3",
+        )
+        .bind(cost_state)
+        .bind(cost_micro_usd)
+        .bind(engineering_session_id.get())
+        .execute(&inspection)
+        .await
+        .expect("simulate a missing required-read assertion summary");
+        self.assert_attachment_refused(action, "missing required-read assertion", &candidate_ref)
+            .await;
+
+        sqlx::query(
+            "UPDATE factory.sessions
+                SET required_read_expected_count = $1,
+                    required_read_satisfied_count = $2
+              WHERE id = $3",
+        )
+        .bind(expected_reads)
+        .bind(satisfied_reads)
+        .bind(engineering_session_id.get())
+        .execute(&inspection)
+        .await
+        .expect("restore the valid terminal summary");
+        inspection.close().await;
+    }
+
+    async fn assert_attachment_refused(
+        &self,
+        action: factory_kernel::ticket_store::DownstreamActionContext,
+        condition: &str,
+        candidate_ref: &str,
+    ) {
+        let error = self
+            .resolver
+            .resume_candidate_commit_attach(action)
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains(
+                "candidate commit attachment requires a succeeded Engineering candidate terminal with known cost and complete required reads"
+            ),
+            "{condition} must fail at the terminal provenance gate, got: {error}",
+        );
+        self.assert_candidate_unattached(candidate_ref).await;
+    }
+
+    async fn assert_candidate_unattached(&self, candidate_ref: &str) {
+        let status = self
+            .store
+            .ticket_store()
+            .ticket_buffer_status(self.campaign.campaign_id)
+            .await
+            .expect("candidate status remains inspectable");
+        assert_eq!(
+            status
+                .downstream_evidence
+                .expect("candidate evidence")
+                .candidate_commit,
+            None,
+            "refusal must not attach a candidate commit",
+        );
+        let ref_probe = Command::new(&self.git_path)
+            .current_dir(&self.repository)
+            .args(["rev-parse", "--verify", candidate_ref])
+            .output()
+            .expect("inspect candidate ref after refused attachment");
+        assert!(
+            !ref_probe.status.success(),
+            "refusal must not create the candidate ref {candidate_ref}",
+        );
+    }
+
+    fn cleanup_actor(&self, launched: ActorLaunch) {
+        self.git
+            .cleanup_worktree(launched.outcome.workspace)
+            .expect("actor worktree cleanup");
+        let _ = fs::remove_dir_all(launched.outcome.staging_root);
     }
 
     async fn seal_kernel(&self, label: &str, bytes: &[u8]) -> Sealed {
@@ -589,6 +864,7 @@ if (ROLE === 'engineering') {
   if (typeof ticketProposal.reproducer_profile !== 'string') throw new Error('Engineering ticket proposal lacks reproducer semantics');
   const regressionCommand = ticketProposal.reproducer_profile;
   const expectedFailure = `ticket-attempt-${ATTEMPT}-${regressionCommand}`;
+  await Deno.writeTextFile(`${packet.workspace_root}/regression-expected.txt`, 'expected\n');
   await call('candidate.checkpoint_regression', {client_command_id:'checkpoint', expected_revision:admission.session_revision, regression_command:regressionCommand, expected_failure:expectedFailure});
   await Deno.writeTextFile(`${packet.workspace_root}/reproduce.sh`, '#!/bin/sh\nprintf \'expected\\n\'\nprintf \'none\\n\' >&2\n'); await Deno.chmod(`${packet.workspace_root}/reproduce.sh`, 0o755);
   const report = await seal('engineering-report.md', 'changed reproducer after kernel checkpoint\n'); const risks = await seal('engineering-risks.md', 'none\n');
@@ -596,6 +872,7 @@ if (ROLE === 'engineering') {
 }
 if (ROLE === 'quality') {
   const suite = await call('quality.run_full_suite', {client_command_id:'quality-suite', expected_revision:admission.session_revision, validation_profile:'full'});
+  await Deno.writeTextFile(`${packet.workspace_root}/reproduce.sh`, '#!/bin/sh\nprintf \'review-only edit\\n\'\n');
   const rationale = await seal('quality-rationale.md', 'independent complete suite passed\n'); const risks = await seal('quality-risks.md', 'none\n'); const probes = await seal('quality-probes.md', 'fresh exact candidate tree\n');
   await call('quality.submit_review', {client_command_id:'quality-review', expected_revision:admission.session_revision, full_suite_validation_id:suite.validation_id, verdict:'accept', rationale, risks, additional_probes:probes});
 }
@@ -896,7 +1173,7 @@ async fn install_build(
         ],
         cache_probe_module: RuntimeRelativePath::parse("cache-probe.ts")
             .expect("fake cache probe module"),
-        pi_version: "provider-free-fake".to_owned(),
+        pi_version: "0.84.1".to_owned(),
     })
     .expect("qualify static provider-free host graph");
     let source = qualify_kernel_source_v1(

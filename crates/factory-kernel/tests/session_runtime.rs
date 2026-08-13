@@ -18,7 +18,7 @@ use factory_kernel::{
     cas::{CasArtifact, CasStore},
     command_supervision::{ApprovedToolExecutables, CommandRunner, ExactExecutable},
     forum_store::ForumStore,
-    local_transport::{LocalDaemon, LocalTransportConfig},
+    local_transport::{LocalDaemon, LocalTransportConfig, OperatorClient},
     process::{CancelCampaign, CreateAssignment, ProcessStore, StartCampaign},
     process_custody::{PiHostSpawnSpec, ProcessSupervisionSpec},
     session_runtime::{
@@ -35,7 +35,8 @@ use factory_protocol::{
     ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV1, ContentDigest,
     CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1, Office, ReadExactFileV1,
     ReadObservationV1, RepositoryRelativePath, RuntimeIdentityV1, SealedArtifactReferenceV1,
-    SessionLimitsV1, TerminalCostV1, TerminalOperationV1,
+    OperatorCancelCampaignRequest, PROTOCOL_VERSION_V1, SessionLimitsV1, TerminalCostV1,
+    TerminalOperationV1,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -93,7 +94,7 @@ fn real_deno_fake_actor_commits_complete_known_cost_session_provenance() {
             .await
             .expect("bounded session cost breakdown");
         assert_eq!(cost_rows.len(), 1);
-        assert_eq!(cost_rows[0].office, Office::Engineering);
+        assert_eq!(cost_rows[0].office, Office::ProductResearch);
         assert_eq!(cost_rows[0].model_provider, "fake");
         assert_eq!(
             cost_rows[0].cost,
@@ -130,13 +131,12 @@ fn real_deno_fake_actor_commits_complete_known_cost_session_provenance() {
             .expect("sealed transcript bytes");
         assert!(transcript_bytes.starts_with(&[0x1f, 0x8b]));
 
-        // One actor-directed staging seal plus terminal reconciliation adds
-        // exactly five durable artifact facts—proposal evidence, gzip
-        // transcript, stdout, stderr, and the one read assertion—plus the
-        // session-start/session-terminal process audit records. Artifact
-        // custody has its own named `artifact.register` receipts and is not
-        // part of `process_fact_counts`; the actor's event stream never
-        // becomes PostgreSQL rows.
+        // One actor-directed staging seal plus terminal reconciliation may
+        // add at most five durable artifact facts—proposal evidence, gzip
+        // transcript, stdout, stderr, and the one read assertion. Identical
+        // content reuses an existing artifact row. The session-start and
+        // session-terminal process audit records remain exact; the actor's
+        // event stream never becomes PostgreSQL rows.
         let after = fixture
             .process
             .process_fact_counts()
@@ -144,7 +144,10 @@ fn real_deno_fake_actor_commits_complete_known_cost_session_provenance() {
             .expect("facts after launch");
         assert_eq!(after.0, before.0);
         assert_eq!(after.1, before.1 + 1);
-        assert_eq!(after.2, before.2 + 5);
+        assert!(
+            (1..=5).contains(&(after.2 - before.2)),
+            "only the bounded named transcript/stream/assertion artifacts may be added: before={before:?}, after={after:?}"
+        );
         assert_eq!(after.3, before.3 + 2);
 
         // A completed session alone does not finish a campaign in the MVP.
@@ -162,6 +165,84 @@ fn real_deno_fake_actor_commits_complete_known_cost_session_provenance() {
             .await
             .expect("typed test campaign cancellation");
 
+        fixture.close().await;
+    });
+}
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn operator_cancellation_stops_and_reconciles_the_exact_live_fake_actor() {
+    smol::block_on(async {
+        let fixture = RuntimeFixture::new(FakeTerminalMode::WaitForCancellation).await;
+        let socket = fixture.daemon.operator_socket_path().to_owned();
+        let expected_revision = fixture
+            .process
+            .campaign_status(fixture.campaign_id)
+            .await
+            .expect("running campaign")
+            .revision;
+        let launch = fixture.launch();
+        let cancel = async {
+            let mut running_session = None;
+            for _ in 0..200 {
+                if let Some(row) = fixture
+                    .process
+                    .campaign_session_costs(fixture.campaign_id, None, 1)
+                    .await
+                    .expect("active session observation")
+                    .into_iter()
+                    .next()
+                    .filter(|row| row.outcome == factory_protocol::SessionState::Running)
+                {
+                    running_session = Some(row.session_id);
+                    break;
+                }
+                smol::Timer::after(Duration::from_millis(5)).await;
+            }
+            let session_id = running_session.expect("live fake actor session");
+            let serve = fixture.daemon.serve_one_operator();
+            let client = OperatorClient::new(socket);
+            let request = client.cancel_campaign(OperatorCancelCampaignRequest {
+                protocol_version: PROTOCOL_VERSION_V1,
+                request_id: unique("cancel-request"),
+                operation: factory_protocol::OP_OPERATOR_CANCEL_CAMPAIGN.to_owned(),
+                client_command_id: unique("cancel-command"),
+                expected_revision: expected_revision.get(),
+                campaign_id: fixture.campaign_id.get(),
+                principal: "architect".to_owned(),
+            });
+            let (served, receipt) = smol::future::zip(serve, request).await;
+            served.expect("operator cancellation served");
+            let receipt = receipt.expect("operator cancellation accepted");
+            assert_eq!(receipt.campaign_id, fixture.campaign_id.get());
+            assert_eq!(receipt.aggregate_revision, expected_revision.get() + 2);
+            session_id
+        };
+        let (outcome, session_id) = smol::future::zip(launch, cancel).await;
+        let outcome = outcome.expect("cancelled fake actor reconciled");
+        assert_eq!(outcome.session.session_id, session_id);
+        assert_eq!(
+            outcome.process.reason,
+            factory_kernel::process_custody::ProcessStopReason::Cancelled
+        );
+        assert_eq!(
+            outcome.terminal.session_state,
+            factory_protocol::SessionState::Cancelled
+        );
+        assert_eq!(outcome.terminal.cost, TerminalCostV1::Unknown);
+        let status = fixture
+            .process
+            .campaign_status(fixture.campaign_id)
+            .await
+            .expect("cancelled campaign status");
+        assert_eq!(status.state, factory_protocol::CampaignState::Cancelled);
+        assert_eq!(status.measured_cost, TerminalCostV1::Unknown);
+        assert_eq!(status.failure_reason, None);
+        assert!(
+            Path::new(fixture.packet.staging_root.as_str())
+                .join("session.ndjson")
+                .is_file()
+        );
         fixture.close().await;
     });
 }
@@ -302,9 +383,10 @@ fn product_mutation_before_daemon_read_writes_no_ticket_authority() {
             .expect("actor exits after rejected mutation");
         assert_eq!(
             outcome.terminal.session_state,
-            factory_protocol::SessionState::Failed,
+            factory_protocol::SessionState::Interrupted,
             "missing exact reads must not become a successful actor terminal"
         );
+        assert_eq!(outcome.terminal.cost, TerminalCostV1::Unknown);
         let after = fixture
             .tickets
             .ticket_buffer_status(fixture.campaign_id)
@@ -320,16 +402,12 @@ fn product_mutation_before_daemon_read_writes_no_ticket_authority() {
             .campaign_status(fixture.campaign_id)
             .await
             .expect("campaign after rejected actor");
-        fixture
-            .process
-            .cancel_campaign(&CancelCampaign {
-                principal: "architect".to_owned(),
-                command_id: unique("pre-read-product-cleanup"),
-                expected_revision: ExpectedRevision::new(campaign.revision),
-                campaign_id: fixture.campaign_id,
-            })
-            .await
-            .expect("typed campaign cleanup");
+        assert_eq!(campaign.state, factory_protocol::CampaignState::Failed);
+        assert_eq!(campaign.measured_cost, TerminalCostV1::Unknown);
+        assert_eq!(
+            campaign.failure_reason.as_deref(),
+            Some("terminal session cost is unknown")
+        );
         fixture.close().await;
     });
 }
@@ -340,6 +418,7 @@ enum FakeTerminalMode {
     CompletedWithThousandEvents,
     UnknownCost,
     ProductMutationBeforeRead,
+    WaitForCancellation,
 }
 
 impl FakeTerminalMode {
@@ -349,6 +428,7 @@ impl FakeTerminalMode {
             Self::CompletedWithThousandEvents => "completed_thousand_events",
             Self::UnknownCost => "unknown_cost",
             Self::ProductMutationBeforeRead => "product_mutation_before_read",
+            Self::WaitForCancellation => "wait_for_cancellation",
         }
     }
 }
@@ -611,7 +691,8 @@ impl RuntimeFixture {
         let daemon_root = std::env::temp_dir().join(format!("fv3d-{}", unique_number()));
         let daemon = LocalDaemon::bind(LocalTransportConfig::new(daemon_root.clone()), &store)
             .await
-            .expect("daemon");
+            .expect("daemon")
+            .with_campaign_control(process.clone(), tickets.clone());
         Self {
             store,
             build,
@@ -1305,6 +1386,9 @@ const verified = await call("session.verify_packet", {
 });
 if (verified.verified !== true || verified.packet_digest !== admission.packet_digest) {
   throw new Error("packet verification was not accepted");
+}
+if (FAKE_TERMINAL_MODE === "wait_for_cancellation") {
+  await new Promise(() => {});
 }
 if (FAKE_TERMINAL_MODE === "product_mutation_before_read") {
   let rejected = false;

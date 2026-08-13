@@ -525,8 +525,22 @@ export function validateProtocolResponse(
       }
       break;
     case "daemon_status":
-      requiredResponseFields(response, ["state"], expectedOperation);
+      requiredResponseFields(
+        response,
+        ["state", "current_kernel_build_id", "aggregate_revision"],
+        expectedOperation,
+      );
       responseString(response, "state", expectedOperation);
+      responseInteger(response, "aggregate_revision", expectedOperation);
+      if (
+        response.current_kernel_build_id !== null &&
+        typeof response.current_kernel_build_id !== "string"
+      ) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} has invalid current kernel build ID`,
+        );
+      }
       break;
     case "campaign_receipt":
       requiredResponseFields(
@@ -569,6 +583,10 @@ export function validateProtocolResponse(
           "measured_cost_state",
           "deadline_unix_millis",
           "delivery_target",
+          "base_commit",
+          "candidate_tree",
+          "candidate_commit",
+          "delivered_commit",
           "delivered_attempt_count",
           "ready_ticket_count",
           "proposed_ticket_count",
@@ -582,6 +600,7 @@ export function validateProtocolResponse(
           "scheduler_next_action",
           "scheduler_constraint",
           "session_costs",
+          "session_cost_aggregates",
         ],
         expectedOperation,
       );
@@ -624,6 +643,31 @@ export function validateProtocolResponse(
           "invalid_json",
           `response for ${expectedOperation} exceeds the session cost bound`,
         );
+      }
+      if (!Array.isArray(response.session_cost_aggregates)) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} requires session cost aggregates`,
+        );
+      }
+      if (response.session_cost_aggregates.length > 18) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} exceeds the session cost aggregate bound`,
+        );
+      }
+      for (const field of [
+        "base_commit",
+        "candidate_tree",
+        "candidate_commit",
+        "delivered_commit",
+      ]) {
+        if (response[field] !== null && typeof response[field] !== "string") {
+          throw new FrameProtocolError(
+            "invalid_json",
+            `response for ${expectedOperation} has invalid ${field}`,
+          );
+        }
       }
       if (
         response.downstream_evidence !== null &&
@@ -703,6 +747,38 @@ export function validateProtocolResponse(
               `response for ${expectedOperation} has invalid ${field}`,
             );
           }
+        }
+      }
+      for (const aggregate of response.session_cost_aggregates) {
+        if (typeof aggregate !== "object" || aggregate === null || Array.isArray(aggregate)) {
+          throw new FrameProtocolError(
+            "invalid_json",
+            `response for ${expectedOperation} has invalid session cost aggregate`,
+          );
+        }
+        const row = aggregate as Record<string, unknown>;
+        for (const field of ["office", "model_provider", "model_id", "outcome"]) {
+          responseString(row, field, expectedOperation);
+        }
+        for (const field of [
+          "session_count",
+          "accounted_cost_micro_usd",
+          "pending_cost_session_count",
+          "unknown_cost_session_count",
+          "exceeded_cost_session_count",
+        ]) {
+          responseInteger(row, field, expectedOperation);
+        }
+        if (
+          !["product_research", "engineering", "quality"].includes(row.office as string) ||
+          !["prepared", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(
+            row.outcome as string,
+          )
+        ) {
+          throw new FrameProtocolError(
+            "invalid_json",
+            `response for ${expectedOperation} has unknown session cost aggregate identity`,
+          );
         }
       }
       break;
@@ -1105,12 +1181,14 @@ export interface OperatorArtifactSealReceiptResponse extends OperationReceiptRes
   readonly was_reused: boolean;
 }
 
-/** Read-only daemon liveness result. It does not create an audit receipt. */
+/** Read-only daemon liveness and current kernel-build command guard. */
 export interface FactorydStatusResponse {
   readonly protocol_version: number;
   readonly request_id: string;
   readonly operation: typeof OPERATION.factorydStatus;
   readonly state: "ready";
+  readonly current_kernel_build_id: string | null;
+  readonly aggregate_revision: number;
 }
 
 /** Durable receipt for campaign admission or cancellation, including every
@@ -1155,6 +1233,10 @@ export interface CampaignStatusResponse {
   readonly remaining_budget_micro_usd: number | null;
   readonly deadline_unix_millis: number;
   readonly delivery_target: number;
+  readonly base_commit: string | null;
+  readonly candidate_tree: string | null;
+  readonly candidate_commit: string | null;
+  readonly delivered_commit: string | null;
   readonly delivered_attempt_count: number;
   readonly ready_ticket_count: number;
   readonly proposed_ticket_count: number;
@@ -1176,6 +1258,8 @@ export interface CampaignStatusResponse {
   readonly scheduler_constraint: string | null;
   /** At most twenty exact session cost/outcome rows, ordered by session ID. */
   readonly session_costs: readonly CampaignSessionCostResponse[];
+  /** Complete all-session grouping; at most three offices by six outcomes. */
+  readonly session_cost_aggregates: readonly CampaignSessionCostAggregateResponse[];
 }
 
 export interface CampaignSessionCostResponse {
@@ -1195,6 +1279,25 @@ export interface CampaignSessionCostResponse {
   readonly cost_micro_usd: number | null;
   /** Present only for the current running session. */
   readonly elapsed_millis: number | null;
+}
+
+export interface CampaignSessionCostAggregateResponse {
+  readonly office: "product_research" | "engineering" | "quality";
+  readonly model_provider: string;
+  readonly model_id: string;
+  readonly outcome:
+    | "prepared"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "interrupted";
+  readonly session_count: number;
+  /** Sum of every persisted numeric cost, including exceeded amounts. */
+  readonly accounted_cost_micro_usd: number;
+  readonly pending_cost_session_count: number;
+  readonly unknown_cost_session_count: number;
+  readonly exceeded_cost_session_count: number;
 }
 
 /** Immutable evidence already attached to the exact downstream candidate. */

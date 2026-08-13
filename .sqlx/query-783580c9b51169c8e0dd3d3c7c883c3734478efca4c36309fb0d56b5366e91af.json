@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tr.revision AS ticket_revision, tr.application_revision_id,\n                    tr.proposal_artifact_id, tr.reproducer_artifact_id,\n                    camp.revision AS campaign_revision, kb.build_digest\n               FROM factory.ticket_revisions tr\n               JOIN factory.tickets t ON t.id = tr.ticket_id\n               JOIN factory.campaigns camp ON camp.application_revision_id = tr.application_revision_id\n               JOIN factory.kernel_builds kb ON kb.id = camp.kernel_build_id\n              WHERE tr.id = $1 AND tr.lifecycle = 1 AND t.current_ticket_revision_id = tr.id\n                AND camp.id = $2 AND camp.lifecycle = 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "proposal_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "reproducer_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "campaign_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "783580c9b51169c8e0dd3d3c7c883c3734478efca4c36309fb0d56b5366e91af"
+}

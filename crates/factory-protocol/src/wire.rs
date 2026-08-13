@@ -1031,6 +1031,12 @@ pub struct OperatorStatusResponse {
     pub request_id: String,
     pub operation: String,
     pub state: String,
+    /// The installed build currently selected by PostgreSQL. A resident
+    /// daemon always reports one; `None` is retained for typed bootstrap
+    /// clients probing an uninitialized authority in tests or tooling.
+    pub current_kernel_build_id: Option<String>,
+    /// Current revision guard for kernel-build-scoped operator commands.
+    pub aggregate_revision: u64,
 }
 
 /// One bounded, read-only campaign projection. Its ticket counts and
@@ -1056,6 +1062,14 @@ pub struct CampaignStatusResponse {
     /// Present only for a failed campaign; it is the bounded terminal daemon
     /// fault, not a mutable operator note.
     pub failure_reason: Option<String>,
+    /// Most recent claimed base in this campaign, even before a candidate is
+    /// submitted.
+    pub base_commit: Option<String>,
+    /// Most recent candidate's immutable tree and attached commit.
+    pub candidate_tree: Option<String>,
+    pub candidate_commit: Option<String>,
+    /// Most recent immutable delivery result in this campaign.
+    pub delivered_commit: Option<String>,
     pub delivered_attempt_count: u32,
     pub ready_ticket_count: u32,
     pub proposed_ticket_count: u32,
@@ -1078,6 +1092,10 @@ pub struct CampaignStatusResponse {
     /// At most twenty durable session facts, ordered by `session_id`. This is
     /// a read-only cost and current-work explanation, not a pagination API.
     pub session_costs: Vec<CampaignSessionCostResponse>,
+    /// Complete spend aggregation over every campaign session. Application
+    /// pinning permits one model per office, so office/model/outcome grouping
+    /// has a hard maximum of eighteen rows.
+    pub session_cost_aggregates: Vec<CampaignSessionCostAggregateResponse>,
 }
 
 /// One exact session cost/outcome fact within a campaign status projection.
@@ -1093,6 +1111,22 @@ pub struct CampaignSessionCostResponse {
     pub cost_state: String,
     pub cost_micro_usd: Option<u64>,
     pub elapsed_millis: Option<u64>,
+}
+
+/// Complete campaign spend grouped by the identities an operator uses to
+/// reconcile provider invoices. Unknown, exceeded, and still-running costs
+/// remain explicit counts rather than being silently folded into a sum.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CampaignSessionCostAggregateResponse {
+    pub office: String,
+    pub model_provider: String,
+    pub model_id: String,
+    pub outcome: String,
+    pub session_count: u32,
+    pub accounted_cost_micro_usd: u64,
+    pub pending_cost_session_count: u32,
+    pub unknown_cost_session_count: u32,
+    pub exceeded_cost_session_count: u32,
 }
 
 /// Immutable evidence already attached to the exact downstream candidate.

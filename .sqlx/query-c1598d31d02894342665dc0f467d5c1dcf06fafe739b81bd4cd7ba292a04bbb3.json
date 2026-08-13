@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.ticket_attempts SET stage = $1::SMALLINT, rework_ordinal = rework_ordinal + $2, failed_at = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN 'architect rejected reviewed candidate' ELSE failure_reason END, revision = $4 WHERE id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int4",
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1598d31d02894342665dc0f467d5c1dcf06fafe739b81bd4cd7ba292a04bbb3"
+}

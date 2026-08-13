@@ -1,0 +1,259 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.revision AS attempt_revision,\n                    c.ticket_attempt_id, c.base_commit, c.base_tree, c.regression_tree,\n                    c.candidate_tree, c.regression_patch_artifact_id,\n                    c.regression_command_set_artifact_id, c.regression_log_artifact_id,\n                    c.patch_artifact_id, c.engineering_session_id,\n                    c.engineering_report_artifact_id, v.id AS hard_validation_id,\n                    c.candidate_commit, c.revision AS candidate_revision,\n                    tr.id AS ticket_revision_id,\n                    qv.id AS quality_validation_id,\n                    qv.pristine_tree AS quality_validation_tree,\n                    qv.log_artifact_id AS quality_validation_log_artifact_id,\n                    qva.id AS quality_validation_audit_log_id\n               FROM factory.candidates c\n               JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n               JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n               JOIN factory.validations v ON v.candidate_id = c.id\n                    AND v.validation_scope = 0 AND v.lifecycle = 1\n               LEFT JOIN factory.validations qv ON qv.candidate_id = c.id\n                    AND qv.validation_scope = 1 AND qv.lifecycle = 1\n               LEFT JOIN factory.audit_log qva ON qva.subject_kind = 41\n                    AND qva.subject_id = qv.id AND qva.operation = 'validation.record'\n               LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id\n              WHERE c.id = $1 AND c.ticket_attempt_id = $2\n                AND ta.campaign_id = $3 AND tr.application_revision_id = $4\n                AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL\n                AND (ta.stage IN (2, 6)\n                     OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "ticket_attempt_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "base_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "regression_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "regression_patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "regression_command_set_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_command_set_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "regression_log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "engineering_session_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "engineering_session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "engineering_report_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "engineering_report_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "hard_validation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "candidate_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "quality_validation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "quality_validation_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "pristine_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "quality_validation_log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "quality_validation_audit_log_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "68b46223d85bd6271132460c56f261795940977984e9a5aab1d048fffea809ca"
+}

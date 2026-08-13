@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.ticket_attempt_id, c.base_commit, c.candidate_tree, c.candidate_commit,\n                    c.revision AS candidate_revision, ta.revision AS attempt_revision,\n                    tr.revision AS ticket_revision, tr.ticket_id, tr.application_revision_id,\n                    camp.revision AS campaign_revision, kb.build_digest\n               FROM factory.candidates c\n               JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n               JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n               JOIN factory.campaigns camp ON camp.id = ta.campaign_id\n               JOIN factory.kernel_builds kb ON kb.id = camp.kernel_build_id\n              WHERE c.id = $1 AND c.lifecycle = 3 AND ta.stage = 3 AND camp.lifecycle = 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "ticket_attempt_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "candidate_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "campaign_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd5b4a55538218dc8564bd7be588fdcd4d35bdd6109475e6918abb96605a0e8d"
+}

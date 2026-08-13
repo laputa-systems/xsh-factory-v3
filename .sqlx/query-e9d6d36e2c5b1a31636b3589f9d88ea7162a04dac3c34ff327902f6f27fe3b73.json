@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.deliveries (\n                 candidate_id, candidate_commit, expected_old_commit, resulting_commit,\n                 resulting_tree, method, lifecycle, recovery_status, receipt_artifact_id\n             ) VALUES ($1, $2, $3, $4, $5, 0, 1, 0, $6) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.deliveries",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e9d6d36e2c5b1a31636b3589f9d88ea7162a04dac3c34ff327902f6f27fe3b73"
+}

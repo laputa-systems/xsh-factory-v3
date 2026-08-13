@@ -1,5 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { absolutePath, parseArguments, sameDatabaseTarget } from "./backup_restore_check.ts";
+import {
+  absolutePath,
+  parseArguments,
+  quoteIdentifier,
+  sameDatabaseTarget,
+} from "./backup_restore_check.ts";
 
 Deno.test("backup restore argument parser accepts only unique flag/value pairs", () => {
   assertEquals(
@@ -16,6 +21,8 @@ Deno.test("backup restore argument parser accepts only unique flag/value pairs",
 Deno.test("backup restore path guard requires normalized absolute distinct roots", () => {
   assertEquals(absolutePath("/restore///"), "/restore");
   assertThrows(() => absolutePath("relative/restore"));
+  assertThrows(() => absolutePath("/restore/../source"));
+  assertThrows(() => absolutePath("/restore/./clone"));
 });
 
 Deno.test("backup restore target guard compares PostgreSQL host port and name", () => {
@@ -40,4 +47,11 @@ Deno.test("backup restore target guard compares PostgreSQL host port and name", 
     ),
     false,
   );
+});
+
+Deno.test("logical database fingerprint quotes catalog-owned identifiers", () => {
+  assertEquals(quoteIdentifier("factory"), '"factory"');
+  assertEquals(quoteIdentifier('relation"name'), '"relation""name"');
+  assertThrows(() => quoteIdentifier(""));
+  assertThrows(() => quoteIdentifier("relation\0name"));
 });

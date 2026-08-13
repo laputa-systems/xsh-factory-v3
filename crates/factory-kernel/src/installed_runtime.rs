@@ -49,6 +49,8 @@ const KERNEL_BUILD_DOMAIN: &[u8] = b"factory-v3-kernel-build-v1\0";
 const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-v3\0";
 const MAX_RECEIPT_BYTES: usize = 256 * 1024;
 const OPENROUTER_PROVIDER: &str = "openrouter";
+const PINNED_DENO_VERSION: &str = "2.9.4";
+const PINNED_PI_VERSION: &str = "0.84.1";
 
 /// Explicit installation inputs for one immutable Deno/Pi runtime.
 ///
@@ -56,7 +58,7 @@ const OPENROUTER_PROVIDER: &str = "openrouter";
 /// actor wire request. `host_source_files` must enumerate the complete regular
 /// file inventory under `host_source_root`; an omitted local import is a
 /// qualification error. The cache probe is an explicit source-relative module
-/// with no host startup action (normally `factory-pi-host/mod.ts`); it proves
+/// with no host startup action (normally `factory-pi-host/cache-probe.ts`); it proves
 /// the already-qualified graph/typecheck is available from the sealed cache.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledRuntimeQualification {
@@ -861,6 +863,13 @@ impl InstalledRuntimeManifest {
         qualification: InstalledRuntimeQualification,
     ) -> Result<Self, InstalledRuntimeError> {
         validate_text("Pi SDK version", &qualification.pi_version)?;
+        if qualification.pi_version != PINNED_PI_VERSION {
+            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Pi SDK",
+                expected: PINNED_PI_VERSION,
+                actual: qualification.pi_version,
+            });
+        }
         if qualification.host_source_files.is_empty() {
             return Err(InstalledRuntimeError::EmptySourceGraph);
         }
@@ -909,6 +918,22 @@ impl InstalledRuntimeManifest {
 
         let deno_json_digest = digest_regular_file("Deno config", &deno_config)?;
         let deno_lock_digest = digest_regular_file("Deno lock", &deno_lock)?;
+        let (deno_version, deno_version_output) = run_deno_version(&deno_executable)?;
+        if deno_version != PINNED_DENO_VERSION {
+            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Deno",
+                expected: PINNED_DENO_VERSION,
+                actual: deno_version,
+            });
+        }
+        populate_frozen_deno_cache(
+            &deno_executable,
+            &host_source_root,
+            &host_entrypoint,
+            &deno_config,
+            &deno_lock,
+            &deno_dir,
+        )?;
         let resolved_dependency_graph_digest = qualify_deno_module_graph(
             &deno_executable,
             &host_source_root,
@@ -917,10 +942,7 @@ impl InstalledRuntimeManifest {
             &deno_lock,
             &deno_dir,
             &source_files,
-            false,
         )?;
-        let (deno_version, deno_version_output) = run_deno_version(&deno_executable)?;
-
         let manifest = Self {
             deno_executable,
             deno_version,
@@ -1146,6 +1168,20 @@ impl InstalledRuntimeManifest {
         let pi_version = cursor.text("Pi SDK version")?;
         validate_text("Deno version", &deno_version)?;
         validate_text("Pi SDK version", &pi_version)?;
+        if deno_version != PINNED_DENO_VERSION {
+            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Deno",
+                expected: PINNED_DENO_VERSION,
+                actual: deno_version,
+            });
+        }
+        if pi_version != PINNED_PI_VERSION {
+            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Pi SDK",
+                expected: PINNED_PI_VERSION,
+                actual: pi_version,
+            });
+        }
         if !host_entrypoint.starts_with(&host_source_root) {
             return Err(InstalledRuntimeError::ReceiptInvalid {
                 reason: "Pi host entrypoint is outside source root",
@@ -1283,7 +1319,6 @@ impl InstalledRuntimeManifest {
             &self.deno_lock,
             &self.deno_dir,
             &self.source_files,
-            true,
         )?;
         if observed_dependency_graph_digest != self.resolved_dependency_graph_digest {
             return Err(InstalledRuntimeError::RuntimeDrift {
@@ -1980,11 +2015,49 @@ fn run_frozen_cache_probe(
     Ok(())
 }
 
+/// Populates one build-specific cache during stopped-daemon installation.
+/// This command resolves the frozen lock but cannot execute the actor or call
+/// a model provider. Every later verification and spawn is cached-only.
+fn populate_frozen_deno_cache(
+    deno_executable: &Path,
+    host_source_root: &Path,
+    host_entrypoint: &Path,
+    deno_config: &Path,
+    deno_lock: &Path,
+    deno_dir: &Path,
+) -> Result<(), InstalledRuntimeError> {
+    let status = exact_deno_command(deno_executable)
+        .env("DENO_DIR", deno_dir)
+        .current_dir(host_source_root)
+        .arg("cache")
+        .arg("--frozen")
+        .arg("--config")
+        .arg(deno_config)
+        .arg("--lock")
+        .arg(deno_lock)
+        .arg(host_entrypoint)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|source| InstalledRuntimeError::DenoCommand {
+            operation: "cache --frozen",
+            source,
+        })?;
+    if !status.success() {
+        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
+            status: status.code(),
+        });
+    }
+    Ok(())
+}
+
 /// Captures Deno's actual resolved graph while installation is allowed to
-/// populate the exact build-specific cache. It does not trust an operator
-/// declaration for the packet's dependency identity. The graph is serialized
-/// from miniserde's ordered JSON object representation before hashing, so
-/// whitespace and object key order do not change the durable digest.
+/// use the populated build-specific cache. It does not trust an operator
+/// declaration for the packet's dependency identity. Qualification and
+/// re-verification intentionally run this same `--no-remote` command: Deno
+/// 2.9 emits a different JSON shape when the flag is omitted, even with an
+/// identical graph. The frozen lock and cached-only execution probe provide
+/// the remote-package integrity and availability fences.
 fn qualify_deno_module_graph(
     deno_executable: &Path,
     host_source_root: &Path,
@@ -1993,19 +2066,14 @@ fn qualify_deno_module_graph(
     deno_lock: &Path,
     deno_dir: &Path,
     source_files: &[InstalledSourceFile],
-    cached_only_reverify: bool,
 ) -> Result<ContentDigest, InstalledRuntimeError> {
-    let mut command = exact_deno_command(deno_executable);
-    command
+    let output = exact_deno_command(deno_executable)
         .env("DENO_DIR", deno_dir)
         .current_dir(host_source_root)
         .arg("info")
         .arg("--json")
-        .arg("--frozen");
-    if cached_only_reverify {
-        command.arg("--no-remote");
-    }
-    let output = command
+        .arg("--frozen")
+        .arg("--no-remote")
         .arg("--config")
         .arg(deno_config)
         .arg("--lock")
@@ -2013,11 +2081,7 @@ fn qualify_deno_module_graph(
         .arg(host_entrypoint)
         .output()
         .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: if cached_only_reverify {
-                "info --json --frozen --no-remote"
-            } else {
-                "info --json --frozen"
-            },
+            operation: "info --json --frozen --no-remote",
             source,
         })?;
     if !output.status.success() {
@@ -2294,6 +2358,13 @@ pub enum InstalledRuntimeError {
     #[error("Deno --version stdout does not begin with a Deno version")]
     VersionOutputInvalid,
 
+    #[error("{component} version must be {expected}, found {actual}")]
+    RuntimeVersionNotPinned {
+        component: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
+
     #[error("frozen cached-only Deno graph probe failed with status {status:?}")]
     FrozenCacheProbeFailed { status: Option<i32> },
 
@@ -2369,6 +2440,7 @@ mod tests {
                    directory=$(dirname \"$entrypoint\")\n\
                    printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"},{\"specifier\":\"file://%s/support.ts\",\"local\":\"%s/support.ts\"}]}' \"$entrypoint\" \"$entrypoint\" \"$directory\" \"$directory\"; exit 0\n\
                  fi\n\
+                 if [ \"$1\" = \"cache\" ]; then exit 0; fi\n\
                  if { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\n\
                  exit 17\n",
             )
@@ -2700,6 +2772,37 @@ mod tests {
         assert!(matches!(
             manifest.verify_installed_material(),
             Err(InstalledRuntimeError::FrozenCacheProbeFailed { status: Some(17) })
+        ));
+    }
+
+    #[test]
+    fn installation_rejects_unpinned_deno_and_pi_versions() {
+        let fixture = Fixture::new("unpinned-deno");
+        let script = fs::read_to_string(&fixture.deno)
+            .expect("read fake Deno")
+            .replace("deno 2.9.4", "deno 2.9.5");
+        fs::write(&fixture.deno, script).expect("write changed fake Deno");
+        fs::set_permissions(&fixture.deno, fs::Permissions::from_mode(0o755))
+            .expect("retain executable mode");
+        assert!(matches!(
+            InstalledRuntimeManifest::qualify(fixture.qualification()),
+            Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Deno",
+                expected: "2.9.4",
+                actual,
+            }) if actual == "2.9.5"
+        ));
+
+        let fixture = Fixture::new("unpinned-pi");
+        let mut qualification = fixture.qualification();
+        qualification.pi_version = "0.84.2".to_owned();
+        assert!(matches!(
+            InstalledRuntimeManifest::qualify(qualification),
+            Err(InstalledRuntimeError::RuntimeVersionNotPinned {
+                component: "Pi SDK",
+                expected: "0.84.1",
+                actual,
+            }) if actual == "0.84.2"
         ));
     }
 

@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.validations (\n                candidate_id, kernel_build_id, performed_by_session_id, validation_scope,\n                validation_profile, pristine_tree, command_set_artifact_id, lifecycle,\n                duration_millis, log_artifact_id\n             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int2",
+        "Text",
+        "Text",
+        "Int8",
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9c6dd0fddfc5e167c2df3d04b8ff21c66dd8f5671a5052e1273bc6a920ee9240"
+}

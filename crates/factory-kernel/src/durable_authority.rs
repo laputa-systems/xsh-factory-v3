@@ -786,8 +786,9 @@ impl DurableAuthorityResolver {
             },
             regression_command: reproducer.clone(),
             regression_expected_failure: format!(
-                "ticket-attempt-{}-reproducer",
-                ticket_attempt_id.get()
+                "ticket-attempt-{}-{}",
+                ticket_attempt_id.get(),
+                stored_profile.name,
             ),
             regression_worktree_name: worktree_name("engineering-regression", session_suffix)?,
             product_reproducer: reproducer,

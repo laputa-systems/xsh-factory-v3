@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT artifact.digest\n               FROM factory.sessions s\n               JOIN factory.assignments a ON a.id = s.assignment_id\n               JOIN factory.artifacts artifact ON artifact.id = s.transcript_artifact_id\n              WHERE s.id = $1 AND s.campaign_id = $2 AND s.application_revision_id = $3\n                AND s.office = 1 AND a.office = 1 AND a.campaign_id = $2\n                AND a.application_revision_id = $3\n                AND s.lifecycle = 2 AND s.cost_state = 0\n                AND s.terminal_operation = 1\n                AND s.required_read_satisfied_count = s.required_read_expected_count",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cbb8828606af3bb219329545a3e7c7435af6e22ec349249ddc27abad37879fd9"
+}

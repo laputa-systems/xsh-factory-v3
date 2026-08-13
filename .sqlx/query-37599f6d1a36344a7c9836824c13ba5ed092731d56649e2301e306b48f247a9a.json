@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT NOT EXISTS (\n                 SELECT 1\n                 FROM (\n                    SELECT $1::SMALLINT AS subject_kind, id, $2::TEXT AS operation\n                    FROM factory.kernel_builds\n                    UNION ALL\n                    SELECT $3::SMALLINT, id, $4::TEXT\n                    FROM factory.application_revisions\n                    UNION ALL\n                    SELECT $5::SMALLINT, id, $6::TEXT\n                    FROM factory.repositories\n                    UNION ALL\n                    SELECT $7::SMALLINT, a.id, $8::TEXT\n                    FROM factory.artifacts AS a\n                    WHERE NOT EXISTS (\n                        SELECT 1 FROM factory.kernel_builds AS kb\n                        WHERE kb.qualification_receipt_artifact_id = a.id\n                    )\n                    AND NOT EXISTS (\n                        SELECT 1 FROM factory.application_revisions AS ar\n                        WHERE ar.bundle_artifact_id = a.id\n                           OR ar.mission_artifact_id = a.id\n                           OR ar.product_research_system_template_artifact_id = a.id\n                           OR ar.product_research_assignment_template_artifact_id = a.id\n                           OR ar.engineering_system_template_artifact_id = a.id\n                           OR ar.engineering_assignment_template_artifact_id = a.id\n                           OR ar.quality_system_template_artifact_id = a.id\n                           OR ar.quality_assignment_template_artifact_id = a.id\n                    )\n                    UNION ALL\n                    SELECT 4::SMALLINT, id, 'campaign.start'::TEXT\n                    FROM factory.campaigns\n                    UNION ALL\n                    SELECT 5::SMALLINT, id, 'assignment.create'::TEXT\n                    FROM factory.assignments\n                    UNION ALL\n                    SELECT 6::SMALLINT, id, 'session.start'::TEXT\n                    FROM factory.sessions\n                    UNION ALL\n                    SELECT 10::SMALLINT, id,\n                           CASE WHEN supersedes_topic_id IS NULL\n                                THEN 'forum.topic.create'\n                                ELSE 'forum.topic.supersede'\n                           END\n                    FROM factory.forum_topics\n                    UNION ALL\n                    SELECT 11::SMALLINT, id,\n                           CASE WHEN supersedes_thread_id IS NULL\n                                THEN 'forum.thread.create'\n                                ELSE 'forum.thread.supersede'\n                           END\n                    FROM factory.forum_threads\n                    UNION ALL\n                    SELECT 12::SMALLINT, id, 'forum.post.append'::TEXT\n                    FROM factory.forum_posts\n                    UNION ALL\n                    SELECT 30::SMALLINT, id, 'ticket.propose'::TEXT\n                    FROM factory.ticket_revisions\n                    UNION ALL\n                    SELECT 32::SMALLINT, id, 'ticket.claim'::TEXT\n                    FROM factory.ticket_attempts\n                    UNION ALL\n                    SELECT 40::SMALLINT, id, 'candidate.submit'::TEXT\n                    FROM factory.candidates\n                    UNION ALL\n                    SELECT 41::SMALLINT, id, 'validation.record'::TEXT\n                    FROM factory.validations\n                    UNION ALL\n                    SELECT 42::SMALLINT, id, 'quality.review.submit'::TEXT\n                    FROM factory.reviews\n                    UNION ALL\n                    SELECT 43::SMALLINT, id,\n                           CASE decision_kind\n                                WHEN 0 THEN 'architect.ticket.sponsor'\n                                WHEN 1 THEN 'architect.ticket.release'\n                                ELSE 'architect.candidate.decide'\n                           END\n                    FROM factory.architect_decisions\n                    UNION ALL\n                    SELECT 44::SMALLINT, id, 'delivery.record'::TEXT\n                    FROM factory.deliveries\n                 ) AS fact\n                 LEFT JOIN factory.audit_log AS audit\n                   ON audit.subject_kind = fact.subject_kind\n                  AND audit.subject_id = fact.id\n                  AND audit.operation = fact.operation\n                 GROUP BY fact.subject_kind, fact.id\n                 HAVING count(audit.id) = 0\n                     OR (fact.subject_kind <> $7::SMALLINT AND count(audit.id) <> 1)\n             ) AS \"consistent!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "consistent!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Text",
+        "Int2",
+        "Text",
+        "Int2",
+        "Text",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "37599f6d1a36344a7c9836824c13ba5ed092731d56649e2301e306b48f247a9a"
+}

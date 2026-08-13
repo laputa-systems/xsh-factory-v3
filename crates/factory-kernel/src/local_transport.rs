@@ -63,6 +63,7 @@ use crate::{
     operator_artifact_rpc::{
         OperatorArtifactCapability, OperatorArtifactRpc, OperatorArtifactRpcError,
     },
+    session_runtime::ActiveSessionCancellationRegistry,
     operator_forum_rpc::{OperatorForumRpc, OperatorForumRpcError},
     operator_navigation::{
         OperatorNavigationCapability, OperatorNavigationRpc, OperatorNavigationRpcError,
@@ -1030,12 +1031,14 @@ impl OperatorClient {
 pub struct LocalDaemon {
     runtime: RuntimeSocket,
     daemon_lock: Option<DaemonLock>,
+    status_store: KernelStore,
     operator_rpc: Option<OperatorRpc>,
     campaign_rpc: Option<CampaignOperatorRpc>,
     application_rpc: Option<ApplicationOperatorRpc>,
     navigation_rpc: Option<OperatorNavigationRpc>,
     artifact_rpc: Option<OperatorArtifactRpc>,
     forum_rpc: Option<OperatorForumRpc>,
+    active_sessions: ActiveSessionCancellationRegistry,
 }
 
 impl LocalDaemon {
@@ -1051,12 +1054,14 @@ impl LocalDaemon {
         Ok(Self {
             runtime,
             daemon_lock: Some(daemon_lock),
+            status_store: store.clone(),
             operator_rpc: None,
             campaign_rpc: None,
             application_rpc: None,
             navigation_rpc: None,
             artifact_rpc: None,
             forum_rpc: None,
+            active_sessions: ActiveSessionCancellationRegistry::default(),
         })
     }
 
@@ -1087,8 +1092,13 @@ impl LocalDaemon {
             OperatorCampaignCapability::from_operator_transport(),
             process,
             tickets,
+            self.active_sessions.clone(),
         ));
         self
+    }
+
+    pub(crate) fn active_session_cancellations(&self) -> ActiveSessionCancellationRegistry {
+        self.active_sessions.clone()
     }
 
     /// Enables generic application inspection, registration, and activation
@@ -1230,12 +1240,14 @@ impl LocalDaemon {
             let navigation_router = self.navigation_rpc.clone();
             let artifact_router = self.artifact_rpc.clone();
             let forum_router = self.forum_rpc.clone();
+            let status_store = self.status_store.clone();
             smol::spawn(async move {
                 if let Err(error) = serve_operator_connection(
                     stream,
                     deadline,
                     operation_deadline,
                     write_deadline,
+                    Some(status_store),
                     router,
                     campaign_router,
                     application_router,
@@ -1261,6 +1273,7 @@ impl LocalDaemon {
             self.runtime.config.read_deadline,
             self.runtime.config.operation_deadline,
             self.runtime.config.write_deadline,
+            Some(self.status_store.clone()),
             self.operator_rpc.clone(),
             self.campaign_rpc.clone(),
             self.application_rpc.clone(),
@@ -1611,6 +1624,7 @@ async fn serve_operator_connection(
     read_deadline: Duration,
     operation_deadline: Duration,
     write_deadline: Duration,
+    status_store: Option<KernelStore>,
     operator_rpc: Option<OperatorRpc>,
     campaign_rpc: Option<CampaignOperatorRpc>,
     application_rpc: Option<ApplicationOperatorRpc>,
@@ -1638,11 +1652,22 @@ async fn serve_operator_connection(
         OPERATOR_STATUS_OPERATION => {
             let request: OperatorStatusRequest =
                 decode_json_frame(&request, REQUEST_FRAME_MAX_BYTES, OPERATOR_STATUS_OPERATION)?;
+            let build_status = match status_store {
+                Some(store) => store.kernel_build_status().await?,
+                None => crate::storage::KernelBuildStatus {
+                    current_kernel_build_id: None,
+                    aggregate_revision: factory_protocol::AggregateRevision::initial(),
+                },
+            };
             let response = OperatorStatusResponse {
                 protocol_version: PROTOCOL_VERSION_V1,
                 request_id: request.request_id,
                 operation: OPERATOR_STATUS_OPERATION.to_owned(),
                 state: "ready".to_owned(),
+                current_kernel_build_id: build_status
+                    .current_kernel_build_id
+                    .map(|build| build.digest().to_hex()),
+                aggregate_revision: build_status.aggregate_revision.get(),
             };
             write_stream_frame_json(
                 &mut stream,
@@ -2036,6 +2061,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                 )
                 .await
             });
@@ -2045,6 +2071,8 @@ mod tests {
                 .expect("status response");
             assert_eq!(status.state, "ready");
             assert_eq!(status.request_id, "status-1");
+            assert_eq!(status.current_kernel_build_id, None);
+            assert_eq!(status.aggregate_revision, 0);
             server.await.expect("server response");
             fs::remove_file(root.join(RUNTIME_LOCK_FILENAME)).expect("remove test lock");
             fs::remove_dir(root).expect("remove test root");
@@ -2071,6 +2099,8 @@ mod tests {
                         request_id: "another-request".to_owned(),
                         operation: OPERATOR_STATUS_OPERATION.to_owned(),
                         state: "ready".to_owned(),
+                        current_kernel_build_id: Some("a".repeat(64)),
+                        aggregate_revision: 1,
                     },
                     RESPONSE_FRAME_MAX_BYTES,
                     Duration::from_secs(1),
@@ -2191,6 +2221,10 @@ mod tests {
                         deadline_unix_millis: 4_000_000_000_000,
                         delivery_target: 2,
                         failure_reason: None,
+                        base_commit: None,
+                        candidate_tree: None,
+                        candidate_commit: None,
+                        delivered_commit: None,
                         delivered_attempt_count: 0,
                         ready_ticket_count: 1,
                         proposed_ticket_count: 0,
@@ -2211,6 +2245,7 @@ mod tests {
                         scheduler_next_action: "blocked".to_owned(),
                         scheduler_constraint: Some("in_flight_ticket_limit_reached".to_owned()),
                         session_costs: vec![],
+                        session_cost_aggregates: vec![],
                     },
                     RESPONSE_FRAME_MAX_BYTES,
                     Duration::from_secs(1),

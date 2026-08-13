@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT artifact_id FROM (\n                         SELECT tr.proposal_artifact_id AS artifact_id\n                           FROM factory.candidates c\n                           JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n                           JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                           LEFT JOIN factory.validations qv ON qv.candidate_id = c.id\n                                AND qv.validation_scope = 1 AND qv.lifecycle = 1\n                           LEFT JOIN factory.reviews qr ON qr.candidate_id = c.id\n                          WHERE c.id = $1 AND c.ticket_attempt_id = $2\n                            AND ta.campaign_id = $3 AND tr.application_revision_id = $4\n                            AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL\n                            AND (ta.stage IN (2, 6)\n                                 OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))\n                         UNION\n                         SELECT c.changed_paths_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.patch_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.engineering_report_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.risks_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.regression_patch_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.regression_command_set_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT c.regression_log_artifact_id FROM factory.candidates c WHERE c.id = $1\n                         UNION SELECT v.command_set_artifact_id FROM factory.validations v WHERE v.candidate_id = $1\n                         UNION SELECT v.log_artifact_id FROM factory.validations v WHERE v.candidate_id = $1\n                         UNION SELECT r.rationale_artifact_id FROM factory.reviews r WHERE r.candidate_id = $1\n                         UNION SELECT r.risks_artifact_id FROM factory.reviews r WHERE r.candidate_id = $1\n                         UNION SELECT r.additional_probes_artifact_id FROM factory.reviews r\n                          WHERE r.candidate_id = $1 AND r.additional_probes_artifact_id IS NOT NULL\n                         UNION SELECT ad.rationale_artifact_id FROM factory.architect_decisions ad WHERE ad.candidate_id = $1\n                     ) closure",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b2d3e05926e8c40c7cc9cb9753a8a271a37b1179c222c98eaa175ffeafbf9872"
+}

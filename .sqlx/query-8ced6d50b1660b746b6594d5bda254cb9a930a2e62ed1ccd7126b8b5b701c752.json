@@ -1,0 +1,362 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.revision AS candidate_revision, c.base_commit, c.base_tree,\n                    c.regression_tree, c.candidate_tree, c.changed_paths_artifact_id,\n                    c.regression_patch_artifact_id, c.regression_command_set_artifact_id,\n                    c.regression_log_artifact_id, c.patch_artifact_id,\n                    c.engineering_session_id, c.engineering_report_artifact_id,\n                    c.commit_subject, c.commit_body, c.regression_test_identity,\n                    c.risks_artifact_id,\n                    ta.revision AS attempt_revision, tr.id AS ticket_revision_id,\n                    tr.revision AS ticket_revision, tr.ticket_id,\n                    tr.application_revision_id, tr.proposal_artifact_id,\n                    tr.reproducer_artifact_id, tr.expected_observation_artifact_id,\n                    tr.discovery_observation_artifact_id,\n                    camp.id AS campaign_id, kb.build_digest,\n                    FLOOR(EXTRACT(EPOCH FROM es.started_at))::BIGINT\n                        AS engineering_started_at_seconds,\n                    hv.id AS hard_validation_id\n               FROM factory.candidates c\n               JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id\n               JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n               JOIN factory.campaigns camp ON camp.id = ta.campaign_id\n               JOIN factory.kernel_builds kb ON kb.id = camp.kernel_build_id\n               JOIN factory.sessions es ON es.id = c.engineering_session_id\n               JOIN factory.assignments a ON a.id = es.assignment_id\n               LEFT JOIN factory.validations hv ON hv.candidate_id = c.id\n                    AND hv.validation_scope = 0 AND hv.lifecycle = 1\n              WHERE c.id = $1 AND c.ticket_attempt_id = $2\n                AND c.lifecycle = $3 AND ta.stage = $4\n                AND c.candidate_commit IS NULL\n                AND camp.lifecycle = 0 AND es.campaign_id = camp.id\n                AND es.office = 1 AND a.office = 1\n                AND a.campaign_id = camp.id\n                AND a.application_revision_id = tr.application_revision_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "base_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "regression_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "changed_paths_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "changed_paths_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "regression_patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "regression_command_set_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_command_set_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "regression_log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "engineering_session_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "engineering_session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "engineering_report_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "engineering_report_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "commit_subject",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "commit_subject"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "commit_body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "commit_body"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "regression_test_identity",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_test_identity"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "risks_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "risks_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "proposal_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "reproducer_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "engineering_started_at_seconds",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 28,
+        "name": "hard_validation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true
+    ]
+  },
+  "hash": "8ced6d50b1660b746b6594d5bda254cb9a930a2e62ed1ccd7126b8b5b701c752"
+}

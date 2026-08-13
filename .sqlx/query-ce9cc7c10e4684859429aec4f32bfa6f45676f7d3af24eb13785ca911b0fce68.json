@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT candidate_id, performed_by_session_id, lifecycle, kernel_build_id, pristine_tree\n         FROM factory.validations\n         WHERE id = $1 AND candidate_id = $2 AND validation_scope = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "candidate_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "performed_by_session_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "performed_by_session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kernel_build_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "pristine_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "pristine_tree"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ce9cc7c10e4684859429aec4f32bfa6f45676f7d3af24eb13785ca911b0fce68"
+}

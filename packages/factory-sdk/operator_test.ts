@@ -23,7 +23,12 @@ class OperatorTransport implements FrameTransport {
     const response = (() => {
       switch (request.operation) {
         case OPERATION.factorydStatus:
-          return { ...envelope, state: "ready" };
+          return {
+            ...envelope,
+            state: "ready",
+            current_kernel_build_id: "a".repeat(64),
+            aggregate_revision: 3,
+          };
         case OPERATION.operatorCampaignStart:
         case OPERATION.operatorCampaignCancel:
           return {
@@ -51,6 +56,10 @@ class OperatorTransport implements FrameTransport {
             remaining_budget_micro_usd: 90,
             deadline_unix_millis: 4_000_000_000_000,
             delivery_target: 1,
+            base_commit: "b".repeat(40),
+            candidate_tree: "c".repeat(40),
+            candidate_commit: null,
+            delivered_commit: null,
             delivered_attempt_count: 0,
             ready_ticket_count: 0,
             proposed_ticket_count: 0,
@@ -85,6 +94,17 @@ class OperatorTransport implements FrameTransport {
               cost_state: "pending",
               cost_micro_usd: null,
               elapsed_millis: 1,
+            }],
+            session_cost_aggregates: [{
+              office: "quality",
+              model_provider: "openai",
+              model_id: "gpt-5.6",
+              outcome: "running",
+              session_count: 1,
+              accounted_cost_micro_usd: 0,
+              pending_cost_session_count: 1,
+              unknown_cost_session_count: 0,
+              exceeded_cost_session_count: 0,
             }],
           };
         case OPERATION.operatorTicketList:

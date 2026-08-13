@@ -12,7 +12,7 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 // assigned investigation, implementation, or review without exposing the
 // surrounding control system as a metaphor the worker has to interpret.
 const forbiddenInstitutionalVocabulary =
-  /\b(?:architect|campaign|compan(?:y|ies)|cto|department|director|employee|factory|grand\s+architect|institution(?:s|al|ally)?|kernel|manager|office|organization(?:s|al|ally)?|sponsor(?:ed|ship)?|ticket\s+buffer)\b/iu;
+  /\b(?:architect|campaign|compan(?:y|ies)|control[- ]plane|cto|daemon|department|director|employee|factory|grand\s+architect|institution(?:s|al|ally)?|kernel|manager|office|organization(?:s|al|ally)?|sponsor(?:ed|ship)?|ticket\s+buffer)\b/iu;
 
 const sourceRoot = decodeURIComponent(new URL("./", import.meta.url).pathname);
 
@@ -165,7 +165,7 @@ function assertRenderedNeutral(
 }
 
 function assertNeutral(label: string, value: string): void {
-  const match = forbiddenInstitutionalVocabulary.exec(value);
+  const match = forbiddenInstitutionalVocabulary.exec(value.replaceAll("_", " "));
   if (match !== null) {
     throw new Error(`${label} exposes institutional vocabulary ${JSON.stringify(match[0])}`);
   }

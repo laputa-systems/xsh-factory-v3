@@ -59,14 +59,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let status = OperatorClient::new(connection.socket_path)
                 .probe(status_request_id())
                 .await?;
-            if connection.json {
-                println!(
-                    "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"state\":\"{}\"}}",
-                    status.protocol_version, status.request_id, status.operation, status.state
-                );
-            } else {
-                println!("daemon: {}", status.state);
-            }
+            println!("{}", daemon_status_output(&status, connection.json));
         }
         CliCommand::Sponsor {
             base,
@@ -453,6 +446,27 @@ fn print_decision(receipt: &ArchitectDecisionReceiptResponse, json: bool) {
     }
 }
 
+fn daemon_status_output(status: &factory_protocol::OperatorStatusResponse, json: bool) -> String {
+    if json {
+        format!(
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"state\":\"{}\",\"current_kernel_build_id\":{},\"aggregate_revision\":{}}}",
+            status.protocol_version,
+            status.request_id,
+            status.operation,
+            status.state,
+            optional_json_string(status.current_kernel_build_id.as_deref()),
+            status.aggregate_revision,
+        )
+    } else {
+        format!(
+            "daemon: {}; build {}; revision {}",
+            status.state,
+            status.current_kernel_build_id.as_deref().unwrap_or("none"),
+            status.aggregate_revision,
+        )
+    }
+}
+
 fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
     if json {
         println!(
@@ -489,7 +503,7 @@ fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
 fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
     if json {
         println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"failure_reason\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"downstream_evidence\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{}}}",
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"failure_reason\":{},\"base_commit\":{},\"candidate_tree\":{},\"candidate_commit\":{},\"delivered_commit\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"downstream_evidence\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{},\"session_cost_aggregates\":{}}}",
             status.protocol_version,
             status.request_id,
             status.operation,
@@ -506,6 +520,10 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             status.deadline_unix_millis,
             status.delivery_target,
             optional_json_string(status.failure_reason.as_deref()),
+            optional_json_string(status.base_commit.as_deref()),
+            optional_json_string(status.candidate_tree.as_deref()),
+            optional_json_string(status.candidate_commit.as_deref()),
+            optional_json_string(status.delivered_commit.as_deref()),
             status.delivered_attempt_count,
             status.ready_ticket_count,
             status.proposed_ticket_count,
@@ -526,16 +544,18 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             status.scheduler_next_action,
             optional_json_string(status.scheduler_constraint.as_deref()),
             session_costs_json(&status.session_costs),
+            session_cost_aggregates_json(&status.session_cost_aggregates),
         );
     } else {
         println!(
-            "campaign #{}: {} (revision {})\n  build: {}\n  application revision: {}; repository: {}\n  budget: {} μUSD; cost: {}{}{}\n  tickets: ready {}, proposed {}, in flight {}, downstream {}; delivered {}/{}{}{}\n  scheduler: {}{}{}",
+            "campaign #{}: {} (revision {})\n  build: {}\n  application revision: {}; repository: {}{}\n  budget: {} μUSD; cost: {}{}{}\n  tickets: ready {}, proposed {}, in flight {}, downstream {}; delivered {}/{}{}{}\n  scheduler: {}{}{}{}",
             status.campaign_id,
             status.state,
             status.aggregate_revision,
             status.kernel_build_id,
             status.application_revision_id,
             status.repository_id,
+            product_identities_text(status),
             status.aggregate_budget_micro_usd,
             status.measured_cost_state,
             status
@@ -582,6 +602,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
                 .map(|value| format!(" ({value})"))
                 .unwrap_or_default(),
             session_costs_text(&status.session_costs),
+            session_cost_aggregates_text(&status.session_cost_aggregates),
         );
     }
 }
@@ -624,6 +645,23 @@ fn downstream_evidence_json(
     format!(
         "{{\"candidate_commit\":{},\"latest_validation\":{validation},\"review\":{review},\"architect_decision\":{decision}}}",
         optional_json_string(evidence.candidate_commit.as_deref()),
+    )
+}
+
+fn product_identities_text(status: &CampaignStatusResponse) -> String {
+    if status.base_commit.is_none()
+        && status.candidate_tree.is_none()
+        && status.candidate_commit.is_none()
+        && status.delivered_commit.is_none()
+    {
+        return String::new();
+    }
+    format!(
+        "\n  git: base {}; candidate tree {}; candidate commit {}; delivered commit {}",
+        status.base_commit.as_deref().unwrap_or("none"),
+        status.candidate_tree.as_deref().unwrap_or("none"),
+        status.candidate_commit.as_deref().unwrap_or("none"),
+        status.delivered_commit.as_deref().unwrap_or("none"),
     )
 }
 
@@ -702,6 +740,55 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
                 || String::new(),
                 |elapsed| format!("; elapsed {elapsed} ms")
             ),
+        ));
+    }
+    output
+}
+
+fn session_cost_aggregates_json(
+    rows: &[factory_protocol::CampaignSessionCostAggregateResponse],
+) -> String {
+    let mut output = String::from("[");
+    for (index, row) in rows.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        output.push_str(&format!(
+            "{{\"office\":\"{}\",\"model_provider\":\"{}\",\"model_id\":\"{}\",\"outcome\":\"{}\",\"session_count\":{},\"accounted_cost_micro_usd\":{},\"pending_cost_session_count\":{},\"unknown_cost_session_count\":{},\"exceeded_cost_session_count\":{}}}",
+            row.office,
+            row.model_provider,
+            row.model_id,
+            row.outcome,
+            row.session_count,
+            row.accounted_cost_micro_usd,
+            row.pending_cost_session_count,
+            row.unknown_cost_session_count,
+            row.exceeded_cost_session_count,
+        ));
+    }
+    output.push(']');
+    output
+}
+
+fn session_cost_aggregates_text(
+    rows: &[factory_protocol::CampaignSessionCostAggregateResponse],
+) -> String {
+    if rows.is_empty() {
+        return "\n  cost breakdown: none".to_owned();
+    }
+    let mut output = String::from("\n  cost breakdown:");
+    for row in rows {
+        output.push_str(&format!(
+            "\n    {} / {}/{} / {}: {} sessions, {} μUSD (pending {}, unknown {}, exceeded {})",
+            row.office,
+            row.model_provider,
+            row.model_id,
+            row.outcome,
+            row.session_count,
+            row.accounted_cost_micro_usd,
+            row.pending_cost_session_count,
+            row.unknown_cost_session_count,
+            row.exceeded_cost_session_count,
         ));
     }
     output
@@ -1309,9 +1396,9 @@ enum CliCommand {
     },
 }
 
-/// Configuration which `factoryctl` forwards to one exact `factoryd init`
-/// child. This CLI retains no SQL code or database connection: it validates
-/// only the bounded command line and then waits for the one-shot daemon.
+/// The closed installation manifest derived by `factoryctl` and forwarded to
+/// one exact `factoryd init` child. Operators name deployment state, not every
+/// source file and tool that makes up this release.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct InitCommand {
     factoryd: PathBuf,
@@ -1499,67 +1586,20 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
 
 fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
     let mut values = arguments.into_iter();
+    let mut installation_root = None;
     let mut factoryd = None;
     let mut database_url = None;
     let mut runtime_root = None;
-    let mut kernel_source_root = None;
-    let mut kernel_source_files = Vec::new();
-    let mut cargo_executable = None;
-    let mut git_executable = None;
-    let mut deno_executable = None;
-    let mut pi_host_source_root = None;
-    let mut pi_host_source_files = Vec::new();
-    let mut pi_host_entrypoint = None;
-    let mut deno_config = None;
-    let mut deno_lock = None;
-    let mut deno_dir = None;
-    let mut pi_host_cache_probe = None;
-    let mut pi_version = None;
     let mut openrouter_credential_environment = None;
     while let Some(flag) = values.next() {
         let value = next_value(&mut values, &flag)?;
         match flag.as_str() {
+            "--installation-root" => {
+                set_absolute_path(&mut installation_root, value, "--installation-root")?
+            }
             "--factoryd" => set_absolute_path(&mut factoryd, value, "--factoryd")?,
             "--database-url" => set_once(&mut database_url, value, "--database-url")?,
             "--runtime-root" => set_absolute_path(&mut runtime_root, value, "--runtime-root")?,
-            "--kernel-source-root" => {
-                set_absolute_path(&mut kernel_source_root, value, "--kernel-source-root")?
-            }
-            "--kernel-source-file" => kernel_source_files.push(safe_relative(value, &flag)?),
-            // `factoryctl` selects this itself from the exact binary it is
-            // about to exec. Letting the caller name a second binary would
-            // create false provenance.
-            "--kernel-binary" => {
-                return Err(
-                    "--kernel-binary is selected from --factoryd and must not be supplied"
-                        .to_owned(),
-                );
-            }
-            "--cargo-executable" => {
-                set_absolute_path(&mut cargo_executable, value, "--cargo-executable")?
-            }
-            "--git-executable" => {
-                set_absolute_path(&mut git_executable, value, "--git-executable")?
-            }
-            "--deno-executable" => {
-                set_absolute_path(&mut deno_executable, value, "--deno-executable")?
-            }
-            "--pi-host-source-root" => {
-                set_absolute_path(&mut pi_host_source_root, value, "--pi-host-source-root")?
-            }
-            "--pi-host-source-file" => pi_host_source_files.push(safe_relative(value, &flag)?),
-            "--pi-host-entrypoint" => {
-                set_absolute_path(&mut pi_host_entrypoint, value, "--pi-host-entrypoint")?
-            }
-            "--deno-config" => set_absolute_path(&mut deno_config, value, "--deno-config")?,
-            "--deno-lock" => set_absolute_path(&mut deno_lock, value, "--deno-lock")?,
-            "--deno-dir" => set_absolute_path(&mut deno_dir, value, "--deno-dir")?,
-            "--pi-host-cache-probe" => set_once(
-                &mut pi_host_cache_probe,
-                safe_relative(value, &flag)?,
-                "--pi-host-cache-probe",
-            )?,
-            "--pi-version" => set_once(&mut pi_version, value, "--pi-version")?,
             "--provider-credential-environment" => set_once(
                 &mut openrouter_credential_environment,
                 parse_openrouter_credential_environment(value)?,
@@ -1568,34 +1608,170 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
             _ => return Err(format!("unknown flag {flag}")),
         }
     }
-    if kernel_source_files.is_empty() {
-        return Err("at least one --kernel-source-file is required".to_owned());
+    let runtime_root = required(runtime_root, "--runtime-root")?;
+    let installation_root = match installation_root {
+        Some(root) => root,
+        None => discover_installation_root()?,
+    };
+    let installation_root = fs::canonicalize(&installation_root).map_err(|error| {
+        format!(
+            "cannot canonicalize installation root {}: {error}",
+            installation_root.display()
+        )
+    })?;
+    if !is_installation_root(&installation_root) {
+        return Err(format!(
+            "{} is not a complete Factory V3 installation",
+            installation_root.display()
+        ));
     }
-    if pi_host_source_files.is_empty() {
-        return Err("at least one --pi-host-source-file is required".to_owned());
-    }
+    let kernel_source_files = closed_kernel_source_files(&installation_root)?;
+    let pi_host_source_root = installation_root.join("packages");
+    let pi_host_source_files = closed_regular_file_inventory(&pi_host_source_root)?;
+    let factoryd = match factoryd {
+        Some(factoryd) => factoryd,
+        None => default_factoryd_executable()?,
+    };
     Ok(InitCommand {
-        factoryd: required(factoryd, "--factoryd")?,
+        factoryd,
         database_url: required(database_url, "--database-url")?,
-        runtime_root: required(runtime_root, "--runtime-root")?,
-        kernel_source_root: required(kernel_source_root, "--kernel-source-root")?,
+        runtime_root: runtime_root.clone(),
+        kernel_source_root: installation_root.clone(),
         kernel_source_files,
-        cargo_executable: required(cargo_executable, "--cargo-executable")?,
-        git_executable: required(git_executable, "--git-executable")?,
-        deno_executable: required(deno_executable, "--deno-executable")?,
-        pi_host_source_root: required(pi_host_source_root, "--pi-host-source-root")?,
+        cargo_executable: resolve_executable("cargo")?,
+        git_executable: resolve_executable("git")?,
+        deno_executable: resolve_executable("deno")?,
+        pi_host_source_root: pi_host_source_root.clone(),
         pi_host_source_files,
-        pi_host_entrypoint: required(pi_host_entrypoint, "--pi-host-entrypoint")?,
-        deno_config: required(deno_config, "--deno-config")?,
-        deno_lock: required(deno_lock, "--deno-lock")?,
-        deno_dir: required(deno_dir, "--deno-dir")?,
-        pi_host_cache_probe: required(pi_host_cache_probe, "--pi-host-cache-probe")?,
-        pi_version: required(pi_version, "--pi-version")?,
-        openrouter_credential_environment: required(
-            openrouter_credential_environment,
-            "--provider-credential-environment openrouter=<ENVIRONMENT_NAME>",
-        )?,
+        pi_host_entrypoint: pi_host_source_root.join("factory-pi-host/main.ts"),
+        deno_config: installation_root.join("deno.json"),
+        deno_lock: installation_root.join("deno.lock"),
+        deno_dir: runtime_root.join("deno"),
+        pi_host_cache_probe: "factory-pi-host/cache-probe.ts".to_owned(),
+        pi_version: "0.84.1".to_owned(),
+        openrouter_credential_environment: openrouter_credential_environment
+            .unwrap_or_else(|| "OPENROUTER_API_KEY".to_owned()),
     })
+}
+
+fn discover_installation_root() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    candidates.push(env::current_dir().map_err(|error| format!("cannot read current directory: {error}"))?);
+    if let Ok(executable) = env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.to_owned());
+        }
+    }
+    for candidate in candidates {
+        for ancestor in candidate.ancestors() {
+            if is_installation_root(ancestor) {
+                return fs::canonicalize(ancestor)
+                    .map_err(|error| format!("cannot canonicalize installation root: {error}"));
+            }
+        }
+    }
+    Err("cannot discover the Factory V3 installation root; run from the checkout or pass --installation-root".to_owned())
+}
+
+fn is_installation_root(path: &Path) -> bool {
+    path.join("Cargo.toml").is_file()
+        && path.join("Cargo.lock").is_file()
+        && path.join("deno.json").is_file()
+        && path.join("deno.lock").is_file()
+        && path.join("schema/migrations").is_dir()
+        && path.join("packages/factory-pi-host/main.ts").is_file()
+}
+
+fn default_factoryd_executable() -> Result<PathBuf, String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("cannot locate factoryctl executable: {error}"))?;
+    let parent = executable
+        .parent()
+        .ok_or_else(|| "factoryctl executable has no parent directory".to_owned())?;
+    let name = if cfg!(windows) { "factoryd.exe" } else { "factoryd" };
+    let sibling = parent.join(name);
+    if sibling.is_file() {
+        Ok(sibling)
+    } else {
+        Err(format!(
+            "cannot find sibling factoryd at {}; pass --factoryd for a nonstandard installation",
+            sibling.display()
+        ))
+    }
+}
+
+fn resolve_executable(name: &str) -> Result<PathBuf, String> {
+    let path = env::var_os("PATH").ok_or_else(|| format!("PATH is unavailable while resolving {name}"))?;
+    for directory in env::split_paths(&path) {
+        let candidate = directory.join(name);
+        if candidate.is_file() {
+            return fs::canonicalize(&candidate)
+                .map_err(|error| format!("cannot canonicalize {name}: {error}"));
+        }
+    }
+    Err(format!("cannot find {name} on PATH"))
+}
+
+fn closed_kernel_source_files(root: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for relative in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "crates/factory-protocol/Cargo.toml",
+        "crates/factory-kernel/Cargo.toml",
+        "crates/factoryd/Cargo.toml",
+        "crates/factoryctl/Cargo.toml",
+    ] {
+        if !root.join(relative).is_file() {
+            return Err(format!("installation is missing required source file {relative}"));
+        }
+        files.push(relative.to_owned());
+    }
+    for relative_root in [
+        ".sqlx",
+        "schema/migrations",
+        "crates/factory-protocol/src",
+        "crates/factory-kernel/src",
+        "crates/factoryd/src",
+        "crates/factoryctl/src",
+    ] {
+        append_regular_files(root, &root.join(relative_root), &mut files)?;
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn closed_regular_file_inventory(root: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    append_regular_files(root, root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn append_regular_files(root: &Path, directory: &Path, files: &mut Vec<String>) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("cannot inventory {}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("cannot read source inventory entry: {error}"))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("source inventory refuses symlink {}", path.display()));
+        }
+        if metadata.is_dir() {
+            append_regular_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            let relative = path.strip_prefix(root)
+                .map_err(|_| format!("source path {} escaped its root", path.display()))?;
+            files.push(safe_relative(relative.to_string_lossy().into_owned(), "source inventory")?);
+        } else {
+            return Err(format!("source inventory refuses non-regular entry {}", path.display()));
+        }
+    }
+    Ok(())
 }
 
 fn spawn_factoryd_init(command: &InitCommand) -> Result<(), io::Error> {
@@ -2651,50 +2827,75 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl init --factoryd <absolute-path> --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --pi-host-cache-probe <safe-relative-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>\n  factoryctl daemon status --socket <path> [--format json]\n  factoryctl application show <key> [--application-revision-id <id>] --socket <path> [--format json]\n  factoryctl application register --socket <path> --client-command-id <id> --expected-revision <application-revision> --expected-kernel-build-revision <build-revision> --kernel-build-id <blake3> --source-root <absolute-path> --bundle-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl application activate <key> <revision-id> --socket <path> --client-command-id <id> --expected-revision <application-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl artifact seal --socket <path> --client-command-id <id> --expected-kernel-build-revision <revision> --source-root <absolute-path> --source-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl campaign start --application-revision-id <id> --expected-application-revision <revision> --aggregate-budget-micro-usd <amount> --deadline-unix-millis <millis> --delivery-target <count> --socket <path> --client-command-id <id> --principal <name> [--format json]\n  factoryctl campaign status <id> --socket <path> [--format json]\n  factoryctl campaign cancel <id> --socket <path> --client-command-id <id> --expected-revision <revision> --principal <name> [--format json]\n  factoryctl ticket list [--state proposed|sponsored|in_flight|delivered|blocked|resolved|superseded|rejected] --socket <path> [--format json]\n  factoryctl ticket show <id> --socket <path> [--format json]\n  factoryctl ticket sponsor <revision> --socket <path> --client-command-id <id> --expected-revision <revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl ticket release <attempt> --socket <path> --client-command-id <id> --expected-revision <attempt-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl candidate show <id> --socket <path> [--format json]\n  factoryctl candidate decide <candidate> --review-id <review> --deliver|--rework|--reject --socket <path> --client-command-id <id> --expected-revision <candidate-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--quality-rejection-override-review-id <review>] [--format json]\n  factoryctl audit show ticket:<id>|candidate:<id>|campaign:<id>|application-revision:<id>|audit:<id> --socket <path> [--format json]\n  factoryctl forum topics [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum threads <topic-id> [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum read <thread-id> [--after-post <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum search <query> [--cursor <opaque>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum create-topic --name <name> --description <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum create-thread --topic-id <id> --title <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum post --thread-id <id> --kind note|question|finding|proposal|challenge|correction|decision_link --body <text> [--reply-to <post-id>] [--supersedes <post-id>] [--attachment <artifact-id>:<label>]... --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]"
+    "usage:\n  factoryctl init --database-url <url> --runtime-root <absolute-path> [--installation-root <absolute-path>] [--factoryd <absolute-path>] [--provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>]\n  factoryctl daemon status --socket <path> [--format json]\n  factoryctl application show <key> [--application-revision-id <id>] --socket <path> [--format json]\n  factoryctl application register --socket <path> --client-command-id <id> --expected-revision <application-revision> --expected-kernel-build-revision <build-revision> --kernel-build-id <blake3> --source-root <absolute-path> --bundle-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl application activate <key> <revision-id> --socket <path> --client-command-id <id> --expected-revision <application-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl artifact seal --socket <path> --client-command-id <id> --expected-kernel-build-revision <revision> --source-root <absolute-path> --source-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl campaign start --application-revision-id <id> --expected-application-revision <revision> --aggregate-budget-micro-usd <amount> --deadline-unix-millis <millis> --delivery-target <count> --socket <path> --client-command-id <id> --principal <name> [--format json]\n  factoryctl campaign status <id> --socket <path> [--format json]\n  factoryctl campaign cancel <id> --socket <path> --client-command-id <id> --expected-revision <revision> --principal <name> [--format json]\n  factoryctl ticket list [--state proposed|sponsored|in_flight|delivered|blocked|resolved|superseded|rejected] --socket <path> [--format json]\n  factoryctl ticket show <id> --socket <path> [--format json]\n  factoryctl ticket sponsor <revision> --socket <path> --client-command-id <id> --expected-revision <revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl ticket release <attempt> --socket <path> --client-command-id <id> --expected-revision <attempt-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl candidate show <id> --socket <path> [--format json]\n  factoryctl candidate decide <candidate> --review-id <review> --deliver|--rework|--reject --socket <path> --client-command-id <id> --expected-revision <candidate-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--quality-rejection-override-review-id <review>] [--format json]\n  factoryctl audit show ticket:<id>|candidate:<id>|campaign:<id>|application-revision:<id>|audit:<id> --socket <path> [--format json]\n  factoryctl forum topics [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum threads <topic-id> [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum read <thread-id> [--after-post <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum search <query> [--cursor <opaque>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum create-topic --name <name> --description <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum create-thread --topic-id <id> --title <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum post --thread-id <id> --kind note|question|finding|proposal|challenge|correction|decision_link --body <text> [--reply-to <post-id>] [--supersedes <post-id>] [--attachment <artifact-id>:<label>]... --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]"
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn daemon_status_output_exposes_bootstrap_guards() {
+        let status = factory_protocol::OperatorStatusResponse {
+            protocol_version: 1,
+            request_id: "status-1".to_owned(),
+            operation: factory_protocol::OP_FACTORYD_STATUS.to_owned(),
+            state: "ready".to_owned(),
+            current_kernel_build_id: Some("a".repeat(64)),
+            aggregate_revision: 7,
+        };
+        let json = daemon_status_output(&status, true);
+        assert!(json.contains(&format!(
+            "\"current_kernel_build_id\":\"{}\"",
+            "a".repeat(64)
+        )));
+        assert!(json.contains("\"aggregate_revision\":7"));
+        assert_eq!(
+            daemon_status_output(&status, false),
+            format!("daemon: ready; build {}; revision 7", "a".repeat(64))
+        );
+    }
+
+    #[test]
+    fn campaign_cost_aggregate_output_is_complete_and_bounded_by_identity() {
+        let rows = vec![factory_protocol::CampaignSessionCostAggregateResponse {
+            office: "engineering".to_owned(),
+            model_provider: "openai".to_owned(),
+            model_id: "gpt-5.6".to_owned(),
+            outcome: "succeeded".to_owned(),
+            session_count: 23,
+            accounted_cost_micro_usd: 456,
+            pending_cost_session_count: 0,
+            unknown_cost_session_count: 1,
+            exceeded_cost_session_count: 2,
+        }];
+        let json = session_cost_aggregates_json(&rows);
+        assert!(json.contains("\"session_count\":23"));
+        assert!(json.contains("\"accounted_cost_micro_usd\":456"));
+        let text = session_cost_aggregates_text(&rows);
+        assert!(text.contains("23 sessions, 456 μUSD"));
+        assert!(text.contains("pending 0, unknown 1, exceeded 2"));
+    }
+
+    fn installation_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("factoryctl is in the workspace crates directory")
+            .to_owned()
+    }
+
     fn init_arguments(factoryd: &str) -> Vec<String> {
         vec![
             "init".to_owned(),
             "--factoryd".to_owned(),
             factoryd.to_owned(),
+            "--installation-root".to_owned(),
+            installation_root().to_string_lossy().into_owned(),
             "--database-url".to_owned(),
             "postgresql://factory@localhost/factory_v3".to_owned(),
             "--runtime-root".to_owned(),
             "/tmp/factory-runtime".to_owned(),
-            "--kernel-source-root".to_owned(),
-            "/opt/factory-source".to_owned(),
-            "--kernel-source-file".to_owned(),
-            "crates/factoryd/src/main.rs".to_owned(),
-            "--cargo-executable".to_owned(),
-            "/opt/rust/bin/cargo".to_owned(),
-            "--git-executable".to_owned(),
-            "/opt/git/bin/git".to_owned(),
-            "--deno-executable".to_owned(),
-            "/opt/deno/bin/deno".to_owned(),
-            "--pi-host-source-root".to_owned(),
-            "/opt/factory-source/packages".to_owned(),
-            "--pi-host-source-file".to_owned(),
-            "factory-pi-host/main.ts".to_owned(),
-            "--pi-host-entrypoint".to_owned(),
-            "/opt/factory-source/packages/factory-pi-host/main.ts".to_owned(),
-            "--pi-host-cache-probe".to_owned(),
-            "factory-pi-host/mod.ts".to_owned(),
-            "--deno-config".to_owned(),
-            "/opt/factory-source/deno.json".to_owned(),
-            "--deno-lock".to_owned(),
-            "/opt/factory-source/deno.lock".to_owned(),
-            "--deno-dir".to_owned(),
-            "/opt/factory-runtime/deno-cache".to_owned(),
-            "--pi-version".to_owned(),
-            "0.84.1".to_owned(),
-            "--provider-credential-environment".to_owned(),
-            "openrouter=OPENROUTER_API_KEY".to_owned(),
         ]
     }
 
@@ -2736,42 +2937,54 @@ mod tests {
     }
 
     #[test]
-    fn init_is_a_closed_explicit_forwarding_contract() {
+    fn init_derives_the_closed_release_manifest_from_two_deployment_inputs() {
         let parsed =
             parse_args(init_arguments("/opt/factory/bin/factoryd")).expect("complete init command");
         assert!(matches!(
             parsed,
             CliCommand::Init(InitCommand {
                 factoryd,
+                kernel_source_root,
                 kernel_source_files,
+                pi_host_source_root,
                 pi_host_source_files,
-                cargo_executable,
-                git_executable,
+                pi_host_entrypoint,
+                deno_config,
+                deno_lock,
+                deno_dir,
+                pi_host_cache_probe,
+                pi_version,
+                openrouter_credential_environment,
                 ..
             }) if factoryd == PathBuf::from("/opt/factory/bin/factoryd")
-                && kernel_source_files == vec!["crates/factoryd/src/main.rs".to_owned()]
-                && pi_host_source_files == vec!["factory-pi-host/main.ts".to_owned()]
-                && cargo_executable == PathBuf::from("/opt/rust/bin/cargo")
-                && git_executable == PathBuf::from("/opt/git/bin/git")
+                && kernel_source_root == fs::canonicalize(installation_root()).expect("canonical installation")
+                && kernel_source_files.contains(&"Cargo.lock".to_owned())
+                && kernel_source_files.contains(&"schema/migrations/0013_campaign_failure_reason.sql".to_owned())
+                && kernel_source_files.contains(&"crates/factoryd/src/main.rs".to_owned())
+                && pi_host_source_root == installation_root().join("packages")
+                && pi_host_source_files.contains(&"factory-pi-host/main.ts".to_owned())
+                && pi_host_source_files.contains(&"factory-sdk/protocol.ts".to_owned())
+                && pi_host_entrypoint == installation_root().join("packages/factory-pi-host/main.ts")
+                && deno_config == installation_root().join("deno.json")
+                && deno_lock == installation_root().join("deno.lock")
+                && deno_dir == PathBuf::from("/tmp/factory-runtime/deno")
+                && pi_host_cache_probe == "factory-pi-host/cache-probe.ts"
+                && pi_version == "0.84.1"
+                && openrouter_credential_environment == "OPENROUTER_API_KEY"
         ));
 
-        let mut kernel_binary = init_arguments("/opt/factory/bin/factoryd");
-        kernel_binary.extend(["--kernel-binary".to_owned(), "/other/factoryd".to_owned()]);
-        assert!(parse_args(kernel_binary).is_err());
-
-        let mut unsafe_source = init_arguments("/opt/factory/bin/factoryd");
-        unsafe_source.extend([
-            "--kernel-source-file".to_owned(),
-            "../outside.rs".to_owned(),
+        let mut internal_manifest_flag = init_arguments("/opt/factory/bin/factoryd");
+        internal_manifest_flag.extend([
+            "--kernel-source-root".to_owned(),
+            "/other/source".to_owned(),
         ]);
-        assert!(parse_args(unsafe_source).is_err());
+        assert!(parse_args(internal_manifest_flag).is_err());
 
         let mut unsupported_credential = init_arguments("/opt/factory/bin/factoryd");
-        let credential = unsupported_credential
-            .iter()
-            .position(|value| value == "--provider-credential-environment")
-            .expect("credential flag");
-        unsupported_credential[credential + 1] = "other=OTHER_KEY".to_owned();
+        unsupported_credential.extend([
+            "--provider-credential-environment".to_owned(),
+            "other=OTHER_KEY".to_owned(),
+        ]);
         assert!(parse_args(unsupported_credential).is_err());
     }
 
@@ -2830,8 +3043,8 @@ mod tests {
             "--database-url",
             "postgresql://factory@localhost/factory_v3",
         );
-        assert_argument_value(&arguments, "--cargo-executable", "/opt/rust/bin/cargo");
-        assert_argument_value(&arguments, "--git-executable", "/opt/git/bin/git");
+        assert!(Path::new(argument_value(&arguments, "--cargo-executable")).is_absolute());
+        assert!(Path::new(argument_value(&arguments, "--git-executable")).is_absolute());
         assert_argument_value(&arguments, "--pi-version", "0.84.1");
         assert_argument_value(
             &arguments,
@@ -2843,11 +3056,16 @@ mod tests {
 
     #[cfg(unix)]
     fn assert_argument_value(arguments: &[&str], flag: &str, expected: &str) {
+        assert_eq!(argument_value(arguments, flag), expected);
+    }
+
+    #[cfg(unix)]
+    fn argument_value<'a>(arguments: &'a [&str], flag: &str) -> &'a str {
         let index = arguments
             .iter()
             .position(|value| *value == flag)
             .expect("required child flag");
-        assert_eq!(arguments.get(index + 1), Some(&expected));
+        arguments.get(index + 1).copied().expect("flag value")
     }
 
     #[test]

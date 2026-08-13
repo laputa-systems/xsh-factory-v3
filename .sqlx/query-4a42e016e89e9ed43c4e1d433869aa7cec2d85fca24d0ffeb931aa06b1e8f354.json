@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, candidate_id, verdict FROM factory.reviews WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "candidate_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "verdict",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "verdict"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4a42e016e89e9ed43c4e1d433869aa7cec2d85fca24d0ffeb931aa06b1e8f354"
+}

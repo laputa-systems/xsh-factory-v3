@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.ticket_attempts SET stage = $1::SMALLINT, revision = $2, failed_at = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN 'hard validation did not pass' ELSE failure_reason END WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int8",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5011d8d37815f65be55c50e6c425a341b2dbaa090f40760573715826b737e5c5"
+}

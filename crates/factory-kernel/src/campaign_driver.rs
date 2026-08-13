@@ -371,10 +371,18 @@ impl CampaignDriver {
         target: DurableAssignmentTarget,
         action: &'static str,
     ) -> Result<CampaignDriverOutcome, CampaignDriverError> {
-        let credential_environment_value = credential_environment_value(
+        let credential_environment_value = match credential_environment_value(
             self.installed.openrouter_credential_environment(),
             &self.credential_lookup,
-        )?;
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                let reason = failure_reason(action, &error.to_string());
+                return self
+                    .terminalize_failed_launch(campaign_id, target, &reason)
+                    .await;
+            }
+        };
         let assignment = materialize_and_launch_assignment(
             &self.store,
             &self.cas,

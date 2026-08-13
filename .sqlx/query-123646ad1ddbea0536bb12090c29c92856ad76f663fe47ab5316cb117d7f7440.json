@@ -1,0 +1,173 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.changed_paths_artifact_id, c.regression_patch_artifact_id,\n                    c.regression_command_set_artifact_id, c.regression_log_artifact_id,\n                    c.patch_artifact_id, c.engineering_report_artifact_id,\n                    c.risks_artifact_id AS engineering_risks_artifact_id,\n                    hv.command_set_artifact_id AS hard_validation_command_set_artifact_id,\n                    hv.log_artifact_id AS hard_validation_log_artifact_id,\n                    review.additional_probes_artifact_id AS prior_quality_additional_probes_artifact_id,\n                    review.rationale_artifact_id AS prior_quality_rationale_artifact_id,\n                    review.risks_artifact_id AS prior_quality_risks_artifact_id,\n                    decision.rationale_artifact_id AS architect_rationale_artifact_id\n               FROM factory.candidates c\n               JOIN factory.validations hv ON hv.candidate_id = c.id\n                    AND hv.validation_scope = 0 AND hv.lifecycle = 1\n               LEFT JOIN factory.reviews review ON review.candidate_id = c.id\n               LEFT JOIN LATERAL (\n                    SELECT rationale_artifact_id\n                      FROM factory.architect_decisions\n                     WHERE candidate_id = c.id\n                     ORDER BY created_at DESC, id DESC\n                     LIMIT 1\n               ) decision ON TRUE\n              WHERE c.id = $1 AND c.ticket_attempt_id = $2 AND c.lifecycle = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "changed_paths_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "changed_paths_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "regression_patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "regression_command_set_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_command_set_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "regression_log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "regression_log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "patch_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "engineering_report_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "engineering_report_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "engineering_risks_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "risks_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "hard_validation_command_set_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "command_set_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "hard_validation_log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "log_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "prior_quality_additional_probes_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "additional_probes_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "prior_quality_rationale_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "rationale_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "prior_quality_risks_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.reviews",
+            "name": "risks_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "architect_rationale_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.architect_decisions",
+            "name": "rationale_artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "123646ad1ddbea0536bb12090c29c92856ad76f663fe47ab5316cb117d7f7440"
+}

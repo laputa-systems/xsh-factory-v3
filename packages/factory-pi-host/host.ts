@@ -521,6 +521,9 @@ function validatePacket(packet: PiAssignmentPacket): void {
   if (
     packet.system_prompt_bytes.byteLength === 0 || packet.assignment_prompt_bytes.byteLength === 0
   ) throw new Error("sealed prompts must not be empty");
+  if (packet.tools.includes("artifact_read") && packet.assignment_evidence.length === 0) {
+    throw new Error("artifact_read requires sealed upstream assignment evidence");
+  }
   if (!Number.isSafeInteger(packet.limits.turn_limit) || packet.limits.turn_limit < 1) {
     throw new Error("turn limit is invalid");
   }
