@@ -990,7 +990,6 @@ impl GitCustody {
             return Err(GitCustodyError::DeliveryBaseMismatch);
         }
         self.assert_snapshot_current(repository)?;
-        self.assert_only_primary_worktree(repository)?;
         self.assert_candidate(repository, candidate)?;
         let merge = self.run(
             "guarded local fast-forward",
@@ -1010,7 +1009,6 @@ impl GitCustody {
             return Err(GitCustodyError::LocalFastForwardFailed);
         }
         let delivered = self.qualify_repository(&repository.root, repository.branch.clone())?;
-        self.assert_only_primary_worktree(&delivered)?;
         if delivered.snapshot.base_commit != candidate.commit
             || delivered.snapshot.base_tree != candidate.candidate_tree
         {
@@ -1036,7 +1034,6 @@ impl GitCustody {
         candidate_commit: GitCommitId,
         candidate_tree: GitTreeId,
     ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
-        self.assert_only_primary_worktree(repository)?;
         if repository.snapshot.base_commit != candidate_commit
             || repository.snapshot.base_tree != candidate_tree
         {
@@ -1269,31 +1266,6 @@ impl GitCustody {
                 operation: "read candidate ref",
             })
         }
-    }
-
-    fn assert_only_primary_worktree(
-        &self,
-        repository: &QualifiedRepository,
-    ) -> Result<(), GitCustodyError> {
-        let output = require_success(self.run(
-            "list delivery worktrees",
-            &repository.root,
-            &["worktree", "list", "--porcelain"],
-            None,
-            None,
-        )?)?;
-        let paths: Vec<String> = output
-            .stdout
-            .split(|byte| *byte == b'\n')
-            .filter_map(|line| line.strip_prefix(b"worktree "))
-            .map(|path| String::from_utf8(path.to_vec()).map_err(|_| GitCustodyError::NonUtf8Path))
-            .collect::<Result<_, _>>()?;
-        if paths.len() != 1
-            || canonical_directory(Path::new(&paths[0]), "registered worktree")? != repository.root
-        {
-            return Err(GitCustodyError::UnexpectedWorktrees { paths });
-        }
-        Ok(())
     }
 
     fn assert_tree(&self, root: &Path, tree: &GitTreeId) -> Result<(), GitCustodyError> {
@@ -2112,8 +2084,6 @@ pub enum GitCustodyError {
     LocalFastForwardFailed,
     #[error("delivery postcondition differs from candidate")]
     DeliveryPostconditionMismatch,
-    #[error("delivery has unexpected worktrees: {paths:?}")]
-    UnexpectedWorktrees { paths: Vec<String> },
     #[error("temporary index names are exhausted")]
     TemporaryIndexExhausted,
     #[error("could not spawn Git for {operation}: {source}")]

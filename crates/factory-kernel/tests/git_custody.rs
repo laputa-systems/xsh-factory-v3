@@ -540,6 +540,40 @@ fn guarded_fast_forward_is_local_and_refuses_moved_base() {
 }
 
 #[test]
+fn guarded_fast_forward_ignores_unrelated_detached_worktrees() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("deliver-with-unrelated-worktree").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("delivery.txt"), b"deliver\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+    let candidate = fixture
+        .custody
+        .construct_candidate_commit(&repository, &commit_request(&capture, 24))
+        .unwrap();
+
+    let unrelated = fixture.root.join("unrelated-detached-worktree");
+    run_in(
+        &fixture.repository,
+        &fixture.git,
+        &["worktree", "add", "--detach", unrelated.to_str().unwrap(), "HEAD"],
+    );
+    let receipt = fixture
+        .custody
+        .guarded_local_fast_forward(&repository, &candidate)
+        .expect("an unrelated detached worktree does not mutate the default checkout");
+    assert_eq!(receipt.delivered_commit, *candidate.commit());
+    assert!(unrelated.exists(), "delivery does not clean unowned worktrees");
+}
+
+#[test]
 fn completed_fast_forward_is_recoverable_only_at_exact_candidate_head() {
     let fixture = Fixture::new();
     let before_delivery = fixture.qualify();
