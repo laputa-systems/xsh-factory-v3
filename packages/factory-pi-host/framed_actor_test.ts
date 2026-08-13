@@ -354,6 +354,21 @@ Deno.test("Engineering candidate submission preserves its bounded validation out
   );
 });
 
+Deno.test("Quality full-suite execution preserves a bounded task diagnostic", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error("invalid_json: Quality assignment target is not an exact validated candidate")),
+  });
+  const [tool] = createFramedToolAdapters(client, ["quality_run_full_suite"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({ validation_profile: "full" }),
+    Error,
+    "Quality full-suite execution did not pass: Quality assignment target is not an exact validated candidate",
+  );
+});
+
 Deno.test("Product submission corrects duplicate ticket contract-read paths", async () => {
   const client = new FramedActorClient({
     exchange: () =>

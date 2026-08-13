@@ -420,6 +420,20 @@ function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
       return new Error(`Candidate submission did not pass: ${taskDetail}.`);
     }
   }
+  if (name === "quality_run_full_suite") {
+    // Quality cannot submit a review without the kernel-owned receipt, so an
+    // opaque failure merely consumes the review assignment. Expose one
+    // bounded task-level diagnostic, as the Engineering checkpoint and
+    // candidate submission already do; raw transport and authority evidence
+    // remains sealed outside the model-visible result.
+    const taskDetail = detail
+      .replace(/^[a-z_]+:\s*/u, "")
+      .replace(/[\r\n\t]+/gu, " ")
+      .slice(0, 480);
+    if (taskDetail.length > 0) {
+      return new Error(`Quality full-suite execution did not pass: ${taskDetail}.`);
+    }
+  }
   if (
     name === "product_submit_ticket" &&
     detail.includes(
