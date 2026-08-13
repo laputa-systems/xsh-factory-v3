@@ -392,7 +392,12 @@ impl CampaignDriver {
             Arc::clone(&self.resolver),
             AssignmentMaterializationRequest {
                 principal: DRIVER_PRINCIPAL.to_owned(),
-                command_id: command_id(action, campaign_id, expected_campaign_revision),
+                command_id: assignment_command_id(
+                    action,
+                    campaign_id,
+                    expected_campaign_revision,
+                    target,
+                ),
                 expected_campaign_revision,
                 campaign_id,
                 application_revision_id,
@@ -534,6 +539,33 @@ fn command_id(
     )
 }
 
+/// Assignment creation can be retried after a released Engineering or Quality
+/// attempt without changing the campaign revision. Bind the target's durable
+/// identity into its idempotency key so that retry cannot recover a prior
+/// packet/session pair for a different attempt.
+fn assignment_command_id(
+    action: &str,
+    campaign_id: CampaignId,
+    revision: factory_protocol::ExpectedRevision,
+    target: DurableAssignmentTarget,
+) -> String {
+    let base = command_id(action, campaign_id, revision);
+    match target {
+        DurableAssignmentTarget::Product => base,
+        DurableAssignmentTarget::Engineering { ticket_attempt_id } => {
+            format!("{base}-attempt-{}", ticket_attempt_id.get())
+        }
+        DurableAssignmentTarget::Quality {
+            ticket_attempt_id,
+            candidate_id,
+        } => format!(
+            "{base}-attempt-{}-candidate-{}",
+            ticket_attempt_id.get(),
+            candidate_id.get()
+        ),
+    }
+}
+
 fn downstream_command_id(action: &str, context: DownstreamActionContext) -> String {
     format!(
         "campaign-{}-{}-attempt-{}-candidate-{}-ar{}-cr{}",
@@ -592,6 +624,42 @@ mod tests {
                 "product",
                 campaign,
                 ExpectedRevision::new(AggregateRevision::from_persisted(1)),
+            ),
+        );
+    }
+
+    #[test]
+    fn assignment_idempotency_key_binds_the_durable_target() {
+        let campaign = CampaignId::new(19).expect("positive campaign");
+        let revision = ExpectedRevision::new(AggregateRevision::from_persisted(2));
+        let first = assignment_command_id(
+            "engineering",
+            campaign,
+            revision,
+            DurableAssignmentTarget::Engineering {
+                ticket_attempt_id: TicketAttemptId::new(7).expect("positive attempt"),
+            },
+        );
+        assert_eq!(
+            first,
+            assignment_command_id(
+                "engineering",
+                campaign,
+                revision,
+                DurableAssignmentTarget::Engineering {
+                    ticket_attempt_id: TicketAttemptId::new(7).expect("positive attempt"),
+                },
+            ),
+        );
+        assert_ne!(
+            first,
+            assignment_command_id(
+                "engineering",
+                campaign,
+                revision,
+                DurableAssignmentTarget::Engineering {
+                    ticket_attempt_id: TicketAttemptId::new(8).expect("positive attempt"),
+                },
             ),
         );
     }

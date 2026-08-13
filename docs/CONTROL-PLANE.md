@@ -51,8 +51,10 @@ wait, and terminal reconciliation. A provider cost that cannot be measured is
 fail-closed for campaign admission. A released ticket requalifies again under
 an idempotency key bound to its campaign, immutable ticket-revision row, and
 current revision, so a retry cannot collide with sealed evidence from its
-earlier attempt. The raw session archive and typed terminal evidence remain
-available for diagnosis.
+earlier attempt. Assignment launch keys additionally bind the Engineering
+attempt (and Quality candidate when applicable), so a release retry cannot
+recover a prior packet/session pair. The raw session archive and typed terminal
+evidence remain available for diagnosis.
 
 The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
