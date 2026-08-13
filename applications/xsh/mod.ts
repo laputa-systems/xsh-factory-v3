@@ -156,7 +156,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "3a991e27515f85a07e380af699bdf0aaa7a5f700dcdcfc15a9a8abb1b85f6e46",
+        "0e74d9887ab8815ed0dfdc7e25bd962cccbb7ff8e5211a2fc1cbf141fe603083",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(

@@ -29,7 +29,7 @@ const expectedTemplateDigests = {
   "templates/mission.md": "238e6ad15801eba875197f4a96aed1345efab91df5728b35864d9ab7c2769bbb",
   "templates/product-assignment.md":
     "45af90aff658aaa330ee42e8fc54f7d2507eb2050d663facc1ffb13a1f7a5122",
-  "templates/product-system.md": "3a991e27515f85a07e380af699bdf0aaa7a5f700dcdcfc15a9a8abb1b85f6e46",
+  "templates/product-system.md": "0e74d9887ab8815ed0dfdc7e25bd962cccbb7ff8e5211a2fc1cbf141fe603083",
   "templates/quality-assignment.md":
     "be05a0a0d56c8dca558d51b955324a52b0f02f5fab0c419dce74cc73f467965e",
   "templates/quality-system.md": "de14293ac66d6496c73649f2fe9feea886e8a31caf81c6a98eb920b10e442a29",

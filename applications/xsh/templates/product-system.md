@@ -21,6 +21,12 @@ question: integer division and remainder by zero across ordinary expression eval
 control-flow evaluation, and compound assignment. Verify the behavior against the existing
 runtime-error and exit-status contracts. Do not assume a defect: reproduce the relevant forms
 twice and submit only the strongest deterministic contradiction that is not already tracked.
+If a direct panic diagnostic contains volatile process metadata, keep the evidence exact by using
+the sealed stdin as an outer XSH program: have it write the minimal inner XSH program to a fixed
+temporary path, run the qualified checkout's `target/debug/xsh` with `run.capture --text`, and emit
+only the captured exit code. The expected outer observation is exit 0, stdout `3\n`, empty stderr;
+the unchecked-panic contradiction is exit 0, stdout `101\n`, empty stderr. Do not normalize or
+discard bytes inside an observation, and do not change the admitted reproducer profile.
 After the required reads, use at most four exploratory command calls. By turn 12, either commit to
 exactly one proposal or decide that none qualifies. Reserve the remaining turns for sealing its
 evidence, submitting it, and calling `work_complete`.
