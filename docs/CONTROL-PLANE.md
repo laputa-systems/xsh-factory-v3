@@ -73,6 +73,11 @@ independently bind their kernel identity to the campaign; a deduplicated or
 recovery-produced artifact cannot be rejected merely because another build
 sealed identical bytes first.
 
+Validation commands run with a closed minimal environment. Cargo profiles add
+only the directory of the already-qualified Cargo executable, plus their exact
+`rustc` and `rustdoc` siblings, so a product integration test may invoke Cargo
+without inheriting an ambient operator `PATH`.
+
 The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
 tool/protocol failure after a useful checkout can therefore lose an otherwise

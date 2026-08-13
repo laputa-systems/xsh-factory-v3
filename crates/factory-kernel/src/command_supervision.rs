@@ -15,6 +15,8 @@
 
 use std::{
     collections::BTreeSet,
+    env,
+    ffi::OsString,
     fs,
     io::{self, Read, Write},
     os::unix::{
@@ -138,10 +140,21 @@ impl ApprovedToolExecutables {
 
     fn cargo_toolchain_environment(
         &self,
-    ) -> Result<[(&'static str, PathBuf); 2], CommandSupervisionError> {
-        Ok([
-            ("RUSTC", self.cargo.sibling("rustc")?),
-            ("RUSTDOC", self.cargo.sibling("rustdoc")?),
+    ) -> Result<Vec<(&'static str, OsString)>, CommandSupervisionError> {
+        let cargo_directory = self
+            .cargo
+            .path()
+            .parent()
+            .ok_or_else(|| CommandSupervisionError::ExecutableNotAbsolute(self.cargo.path().into()))?;
+        // Cargo-driven integration suites can deliberately invoke `cargo`
+        // again from their own test binary. That child must resolve the
+        // already-qualified Cargo executable, never an ambient operator path.
+        let path = env::join_paths([cargo_directory, Path::new("/usr/bin"), Path::new("/bin")])
+            .map_err(|_| CommandSupervisionError::ToolPathUnrepresentable)?;
+        Ok(vec![
+            ("RUSTC", self.cargo.sibling("rustc")?.into_os_string()),
+            ("RUSTDOC", self.cargo.sibling("rustdoc")?.into_os_string()),
+            ("PATH", path),
         ])
     }
 }
@@ -441,7 +454,7 @@ impl CommandRunner {
         child_command.env_clear();
         child_command.envs(MINIMAL_ENVIRONMENT);
         if let Some(toolchain) = &cargo_toolchain_environment {
-            child_command.envs(toolchain.iter().map(|(name, path)| (name, path)));
+            child_command.envs(toolchain.iter().map(|(name, value)| (name, value)));
         }
         child_command.envs(
             command
@@ -1418,6 +1431,9 @@ pub enum CommandSupervisionError {
     #[error("failed to spawn deterministic command: {0}")]
     Spawn(#[source] io::Error),
 
+    #[error("the kernel-owned approved-tool PATH cannot be represented")]
+    ToolPathUnrepresentable,
+
     #[error("spawned command did not expose piped {stream}")]
     MissingChildStream { stream: &'static str },
 
@@ -1674,7 +1690,7 @@ printf '%s' "$1"
     }
 
     #[test]
-    fn approved_cargo_can_resolve_its_exact_toolchain_children_with_the_minimal_environment() {
+    fn approved_cargo_can_resolve_its_exact_toolchain_and_nested_cargo_with_kernel_environment() {
         let root = temporary_repository("approved-cargo-toolchain");
         fs::create_dir(root.join("src")).expect("create synthetic Rust source directory");
         fs::write(
@@ -1683,6 +1699,11 @@ printf '%s' "$1"
         )
         .expect("write synthetic Cargo manifest");
         fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write synthetic Rust source");
+        fs::write(
+            root.join("build.rs"),
+            "fn main() {\n    assert!(std::process::Command::new(\"cargo\").arg(\"--version\").status().expect(\"nested cargo\").success());\n}\n",
+        )
+        .expect("write nested Cargo build script");
         let cargo = ExactExecutable::discover(
             std::env::var_os("CARGO")
                 .map(PathBuf::from)
@@ -1690,12 +1711,14 @@ printf '%s' "$1"
         )
         .expect("exact Cargo");
         let echo = ExactExecutable::discover("/bin/echo").expect("installed echo");
+        let mut cargo_profile = profile(
+            "cargo-check",
+            ExecutableV1::ApprovedTool(ApprovedToolV1::Cargo),
+            &["check", "--offline", "--quiet"],
+        );
+        cargo_profile.timeout = DurationMillis::new(5_000);
         let exact = command(
-            profile(
-                "cargo-check",
-                ExecutableV1::ApprovedTool(ApprovedToolV1::Cargo),
-                &["check", "--offline", "--quiet"],
-            ),
+            cargo_profile,
             CommandStdin::Empty,
             None,
             None,
@@ -1711,7 +1734,7 @@ printf '%s' "$1"
 
         assert!(
             receipt.matches_expectation(),
-            "exact Cargo must be able to invoke its exact rustc/rustdoc siblings: {}",
+            "exact Cargo must be able to invoke its exact toolchain and nested Cargo: {}",
             String::from_utf8_lossy(receipt.stderr())
         );
         fs::remove_dir_all(root).expect("remove synthetic repository");
