@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(MAX(resulting_revision), 0)::BIGINT AS \"revision!\"\n         FROM factory.audit_log\n         WHERE operation IN ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c7082020070b42968f986ae02fdd0175764e1d18691ac1d6521e64a1375a285f"
+}

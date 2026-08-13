@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.ticket_revisions (\n                 id, ticket_id, application_revision_id, revision_ordinal, lifecycle,\n                 proposal_artifact_id, reproducer_artifact_id,\n                 expected_observation_artifact_id, discovery_observation_artifact_id,\n                 discovery_commit, discovery_tree\n             ) OVERRIDING SYSTEM VALUE\n             VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b4757e507fab56556e9dd3b24f486e4a074133e20accc13d7154542dad9e243b"
+}

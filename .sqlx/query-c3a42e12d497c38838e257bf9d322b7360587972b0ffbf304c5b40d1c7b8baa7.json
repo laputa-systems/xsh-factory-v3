@@ -1,0 +1,232 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.assignment_id, s.campaign_id, s.revision, s.lifecycle,\n                    s.input_price_micro_usd_per_million, s.output_price_micro_usd_per_million,\n                    s.cache_read_price_micro_usd_per_million, s.cache_write_price_micro_usd_per_million,\n                    a.packet_digest, a.terminal_operations_mask,\n                    s.kernel_build_id,\n                    a.required_read_manifest_artifact_id, a.revision AS assignment_revision,\n                    c.revision AS campaign_revision, c.aggregate_budget_micro_usd,\n                    c.measured_cost_micro_usd, c.cost_state AS campaign_cost_state,\n                    c.lifecycle AS campaign_lifecycle\n             FROM factory.sessions s JOIN factory.assignments a ON a.id = s.assignment_id\n             JOIN factory.campaigns c ON c.id = s.campaign_id WHERE s.id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "assignment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "assignment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "input_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "input_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "output_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "output_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_read_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cache_read_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_write_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cache_write_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "packet_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "terminal_operations_mask",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "terminal_operations_mask"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "kernel_build_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "required_read_manifest_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "required_read_manifest_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "assignment_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "campaign_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "aggregate_budget_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "aggregate_budget_micro_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "measured_cost_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "measured_cost_micro_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "campaign_cost_state",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "cost_state"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "campaign_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "lifecycle"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c3a42e12d497c38838e257bf9d322b7360587972b0ffbf304c5b40d1c7b8baa7"
+}

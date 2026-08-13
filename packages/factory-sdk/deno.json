@@ -1,0 +1,4 @@
+{
+  "name": "@factory/sdk",
+  "exports": "./mod.ts"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.application_revisions\n                 SET is_active = FALSE\n                 WHERE application_key = $1 AND is_active",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c881d33f63f8db511a4f991385d68c2a2e822bbfd55038d45569547e9dc6c9dd"
+}

@@ -1,0 +1,1352 @@
+{
+  "operations": [
+    "workspace.read",
+    "artifact.seal_workspace_file",
+    "artifact.read",
+    "product.submit_ticket",
+    "candidate.checkpoint_regression",
+    "candidate.submit",
+    "quality.run_full_suite",
+    "quality.submit_review",
+    "work.complete",
+    "architect.sponsor_ticket_revision",
+    "architect.release_ticket_attempt",
+    "architect.decide_candidate",
+    "factoryd.status",
+    "operator.campaign.start",
+    "operator.campaign.status",
+    "operator.campaign.cancel",
+    "operator.application.show",
+    "operator.application.register",
+    "operator.application.activate",
+    "operator.artifact.seal",
+    "operator.ticket.list",
+    "operator.ticket.show",
+    "operator.candidate.show",
+    "operator.audit.show",
+    "session.verify_packet",
+    "session.seal_artifact",
+    "session.submit_terminal",
+    "forum.list_topics",
+    "forum.list_threads",
+    "forum.search",
+    "forum.read_thread",
+    "forum.create_topic",
+    "forum.create_thread",
+    "forum.post"
+  ],
+  "requests": {
+    "workspace.read": {
+      "protocol_version": 1,
+      "request_id": "req-0",
+      "operation": "workspace.read",
+      "repository_relative_path": "AGENTS.md"
+    },
+    "artifact.seal_workspace_file": {
+      "protocol_version": 1,
+      "request_id": "req-1",
+      "operation": "artifact.seal_workspace_file",
+      "client_command_id": "cmd-1",
+      "expected_revision": 7,
+      "staging_relative_path": "reports/result.json",
+      "byte_limit": 4096
+    },
+    "artifact.read": {
+      "protocol_version": 1,
+      "request_id": "req-2",
+      "operation": "artifact.read",
+      "artifact_id": 8,
+      "expected_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "product.submit_ticket": {
+      "protocol_version": 1,
+      "request_id": "req-3",
+      "operation": "product.submit_ticket",
+      "client_command_id": "cmd-3",
+      "expected_revision": 7,
+      "title": "observable public defect",
+      "mission_value": "users receive the documented result",
+      "scope": "public command output",
+      "acceptance_criteria": ["criterion"],
+      "contract_owner": "docs/contract.md",
+      "risk": "compatibility",
+      "narrative": {
+        "artifact_id": 31,
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "byte_length": 100
+      },
+      "evidence": {
+        "artifact_id": 32,
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "byte_length": 100
+      },
+      "contract_reads": [{ "path": "docs/contract.md", "reason": "public contract" }],
+      "duplicate_search": { "query": "observable public defect", "limit": 20 },
+      "reproducer_profile": "reproducer",
+      "reproducer": {
+        "comparison_rule_version": 1,
+        "command": {
+          "artifact_id": 33,
+          "digest": "3333333333333333333333333333333333333333333333333333333333333333",
+          "byte_length": 100
+        },
+        "expected_observation": {
+          "exit_status": 0,
+          "stdout": {
+            "artifact_id": 34,
+            "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+            "byte_length": 1
+          },
+          "stderr": {
+            "artifact_id": 35,
+            "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+            "byte_length": 0
+          }
+        },
+        "first_observation": {
+          "exit_status": 1,
+          "stdout": {
+            "artifact_id": 36,
+            "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "byte_length": 1
+          },
+          "stderr": {
+            "artifact_id": 37,
+            "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+            "byte_length": 0
+          }
+        },
+        "second_observation": {
+          "exit_status": 1,
+          "stdout": {
+            "artifact_id": 38,
+            "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "byte_length": 1
+          },
+          "stderr": {
+            "artifact_id": 39,
+            "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+            "byte_length": 0
+          }
+        }
+      }
+    },
+    "candidate.checkpoint_regression": {
+      "protocol_version": 1,
+      "request_id": "req-4",
+      "operation": "candidate.checkpoint_regression",
+      "client_command_id": "cmd-4",
+      "expected_revision": 7,
+      "regression_command": "cargo test",
+      "expected_failure": "fails"
+    },
+    "candidate.submit": {
+      "protocol_version": 1,
+      "request_id": "req-5",
+      "operation": "candidate.submit",
+      "client_command_id": "cmd-5",
+      "expected_revision": 7,
+      "engineering_report": {
+        "artifact_id": 40,
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_length": 100
+      },
+      "commit_subject": "subject",
+      "commit_body": "body",
+      "regression_test_identity": "test",
+      "risks": {
+        "artifact_id": 41,
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_length": 20
+      }
+    },
+    "quality.run_full_suite": {
+      "protocol_version": 1,
+      "request_id": "req-6",
+      "operation": "quality.run_full_suite",
+      "client_command_id": "cmd-6",
+      "expected_revision": 7,
+      "validation_profile": "full"
+    },
+    "quality.submit_review": {
+      "protocol_version": 1,
+      "request_id": "req-7",
+      "operation": "quality.submit_review",
+      "client_command_id": "cmd-7",
+      "expected_revision": 7,
+      "full_suite_validation_id": 60,
+      "verdict": "accept",
+      "rationale": {
+        "artifact_id": 42,
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "byte_length": 20
+      },
+      "risks": {
+        "artifact_id": 43,
+        "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "byte_length": 20
+      },
+      "additional_probes": {
+        "artifact_id": 44,
+        "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "byte_length": 20
+      }
+    },
+    "work.complete": {
+      "protocol_version": 1,
+      "request_id": "req-8",
+      "operation": "work.complete",
+      "client_command_id": "cmd-8",
+      "expected_revision": 7,
+      "result_artifact_id": 10
+    },
+    "architect.sponsor_ticket_revision": {
+      "protocol_version": 1,
+      "request_id": "req-19",
+      "operation": "architect.sponsor_ticket_revision",
+      "client_command_id": "cmd-19",
+      "expected_revision": 7,
+      "ticket_revision_id": 70,
+      "rationale": {
+        "artifact_id": 45,
+        "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "byte_length": 20
+      },
+      "principal": "grand-architect"
+    },
+    "architect.release_ticket_attempt": {
+      "protocol_version": 1,
+      "request_id": "req-20",
+      "operation": "architect.release_ticket_attempt",
+      "client_command_id": "cmd-20",
+      "expected_revision": 7,
+      "ticket_attempt_id": 71,
+      "rationale": {
+        "artifact_id": 46,
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "byte_length": 20
+      },
+      "principal": "grand-architect"
+    },
+    "architect.decide_candidate": {
+      "protocol_version": 1,
+      "request_id": "req-21",
+      "operation": "architect.decide_candidate",
+      "client_command_id": "cmd-21",
+      "expected_revision": 7,
+      "candidate_id": 72,
+      "review_id": 73,
+      "decision": "deliver",
+      "rationale": {
+        "artifact_id": 47,
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "byte_length": 20
+      },
+      "quality_rejection_override_review_id": null,
+      "principal": "grand-architect"
+    },
+    "factoryd.status": {
+      "protocol_version": 1,
+      "request_id": "req-26",
+      "operation": "factoryd.status"
+    },
+    "operator.campaign.start": {
+      "protocol_version": 1,
+      "request_id": "req-27",
+      "operation": "operator.campaign.start",
+      "client_command_id": "campaign-start-1",
+      "expected_application_revision": 1,
+      "application_revision_id": 81,
+      "aggregate_budget_micro_usd": 1000000,
+      "deadline_unix_millis": 4000000000000,
+      "delivery_target": 1,
+      "principal": "operator"
+    },
+    "operator.campaign.status": {
+      "protocol_version": 1,
+      "request_id": "req-28",
+      "operation": "operator.campaign.status",
+      "campaign_id": 90
+    },
+    "operator.campaign.cancel": {
+      "protocol_version": 1,
+      "request_id": "req-29",
+      "operation": "operator.campaign.cancel",
+      "client_command_id": "campaign-cancel-1",
+      "expected_revision": 2,
+      "campaign_id": 90,
+      "principal": "operator"
+    },
+    "operator.application.show": {
+      "protocol_version": 1,
+      "request_id": "req-22",
+      "operation": "operator.application.show",
+      "application_key": "xsh",
+      "application_revision_id": null
+    },
+    "operator.application.register": {
+      "protocol_version": 1,
+      "request_id": "req-23",
+      "operation": "operator.application.register",
+      "client_command_id": "application-register-1",
+      "expected_revision": 0,
+      "expected_kernel_build_revision": 1,
+      "kernel_build_id": "3333333333333333333333333333333333333333333333333333333333333333",
+      "source_root": "/workspace/factory/applications/xsh",
+      "bundle_relative_path": "bundle.json",
+      "principal": "grand-architect"
+    },
+    "operator.application.activate": {
+      "protocol_version": 1,
+      "request_id": "req-24",
+      "operation": "operator.application.activate",
+      "client_command_id": "application-activate-1",
+      "expected_revision": 1,
+      "application_key": "xsh",
+      "application_revision_id": 81,
+      "rationale": {
+        "artifact_id": 48,
+        "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "byte_length": 20
+      },
+      "principal": "grand-architect"
+    },
+    "operator.artifact.seal": {
+      "protocol_version": 1,
+      "request_id": "req-25",
+      "operation": "operator.artifact.seal",
+      "client_command_id": "operator-artifact-25",
+      "expected_kernel_build_revision": 1,
+      "source_root": "/workspace/operator-evidence",
+      "source_relative_path": "rationale.md",
+      "principal": "grand-architect"
+    },
+    "operator.ticket.list": {
+      "protocol_version": 1,
+      "request_id": "req-30",
+      "operation": "operator.ticket.list",
+      "state": "sponsored"
+    },
+    "operator.ticket.show": {
+      "protocol_version": 1,
+      "request_id": "req-31",
+      "operation": "operator.ticket.show",
+      "ticket_id": 91
+    },
+    "operator.candidate.show": {
+      "protocol_version": 1,
+      "request_id": "req-32",
+      "operation": "operator.candidate.show",
+      "candidate_id": 92
+    },
+    "operator.audit.show": {
+      "protocol_version": 1,
+      "request_id": "req-33",
+      "operation": "operator.audit.show",
+      "selector": "ticket:91"
+    },
+    "session.verify_packet": {
+      "protocol_version": 1,
+      "request_id": "req-16",
+      "operation": "session.verify_packet",
+      "packet_digest": "ed707944e9dd7d0606cbb44dfc90846f5b9b9b514db84463b8e9033fa9a29a52",
+      "packet_bytes_b64": "e30="
+    },
+    "session.seal_artifact": {
+      "protocol_version": 1,
+      "request_id": "req-17",
+      "operation": "session.seal_artifact",
+      "client_command_id": "cmd-16",
+      "expected_revision": 7,
+      "staging_relative_path": "reports/transcript.jsonl.gz",
+      "role": "pi_transcript_gzip",
+      "byte_limit": 4194304
+    },
+    "session.submit_terminal": {
+      "protocol_version": 1,
+      "request_id": "req-18",
+      "operation": "session.submit_terminal",
+      "client_command_id": "cmd-17",
+      "expected_revision": 7,
+      "terminal_operation": "work_complete",
+      "terminal_payload_b64": "e30=",
+      "transcript_artifact_id": 20,
+      "input_tokens": 1,
+      "output_tokens": 2,
+      "cache_read_tokens": 3,
+      "cache_write_tokens": 4,
+      "reasoning_tokens": 5,
+      "reported_cost_micro_usd": 12,
+      "stop_reason": "completed"
+    },
+    "forum.list_topics": {
+      "protocol_version": 1,
+      "request_id": "req-9",
+      "operation": "forum.list_topics",
+      "cursor": "",
+      "limit": 20
+    },
+    "forum.list_threads": {
+      "protocol_version": 1,
+      "request_id": "req-10",
+      "operation": "forum.list_threads",
+      "topic_id": 12,
+      "cursor": "",
+      "limit": 20
+    },
+    "forum.search": {
+      "protocol_version": 1,
+      "request_id": "req-11",
+      "operation": "forum.search",
+      "query": "query",
+      "cursor": "",
+      "author_office": null,
+      "post_kind": null,
+      "topic_id": null,
+      "thread_id": null,
+      "created_after_micros": null,
+      "created_before_micros": null,
+      "limit": 20
+    },
+    "forum.read_thread": {
+      "protocol_version": 1,
+      "request_id": "req-12",
+      "operation": "forum.read_thread",
+      "thread_id": 11,
+      "after_post_id": 0,
+      "limit": 20
+    },
+    "forum.create_topic": {
+      "protocol_version": 1,
+      "request_id": "req-13",
+      "operation": "forum.create_topic",
+      "client_command_id": "cmd-12",
+      "expected_revision": 7,
+      "name": "topic",
+      "description": "description"
+    },
+    "forum.create_thread": {
+      "protocol_version": 1,
+      "request_id": "req-14",
+      "operation": "forum.create_thread",
+      "client_command_id": "cmd-13",
+      "expected_revision": 7,
+      "topic_id": 12,
+      "title": "thread"
+    },
+    "forum.post": {
+      "protocol_version": 1,
+      "request_id": "req-15",
+      "operation": "forum.post",
+      "client_command_id": "cmd-14",
+      "expected_revision": 7,
+      "thread_id": 13,
+      "kind": 0,
+      "body": "body",
+      "reply_to": null,
+      "supersedes": null,
+      "attachments": []
+    }
+  },
+  "success": {
+    "workspace.read": {
+      "protocol_version": 1,
+      "request_id": "req-0",
+      "operation": "workspace.read",
+      "canonical_path": "AGENTS.md",
+      "blake3": "0000000000000000000000000000000000000000000000000000000000000000",
+      "byte_length": 3,
+      "content_base64": "eHNo"
+    },
+    "artifact.seal_workspace_file": {
+      "protocol_version": 1,
+      "request_id": "req-1",
+      "operation": "artifact.seal_workspace_file",
+      "artifact_id": 8,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "byte_length": 12,
+      "aggregate_revision": 8
+    },
+    "artifact.read": {
+      "protocol_version": 1,
+      "request_id": "req-2",
+      "operation": "artifact.read",
+      "artifact_id": 8,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "byte_length": 12,
+      "content_base64": "dGVzdCBieXRlcw=="
+    },
+    "product.submit_ticket": {
+      "protocol_version": 1,
+      "request_id": "req-3",
+      "operation": "product.submit_ticket",
+      "audit_id": 3,
+      "aggregate_revision": 8
+    },
+    "candidate.checkpoint_regression": {
+      "protocol_version": 1,
+      "request_id": "req-4",
+      "operation": "candidate.checkpoint_regression",
+      "audit_id": 4,
+      "aggregate_revision": 8
+    },
+    "candidate.submit": {
+      "protocol_version": 1,
+      "request_id": "req-5",
+      "operation": "candidate.submit",
+      "audit_id": 5,
+      "aggregate_revision": 8,
+      "candidate_id": 50,
+      "validation_id": 51,
+      "candidate_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "candidate_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "quality.run_full_suite": {
+      "protocol_version": 1,
+      "request_id": "req-6",
+      "operation": "quality.run_full_suite",
+      "audit_id": 6,
+      "aggregate_revision": 8,
+      "validation_id": 60,
+      "candidate_id": 50,
+      "candidate_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "quality.submit_review": {
+      "protocol_version": 1,
+      "request_id": "req-7",
+      "operation": "quality.submit_review",
+      "audit_id": 7,
+      "aggregate_revision": 8,
+      "review_id": 61,
+      "candidate_id": 50,
+      "verdict": "accept"
+    },
+    "work.complete": {
+      "protocol_version": 1,
+      "request_id": "req-8",
+      "operation": "work.complete",
+      "audit_id": 8,
+      "aggregate_revision": 8
+    },
+    "architect.sponsor_ticket_revision": {
+      "protocol_version": 1,
+      "request_id": "req-19",
+      "operation": "architect.sponsor_ticket_revision",
+      "audit_id": 70,
+      "aggregate_revision": 8,
+      "architect_decision_id": 71,
+      "decision_kind": "sponsor"
+    },
+    "architect.release_ticket_attempt": {
+      "protocol_version": 1,
+      "request_id": "req-20",
+      "operation": "architect.release_ticket_attempt",
+      "audit_id": 72,
+      "aggregate_revision": 8,
+      "architect_decision_id": 73,
+      "decision_kind": "release"
+    },
+    "architect.decide_candidate": {
+      "protocol_version": 1,
+      "request_id": "req-21",
+      "operation": "architect.decide_candidate",
+      "audit_id": 74,
+      "aggregate_revision": 8,
+      "architect_decision_id": 75,
+      "decision_kind": "deliver"
+    },
+    "factoryd.status": {
+      "protocol_version": 1,
+      "request_id": "req-26",
+      "operation": "factoryd.status",
+      "state": "ready"
+    },
+    "operator.campaign.start": {
+      "protocol_version": 1,
+      "request_id": "req-27",
+      "operation": "operator.campaign.start",
+      "audit_id": 87,
+      "aggregate_revision": 0,
+      "campaign_id": 90,
+      "kernel_build_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "application_revision_id": 81,
+      "repository_id": 88,
+      "was_idempotent_retry": false
+    },
+    "operator.campaign.status": {
+      "protocol_version": 1,
+      "request_id": "req-28",
+      "operation": "operator.campaign.status",
+      "campaign_id": 90,
+      "state": "running",
+      "aggregate_revision": 2,
+      "kernel_build_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "application_revision_id": 81,
+      "repository_id": 88,
+      "aggregate_budget_micro_usd": 1000000,
+      "measured_cost_state": "known",
+      "measured_cost_micro_usd": 10,
+      "remaining_budget_micro_usd": 999990,
+      "deadline_unix_millis": 4000000000000,
+      "delivery_target": 1,
+      "delivered_attempt_count": 0,
+      "ready_ticket_count": 0,
+      "proposed_ticket_count": 0,
+      "in_flight_ticket_count": 1,
+      "downstream_ticket_attempt_count": 1,
+      "downstream_action_stage": "quality",
+      "downstream_ticket_attempt_id": 93,
+      "downstream_ticket_attempt_revision": 4,
+      "downstream_candidate_id": 92,
+      "downstream_candidate_revision": 5,
+      "ready_low_water": 1,
+      "ready_target": 2,
+      "ready_maximum": 3,
+      "proposal_maximum": 2,
+      "oldest_sponsored_ticket_revision_id": null,
+      "oldest_sponsored_ticket_revision": null,
+      "scheduler_next_action": "continue_downstream",
+      "scheduler_constraint": null,
+      "session_costs": [
+        {
+          "session_id": 94,
+          "assignment_id": 95,
+          "office": "quality",
+          "model_provider": "openai",
+          "model_id": "gpt-5.6",
+          "outcome": "running",
+          "cost_state": "pending",
+          "cost_micro_usd": null,
+          "elapsed_millis": 1200
+        }
+      ]
+    },
+    "operator.campaign.cancel": {
+      "protocol_version": 1,
+      "request_id": "req-29",
+      "operation": "operator.campaign.cancel",
+      "audit_id": 89,
+      "aggregate_revision": 3,
+      "campaign_id": 90,
+      "kernel_build_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "application_revision_id": 81,
+      "repository_id": 88,
+      "was_idempotent_retry": false
+    },
+    "operator.application.show": {
+      "protocol_version": 1,
+      "request_id": "req-22",
+      "operation": "operator.application.show",
+      "application_key": "xsh",
+      "application_revision_id": 81,
+      "aggregate_revision": 1,
+      "bundle_artifact_id": 82,
+      "is_active": false
+    },
+    "operator.application.register": {
+      "protocol_version": 1,
+      "request_id": "req-23",
+      "operation": "operator.application.register",
+      "audit_id": 83,
+      "aggregate_revision": 1,
+      "application_revision_id": 81,
+      "is_active": false,
+      "was_idempotent_retry": false
+    },
+    "operator.application.activate": {
+      "protocol_version": 1,
+      "request_id": "req-24",
+      "operation": "operator.application.activate",
+      "audit_id": 84,
+      "aggregate_revision": 1,
+      "application_revision_id": 81,
+      "is_active": true,
+      "was_idempotent_retry": false
+    },
+    "operator.artifact.seal": {
+      "protocol_version": 1,
+      "request_id": "req-25",
+      "operation": "operator.artifact.seal",
+      "audit_id": 85,
+      "aggregate_revision": 1,
+      "artifact_id": 86,
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byte_length": 17,
+      "was_idempotent_retry": false,
+      "was_reused": false
+    },
+    "operator.ticket.list": {
+      "protocol_version": 1,
+      "request_id": "req-30",
+      "operation": "operator.ticket.list",
+      "items": [{
+        "ticket_id": 91,
+        "ticket_revision_id": 94,
+        "ticket_revision": 3,
+        "application_revision_id": 81,
+        "state": "sponsored",
+        "proposal_artifact_id": 95,
+        "created_at_micros": 1
+      }]
+    },
+    "operator.ticket.show": {
+      "protocol_version": 1,
+      "request_id": "req-31",
+      "operation": "operator.ticket.show",
+      "ticket_id": 91,
+      "ticket_revision_id": 94,
+      "ticket_revision": 3,
+      "application_revision_id": 81,
+      "state": "sponsored",
+      "sponsorship_reason": "bounded rationale",
+      "blocked_reason": null,
+      "evidence": [{
+        "role": "proposal",
+        "artifact_id": 95,
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_length": 20
+      }],
+      "attempts": [{
+        "ticket_attempt_id": 93,
+        "attempt_revision": 4,
+        "campaign_id": 90,
+        "stage": "quality",
+        "candidate_id": 92
+      }]
+    },
+    "operator.candidate.show": {
+      "protocol_version": 1,
+      "request_id": "req-32",
+      "operation": "operator.candidate.show",
+      "candidate_id": 92,
+      "candidate_revision": 5,
+      "state": "validated",
+      "ticket_attempt_id": 93,
+      "ticket_revision_id": 94,
+      "ticket_revision": 3,
+      "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "candidate_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "candidate_commit": "cccccccccccccccccccccccccccccccccccccccc",
+      "evidence": [{
+        "role": "candidate_patch",
+        "artifact_id": 96,
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "byte_length": 20
+      }],
+      "validations": [{
+        "validation_id": 97,
+        "scope": "hard_candidate",
+        "state": "passed",
+        "log": {
+          "role": "validation_log",
+          "artifact_id": 98,
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "byte_length": 20
+        }
+      }],
+      "review": null,
+      "latest_architect_decision": null,
+      "delivery_receipt": null
+    },
+    "operator.audit.show": {
+      "protocol_version": 1,
+      "request_id": "req-33",
+      "operation": "operator.audit.show",
+      "selector": "ticket:91",
+      "items": [{
+        "audit_id": 99,
+        "principal": "operator",
+        "operation": "ticket.propose",
+        "subject_kind": 30,
+        "subject_id": 91,
+        "aggregate_revision": 3
+      }]
+    },
+    "session.verify_packet": {
+      "protocol_version": 1,
+      "request_id": "req-16",
+      "operation": "session.verify_packet",
+      "packet_digest": "ed707944e9dd7d0606cbb44dfc90846f5b9b9b514db84463b8e9033fa9a29a52",
+      "verified": true
+    },
+    "session.seal_artifact": {
+      "protocol_version": 1,
+      "request_id": "req-17",
+      "operation": "session.seal_artifact",
+      "artifact_id": 20,
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byte_length": 120,
+      "aggregate_revision": 8
+    },
+    "session.submit_terminal": {
+      "protocol_version": 1,
+      "request_id": "req-18",
+      "operation": "session.submit_terminal",
+      "audit_id": 19,
+      "aggregate_revision": 9
+    },
+    "forum.list_topics": {
+      "protocol_version": 1,
+      "request_id": "req-9",
+      "operation": "forum.list_topics",
+      "items": [],
+      "next_cursor": ""
+    },
+    "forum.list_threads": {
+      "protocol_version": 1,
+      "request_id": "req-10",
+      "operation": "forum.list_threads",
+      "items": [],
+      "next_cursor": ""
+    },
+    "forum.search": {
+      "protocol_version": 1,
+      "request_id": "req-11",
+      "operation": "forum.search",
+      "items": [],
+      "next_cursor": ""
+    },
+    "forum.read_thread": {
+      "protocol_version": 1,
+      "request_id": "req-12",
+      "operation": "forum.read_thread",
+      "items": [],
+      "next_cursor": ""
+    },
+    "forum.create_topic": {
+      "protocol_version": 1,
+      "request_id": "req-13",
+      "operation": "forum.create_topic",
+      "audit_id": 12,
+      "aggregate_revision": 8
+    },
+    "forum.create_thread": {
+      "protocol_version": 1,
+      "request_id": "req-14",
+      "operation": "forum.create_thread",
+      "audit_id": 13,
+      "aggregate_revision": 8
+    },
+    "forum.post": {
+      "protocol_version": 1,
+      "request_id": "req-15",
+      "operation": "forum.post",
+      "audit_id": 14,
+      "aggregate_revision": 8
+    }
+  },
+  "conflict": {
+    "workspace.read": {
+      "protocol_version": 1,
+      "request_id": "req-0",
+      "operation": "workspace.read",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "artifact.seal_workspace_file": {
+      "protocol_version": 1,
+      "request_id": "req-1",
+      "operation": "artifact.seal_workspace_file",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "artifact.read": {
+      "protocol_version": 1,
+      "request_id": "req-2",
+      "operation": "artifact.read",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "product.submit_ticket": {
+      "protocol_version": 1,
+      "request_id": "req-3",
+      "operation": "product.submit_ticket",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "candidate.checkpoint_regression": {
+      "protocol_version": 1,
+      "request_id": "req-4",
+      "operation": "candidate.checkpoint_regression",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "candidate.submit": {
+      "protocol_version": 1,
+      "request_id": "req-5",
+      "operation": "candidate.submit",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "quality.run_full_suite": {
+      "protocol_version": 1,
+      "request_id": "req-6",
+      "operation": "quality.run_full_suite",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "quality.submit_review": {
+      "protocol_version": 1,
+      "request_id": "req-7",
+      "operation": "quality.submit_review",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "work.complete": {
+      "protocol_version": 1,
+      "request_id": "req-8",
+      "operation": "work.complete",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "architect.sponsor_ticket_revision": {
+      "protocol_version": 1,
+      "request_id": "req-19",
+      "operation": "architect.sponsor_ticket_revision",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "architect.release_ticket_attempt": {
+      "protocol_version": 1,
+      "request_id": "req-20",
+      "operation": "architect.release_ticket_attempt",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "architect.decide_candidate": {
+      "protocol_version": 1,
+      "request_id": "req-21",
+      "operation": "architect.decide_candidate",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "factoryd.status": {
+      "protocol_version": 1,
+      "request_id": "req-26",
+      "operation": "factoryd.status",
+      "error_code": "revision_conflict",
+      "current_revision": 0,
+      "message": "stale"
+    },
+    "operator.campaign.start": {
+      "protocol_version": 1,
+      "request_id": "req-27",
+      "operation": "operator.campaign.start",
+      "error_code": "revision_conflict",
+      "current_revision": 2,
+      "message": "stale"
+    },
+    "operator.campaign.status": {
+      "protocol_version": 1,
+      "request_id": "req-28",
+      "operation": "operator.campaign.status",
+      "error_code": "revision_conflict",
+      "current_revision": 2,
+      "message": "stale"
+    },
+    "operator.campaign.cancel": {
+      "protocol_version": 1,
+      "request_id": "req-29",
+      "operation": "operator.campaign.cancel",
+      "error_code": "revision_conflict",
+      "current_revision": 2,
+      "message": "stale"
+    },
+    "operator.application.show": {
+      "protocol_version": 1,
+      "request_id": "req-22",
+      "operation": "operator.application.show",
+      "error_code": "revision_conflict",
+      "current_revision": 1,
+      "message": "stale"
+    },
+    "operator.application.register": {
+      "protocol_version": 1,
+      "request_id": "req-23",
+      "operation": "operator.application.register",
+      "error_code": "revision_conflict",
+      "current_revision": 1,
+      "message": "stale"
+    },
+    "operator.application.activate": {
+      "protocol_version": 1,
+      "request_id": "req-24",
+      "operation": "operator.application.activate",
+      "error_code": "revision_conflict",
+      "current_revision": 1,
+      "message": "stale"
+    },
+    "operator.artifact.seal": {
+      "protocol_version": 1,
+      "request_id": "req-25",
+      "operation": "operator.artifact.seal",
+      "error_code": "revision_conflict",
+      "current_revision": 2,
+      "message": "stale"
+    },
+    "operator.ticket.list": {
+      "protocol_version": 1,
+      "request_id": "req-30",
+      "operation": "operator.ticket.list",
+      "error_code": "revision_conflict",
+      "current_revision": 3,
+      "message": "stale"
+    },
+    "operator.ticket.show": {
+      "protocol_version": 1,
+      "request_id": "req-31",
+      "operation": "operator.ticket.show",
+      "error_code": "revision_conflict",
+      "current_revision": 3,
+      "message": "stale"
+    },
+    "operator.candidate.show": {
+      "protocol_version": 1,
+      "request_id": "req-32",
+      "operation": "operator.candidate.show",
+      "error_code": "revision_conflict",
+      "current_revision": 5,
+      "message": "stale"
+    },
+    "operator.audit.show": {
+      "protocol_version": 1,
+      "request_id": "req-33",
+      "operation": "operator.audit.show",
+      "error_code": "revision_conflict",
+      "current_revision": 3,
+      "message": "stale"
+    },
+    "session.verify_packet": {
+      "protocol_version": 1,
+      "request_id": "req-16",
+      "operation": "session.verify_packet",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "session.seal_artifact": {
+      "protocol_version": 1,
+      "request_id": "req-17",
+      "operation": "session.seal_artifact",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "session.submit_terminal": {
+      "protocol_version": 1,
+      "request_id": "req-18",
+      "operation": "session.submit_terminal",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.list_topics": {
+      "protocol_version": 1,
+      "request_id": "req-9",
+      "operation": "forum.list_topics",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.list_threads": {
+      "protocol_version": 1,
+      "request_id": "req-10",
+      "operation": "forum.list_threads",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.search": {
+      "protocol_version": 1,
+      "request_id": "req-11",
+      "operation": "forum.search",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.read_thread": {
+      "protocol_version": 1,
+      "request_id": "req-12",
+      "operation": "forum.read_thread",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.create_topic": {
+      "protocol_version": 1,
+      "request_id": "req-13",
+      "operation": "forum.create_topic",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.create_thread": {
+      "protocol_version": 1,
+      "request_id": "req-14",
+      "operation": "forum.create_thread",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    },
+    "forum.post": {
+      "protocol_version": 1,
+      "request_id": "req-15",
+      "operation": "forum.post",
+      "error_code": "revision_conflict",
+      "current_revision": 8,
+      "message": "stale"
+    }
+  },
+  "error": {
+    "workspace.read": {
+      "protocol_version": 1,
+      "request_id": "req-0",
+      "operation": "workspace.read",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "artifact.seal_workspace_file": {
+      "protocol_version": 1,
+      "request_id": "req-1",
+      "operation": "artifact.seal_workspace_file",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "artifact.read": {
+      "protocol_version": 1,
+      "request_id": "req-2",
+      "operation": "artifact.read",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "product.submit_ticket": {
+      "protocol_version": 1,
+      "request_id": "req-3",
+      "operation": "product.submit_ticket",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "candidate.checkpoint_regression": {
+      "protocol_version": 1,
+      "request_id": "req-4",
+      "operation": "candidate.checkpoint_regression",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "candidate.submit": {
+      "protocol_version": 1,
+      "request_id": "req-5",
+      "operation": "candidate.submit",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "quality.run_full_suite": {
+      "protocol_version": 1,
+      "request_id": "req-6",
+      "operation": "quality.run_full_suite",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "quality.submit_review": {
+      "protocol_version": 1,
+      "request_id": "req-7",
+      "operation": "quality.submit_review",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "work.complete": {
+      "protocol_version": 1,
+      "request_id": "req-8",
+      "operation": "work.complete",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "architect.sponsor_ticket_revision": {
+      "protocol_version": 1,
+      "request_id": "req-19",
+      "operation": "architect.sponsor_ticket_revision",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "architect.release_ticket_attempt": {
+      "protocol_version": 1,
+      "request_id": "req-20",
+      "operation": "architect.release_ticket_attempt",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "architect.decide_candidate": {
+      "protocol_version": 1,
+      "request_id": "req-21",
+      "operation": "architect.decide_candidate",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "factoryd.status": {
+      "protocol_version": 1,
+      "request_id": "req-26",
+      "operation": "factoryd.status",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.campaign.start": {
+      "protocol_version": 1,
+      "request_id": "req-27",
+      "operation": "operator.campaign.start",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.campaign.status": {
+      "protocol_version": 1,
+      "request_id": "req-28",
+      "operation": "operator.campaign.status",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.campaign.cancel": {
+      "protocol_version": 1,
+      "request_id": "req-29",
+      "operation": "operator.campaign.cancel",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.application.show": {
+      "protocol_version": 1,
+      "request_id": "req-22",
+      "operation": "operator.application.show",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.application.register": {
+      "protocol_version": 1,
+      "request_id": "req-23",
+      "operation": "operator.application.register",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.application.activate": {
+      "protocol_version": 1,
+      "request_id": "req-24",
+      "operation": "operator.application.activate",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.artifact.seal": {
+      "protocol_version": 1,
+      "request_id": "req-25",
+      "operation": "operator.artifact.seal",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.ticket.list": {
+      "protocol_version": 1,
+      "request_id": "req-30",
+      "operation": "operator.ticket.list",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.ticket.show": {
+      "protocol_version": 1,
+      "request_id": "req-31",
+      "operation": "operator.ticket.show",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.candidate.show": {
+      "protocol_version": 1,
+      "request_id": "req-32",
+      "operation": "operator.candidate.show",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.audit.show": {
+      "protocol_version": 1,
+      "request_id": "req-33",
+      "operation": "operator.audit.show",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "session.verify_packet": {
+      "protocol_version": 1,
+      "request_id": "req-16",
+      "operation": "session.verify_packet",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "session.seal_artifact": {
+      "protocol_version": 1,
+      "request_id": "req-17",
+      "operation": "session.seal_artifact",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "session.submit_terminal": {
+      "protocol_version": 1,
+      "request_id": "req-18",
+      "operation": "session.submit_terminal",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.list_topics": {
+      "protocol_version": 1,
+      "request_id": "req-9",
+      "operation": "forum.list_topics",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.list_threads": {
+      "protocol_version": 1,
+      "request_id": "req-10",
+      "operation": "forum.list_threads",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.search": {
+      "protocol_version": 1,
+      "request_id": "req-11",
+      "operation": "forum.search",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.read_thread": {
+      "protocol_version": 1,
+      "request_id": "req-12",
+      "operation": "forum.read_thread",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.create_topic": {
+      "protocol_version": 1,
+      "request_id": "req-13",
+      "operation": "forum.create_topic",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.create_thread": {
+      "protocol_version": 1,
+      "request_id": "req-14",
+      "operation": "forum.create_thread",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "forum.post": {
+      "protocol_version": 1,
+      "request_id": "req-15",
+      "operation": "forum.post",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    }
+  }
+}

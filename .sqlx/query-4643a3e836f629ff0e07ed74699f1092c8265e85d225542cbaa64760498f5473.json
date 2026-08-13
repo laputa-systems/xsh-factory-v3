@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.kernel_builds SET is_current = FALSE WHERE is_current",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "4643a3e836f629ff0e07ed74699f1092c8265e85d225542cbaa64760498f5473"
+}

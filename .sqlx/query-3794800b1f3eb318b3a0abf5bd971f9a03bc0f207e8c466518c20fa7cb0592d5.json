@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT receipt.id AS receipt_artifact_id, receipt.digest AS receipt_digest,\n                    receipt.byte_length AS receipt_byte_length\n             FROM factory.deliveries AS delivery\n             JOIN factory.artifacts AS receipt ON receipt.id = delivery.receipt_artifact_id\n             WHERE delivery.candidate_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "receipt_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "receipt_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "receipt_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3794800b1f3eb318b3a0abf5bd971f9a03bc0f207e8c466518c20fa7cb0592d5"
+}

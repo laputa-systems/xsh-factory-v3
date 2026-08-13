@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT nextval(pg_get_serial_sequence('factory.kernel_builds', 'id')) AS \"id!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b9a4b502f6eaf4e4ce2228556a6093a164419676a2eb5dc0ffa14202a7d12112"
+}

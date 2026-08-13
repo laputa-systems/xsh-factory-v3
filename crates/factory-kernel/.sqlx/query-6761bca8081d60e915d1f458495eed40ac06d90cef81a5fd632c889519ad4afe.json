@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, operation, command_fingerprint, subject_kind, subject_id, resulting_revision FROM factory.audit_log WHERE principal = $1 AND command_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "command_fingerprint",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "command_fingerprint"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "subject_kind",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "subject_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "resulting_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6761bca8081d60e915d1f458495eed40ac06d90cef81a5fd632c889519ad4afe"
+}

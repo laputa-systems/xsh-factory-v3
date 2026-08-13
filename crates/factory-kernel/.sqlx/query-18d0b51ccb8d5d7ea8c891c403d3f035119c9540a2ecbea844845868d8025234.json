@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.repositories (\n                repository_key, canonical_local_path, default_branch, delivery_mode, revision\n             ) VALUES ($1, $2, $3, 0, $4)\n             RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.repositories",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "18d0b51ccb8d5d7ea8c891c403d3f035119c9540a2ecbea844845868d8025234"
+}

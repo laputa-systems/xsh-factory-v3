@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, byte_length, cas_relative_path\n         FROM factory.artifacts WHERE digest = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cas_relative_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "cas_relative_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3df69d258b8da0d7fb956f45b34abb3945c74ff484d7b0655e7a40a931667d87"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)::BIGINT AS \"count!\" FROM factory.ticket_attempts\n             WHERE campaign_id = $1 AND stage = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a1314dc67477dc0aa1af1735c172318cd46c27946eee978b80ca527d13c086dd"
+}

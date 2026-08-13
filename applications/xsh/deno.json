@@ -1,0 +1,4 @@
+{
+  "name": "@factory/application-xsh",
+  "exports": "./mod.ts"
+}

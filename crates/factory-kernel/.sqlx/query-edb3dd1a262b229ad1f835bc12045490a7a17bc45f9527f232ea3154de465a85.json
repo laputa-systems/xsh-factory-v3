@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT repository_id, aggregate_revision, is_active\n             FROM factory.application_revisions\n             WHERE id = $1\n             FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repository_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "repository_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "aggregate_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "is_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "is_active"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "edb3dd1a262b229ad1f835bc12045490a7a17bc45f9527f232ea3154de465a85"
+}

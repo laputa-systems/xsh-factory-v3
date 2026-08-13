@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ticket_revision_id FROM factory.ticket_attempts WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "ticket_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5fc9514c9bf7e501dc3dde2bc8f74bb737d5beebb6f5608e55b8a3fbecefe54d"
+}

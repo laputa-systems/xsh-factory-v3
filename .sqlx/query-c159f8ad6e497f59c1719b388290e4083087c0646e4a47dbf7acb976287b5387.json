@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.forum_attachments (post_id, artifact_id, label)\n                 VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c159f8ad6e497f59c1719b388290e4083087c0646e4a47dbf7acb976287b5387"
+}

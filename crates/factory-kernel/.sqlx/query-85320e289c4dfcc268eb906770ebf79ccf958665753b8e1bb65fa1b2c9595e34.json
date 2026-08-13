@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)::BIGINT AS \"count!\" FROM factory.audit_log\n             WHERE principal = $1 AND command_id IN ($2, $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "85320e289c4dfcc268eb906770ebf79ccf958665753b8e1bb65fa1b2c9595e34"
+}

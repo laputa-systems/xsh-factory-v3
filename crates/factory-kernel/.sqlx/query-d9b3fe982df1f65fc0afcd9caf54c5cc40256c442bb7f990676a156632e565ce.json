@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lifecycle, revision FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d9b3fe982df1f65fc0afcd9caf54c5cc40256c442bb7f990676a156632e565ce"
+}

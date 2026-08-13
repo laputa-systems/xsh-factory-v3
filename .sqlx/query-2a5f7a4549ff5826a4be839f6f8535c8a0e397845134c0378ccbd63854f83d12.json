@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.application_revisions (\n                 application_key, aggregate_revision,\n                 predecessor_application_revision_id, bundle_artifact_id,\n                 mission_artifact_id,\n                 product_research_system_template_artifact_id,\n                 product_research_assignment_template_artifact_id,\n                 engineering_system_template_artifact_id,\n                 engineering_assignment_template_artifact_id,\n                 quality_system_template_artifact_id,\n                 quality_assignment_template_artifact_id,\n                 repository_id, ticket_low_water, ticket_target, ticket_maximum,\n                 proposal_maximum, ticket_narrative_byte_limit,\n                 ticket_acceptance_criteria_limit, ticket_contract_read_limit\n             ) VALUES (\n                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,\n                 $17, $18, $19\n             ) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2a5f7a4549ff5826a4be839f6f8535c8a0e397845134c0378ccbd63854f83d12"
+}

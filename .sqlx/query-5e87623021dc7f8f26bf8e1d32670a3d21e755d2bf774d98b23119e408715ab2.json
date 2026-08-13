@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT audit.id, audit.principal, audit.operation, audit.subject_kind,\n                        audit.subject_id, audit.resulting_revision\n                 FROM factory.audit_log AS audit\n                 LEFT JOIN factory.ticket_revisions AS direct_revision\n                   ON audit.subject_id = direct_revision.id\n                  AND audit.subject_kind IN (30, 31, 33, 34, 39)\n                 LEFT JOIN factory.ticket_attempts AS attempt\n                   ON audit.subject_id = attempt.id\n                  AND audit.subject_kind IN (32, 35, 36, 37, 38)\n                 LEFT JOIN factory.ticket_revisions AS attempt_revision\n                   ON attempt_revision.id = attempt.ticket_revision_id\n                 WHERE direct_revision.ticket_id = $1 OR attempt_revision.ticket_id = $1\n                 ORDER BY audit.id DESC LIMIT 20",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "principal",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "principal"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "subject_kind",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "subject_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "resulting_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5e87623021dc7f8f26bf8e1d32670a3d21e755d2bf774d98b23119e408715ab2"
+}

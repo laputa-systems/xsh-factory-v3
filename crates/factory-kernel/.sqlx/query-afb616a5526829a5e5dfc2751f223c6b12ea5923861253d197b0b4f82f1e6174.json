@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)::BIGINT AS \"count!\"\n             FROM factory.ticket_attempts AS ta\n             JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id\n             JOIN factory.application_revisions AS ticket_application\n               ON ticket_application.id = tr.application_revision_id\n             WHERE ticket_application.application_key = $1\n               AND ta.stage BETWEEN $2 AND $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "afb616a5526829a5e5dfc2751f223c6b12ea5923861253d197b0b4f82f1e6174"
+}

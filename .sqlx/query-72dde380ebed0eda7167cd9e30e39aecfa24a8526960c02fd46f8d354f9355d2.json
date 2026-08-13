@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.campaigns (\n                 kernel_build_id, application_revision_id, repository_id, lifecycle,\n                 aggregate_budget_micro_usd, deadline, delivery_target, revision\n             ) VALUES ($1, $2, $3, $4, $5,\n                       to_timestamp($6::DOUBLE PRECISION / 1000.0), $7, 0)\n             RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int8",
+        "Float8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "72dde380ebed0eda7167cd9e30e39aecfa24a8526960c02fd46f8d354f9355d2"
+}

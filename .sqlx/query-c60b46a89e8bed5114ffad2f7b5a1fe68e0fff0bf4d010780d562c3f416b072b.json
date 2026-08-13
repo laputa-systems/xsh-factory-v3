@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.assignments SET lifecycle = $1, revision = revision + 1 WHERE id = $2 AND lifecycle = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c60b46a89e8bed5114ffad2f7b5a1fe68e0fff0bf4d010780d562c3f416b072b"
+}

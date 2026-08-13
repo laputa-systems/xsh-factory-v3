@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, aggregate_revision, bundle_artifact_id, is_active\n                 FROM factory.application_revisions\n                 WHERE application_key = $1\n                 ORDER BY aggregate_revision DESC\n                 LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "aggregate_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "bundle_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "bundle_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "is_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "is_active"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4bcfc81fc3f44de9ed5ba73cd3dd85f081134753235a51ab1ab9c872c9eeab64"
+}

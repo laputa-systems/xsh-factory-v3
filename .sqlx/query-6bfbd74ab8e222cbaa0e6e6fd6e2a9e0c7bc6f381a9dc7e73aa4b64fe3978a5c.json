@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT validation.id AS validation_id, validation.validation_scope,\n                    validation.lifecycle, log.id AS log_artifact_id, log.digest AS log_digest,\n                    log.byte_length AS log_byte_length\n             FROM factory.validations AS validation\n             JOIN factory.artifacts AS log ON log.id = validation.log_artifact_id\n             WHERE validation.candidate_id = $1\n             ORDER BY validation.validation_scope ASC, validation.id ASC\n             LIMIT 2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "validation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "validation_scope",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "validation_scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.validations",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "log_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "log_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "log_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6bfbd74ab8e222cbaa0e6e6fd6e2a9e0c7bc6f381a9dc7e73aa4b64fe3978a5c"
+}

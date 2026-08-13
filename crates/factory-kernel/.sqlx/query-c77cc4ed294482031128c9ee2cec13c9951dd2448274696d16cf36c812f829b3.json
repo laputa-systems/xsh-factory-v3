@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT digest, byte_length FROM factory.artifacts WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c77cc4ed294482031128c9ee2cec13c9951dd2448274696d16cf36c812f829b3"
+}

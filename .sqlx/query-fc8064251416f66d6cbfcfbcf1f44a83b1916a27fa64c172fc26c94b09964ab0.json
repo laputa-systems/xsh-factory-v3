@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.campaigns SET lifecycle = 3, revision = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fc8064251416f66d6cbfcfbcf1f44a83b1916a27fa64c172fc26c94b09964ab0"
+}

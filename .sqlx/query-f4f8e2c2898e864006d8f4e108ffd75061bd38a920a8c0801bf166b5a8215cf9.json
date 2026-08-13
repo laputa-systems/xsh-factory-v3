@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "EXPLAIN (COSTS OFF)\n             SELECT id FROM factory.forum_posts\n             WHERE search_vector @@ websearch_to_tsquery('simple', $1::text)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f4f8e2c2898e864006d8f4e108ffd75061bd38a920a8c0801bf166b5a8215cf9"
+}

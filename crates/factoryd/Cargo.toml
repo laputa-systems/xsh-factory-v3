@@ -1,0 +1,21 @@
+[package]
+name = "factoryd"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "factoryd"
+path = "src/main.rs"
+
+[dependencies]
+factory-kernel = { path = "../factory-kernel" }
+factory-protocol = { path = "../factory-protocol" }
+smol.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

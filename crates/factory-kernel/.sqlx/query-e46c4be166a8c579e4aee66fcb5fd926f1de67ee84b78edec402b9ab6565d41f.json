@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, build_digest FROM factory.kernel_builds WHERE is_current FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e46c4be166a8c579e4aee66fcb5fd926f1de67ee84b78edec402b9ab6565d41f"
+}

@@ -1,0 +1,268 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT candidate.id AS candidate_id, candidate.revision AS candidate_revision,\n                    candidate.lifecycle, candidate.ticket_attempt_id,\n                    ticket_revision.id AS ticket_revision_id,\n                    ticket_revision.revision AS ticket_revision,\n                    candidate.base_commit, candidate.candidate_tree, candidate.candidate_commit,\n                    changed_paths.id AS changed_paths_artifact_id,\n                    changed_paths.digest AS changed_paths_digest,\n                    changed_paths.byte_length AS changed_paths_byte_length,\n                    patch.id AS patch_artifact_id, patch.digest AS patch_digest,\n                    patch.byte_length AS patch_byte_length,\n                    engineering_report.id AS engineering_report_artifact_id,\n                    engineering_report.digest AS engineering_report_digest,\n                    engineering_report.byte_length AS engineering_report_byte_length,\n                    risks.id AS risks_artifact_id, risks.digest AS risks_digest,\n                    risks.byte_length AS risks_byte_length\n             FROM factory.candidates AS candidate\n             JOIN factory.ticket_attempts AS attempt ON attempt.id = candidate.ticket_attempt_id\n             JOIN factory.ticket_revisions AS ticket_revision ON ticket_revision.id = attempt.ticket_revision_id\n             JOIN factory.artifacts AS changed_paths ON changed_paths.id = candidate.changed_paths_artifact_id\n             JOIN factory.artifacts AS patch ON patch.id = candidate.patch_artifact_id\n             JOIN factory.artifacts AS engineering_report ON engineering_report.id = candidate.engineering_report_artifact_id\n             JOIN factory.artifacts AS risks ON risks.id = candidate.risks_artifact_id\n             WHERE candidate.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "ticket_attempt_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "base_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "candidate_tree",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_tree"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "candidate_commit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "candidate_commit"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "changed_paths_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "changed_paths_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "changed_paths_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "patch_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "patch_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "patch_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "engineering_report_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "engineering_report_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "engineering_report_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "risks_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "risks_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "risks_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "53ff29fc28dbe5e90187439869b8446f0953ddcb075002431501042f17b64632"
+}

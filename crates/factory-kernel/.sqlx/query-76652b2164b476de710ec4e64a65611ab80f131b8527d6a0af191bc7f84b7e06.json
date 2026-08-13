@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                 SELECT 1 FROM factory.audit_log\n                 WHERE principal = $1 AND subject_kind = $2 AND subject_id = $3\n             ) AS \"owned!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owned!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "76652b2164b476de710ec4e64a65611ab80f131b8527d6a0af191bc7f84b7e06"
+}

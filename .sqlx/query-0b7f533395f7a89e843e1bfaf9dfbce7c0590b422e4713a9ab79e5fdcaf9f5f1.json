@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ar.id, ar.aggregate_revision, ba.digest AS bundle_digest\n             FROM factory.application_revisions ar\n             JOIN factory.artifacts ba ON ba.id = ar.bundle_artifact_id\n             WHERE ar.application_key = $1\n             ORDER BY ar.aggregate_revision DESC LIMIT 1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "aggregate_revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "bundle_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0b7f533395f7a89e843e1bfaf9dfbce7c0590b422e4713a9ab79e5fdcaf9f5f1"
+}

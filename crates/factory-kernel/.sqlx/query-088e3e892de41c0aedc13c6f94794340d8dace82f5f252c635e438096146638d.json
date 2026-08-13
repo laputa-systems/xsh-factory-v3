@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.packet_artifact_id, a.packet_digest, a.required_read_manifest_artifact_id,\n                    a.campaign_id, a.kernel_build_id, a.application_revision_id\n             FROM factory.sessions s\n             JOIN factory.assignments a ON a.id = s.assignment_id\n             WHERE s.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "packet_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "packet_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "required_read_manifest_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "required_read_manifest_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "kernel_build_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "application_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "088e3e892de41c0aedc13c6f94794340d8dace82f5f252c635e438096146638d"
+}

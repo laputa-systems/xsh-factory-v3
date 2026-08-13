@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                (SELECT count(*)::BIGINT FROM factory.forum_topics) AS \"topic_count!\",\n                (SELECT count(*)::BIGINT FROM factory.forum_threads) AS \"thread_count!\",\n                (SELECT count(*)::BIGINT FROM factory.forum_posts) AS \"post_count!\",\n                (SELECT count(*)::BIGINT FROM factory.forum_attachments) AS \"attachment_count!\",\n                (SELECT count(*)::BIGINT FROM factory.audit_log\n                    WHERE operation IN ($1, $2, $3, $4, $5)) AS \"audit_count!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "topic_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "thread_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "post_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "attachment_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "audit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5398b9689b7d4ac2acd3c7d2a8c5e7f9619c23054c3e8c268f4ee5ac645df568"
+}

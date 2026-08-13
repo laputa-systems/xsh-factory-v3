@@ -1,0 +1,316 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id AS ticket_id, tr.id AS ticket_revision_id, tr.revision,\n                    tr.application_revision_id, tr.lifecycle, tr.sponsorship_reason,\n                    tr.blocked_reason,\n                    proposal.id AS proposal_artifact_id, proposal.digest AS proposal_digest,\n                    proposal.byte_length AS proposal_byte_length,\n                    reproducer.id AS reproducer_artifact_id, reproducer.digest AS reproducer_digest,\n                    reproducer.byte_length AS reproducer_byte_length,\n                    expected_observation.id AS expected_observation_artifact_id,\n                    expected_observation.digest AS expected_observation_digest,\n                    expected_observation.byte_length AS expected_observation_byte_length,\n                    discovery_observation.id AS discovery_observation_artifact_id,\n                    discovery_observation.digest AS discovery_observation_digest,\n                    discovery_observation.byte_length AS discovery_observation_byte_length,\n                    requalification_first.id AS requalification_first_artifact_id,\n                    requalification_first.digest AS requalification_first_digest,\n                    requalification_first.byte_length AS requalification_first_byte_length,\n                    requalification_second.id AS requalification_second_artifact_id,\n                    requalification_second.digest AS requalification_second_digest,\n                    requalification_second.byte_length AS requalification_second_byte_length\n             FROM factory.tickets AS t\n             JOIN factory.ticket_revisions AS tr ON tr.id = t.current_ticket_revision_id\n             JOIN factory.artifacts AS proposal ON proposal.id = tr.proposal_artifact_id\n             JOIN factory.artifacts AS reproducer ON reproducer.id = tr.reproducer_artifact_id\n             JOIN factory.artifacts AS expected_observation\n                 ON expected_observation.id = tr.expected_observation_artifact_id\n             JOIN factory.artifacts AS discovery_observation\n                 ON discovery_observation.id = tr.discovery_observation_artifact_id\n             LEFT JOIN factory.artifacts AS requalification_first\n                 ON requalification_first.id = tr.last_requalification_first_observation_artifact_id\n             LEFT JOIN factory.artifacts AS requalification_second\n                 ON requalification_second.id = tr.last_requalification_second_observation_artifact_id\n             WHERE t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "sponsorship_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "sponsorship_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "blocked_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "blocked_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "proposal_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "proposal_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "proposal_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "reproducer_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "reproducer_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "expected_observation_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "expected_observation_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "discovery_observation_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "discovery_observation_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "requalification_first_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "requalification_first_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "requalification_first_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "requalification_second_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "requalification_second_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "requalification_second_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "9371f9606b7eec286b7e6263e631aa5d81b468cc6c960d1830446def966eab70"
+}

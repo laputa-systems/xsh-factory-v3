@@ -1,0 +1,203 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.campaign_id, a.kernel_build_id, a.application_revision_id,\n                    a.packet_digest, a.revision, a.lifecycle, a.model_provider, a.model_id,\n                    a.thinking_level, a.input_price_micro_usd_per_million,\n                    a.output_price_micro_usd_per_million, a.cache_read_price_micro_usd_per_million,\n                    a.cache_write_price_micro_usd_per_million, c.lifecycle AS campaign_lifecycle,\n                    c.cost_state, c.deadline > CURRENT_TIMESTAMP AS \"deadline_open!\"\n             FROM factory.assignments a JOIN factory.campaigns c ON c.id = a.campaign_id\n             WHERE a.id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kernel_build_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "packet_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "model_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "model_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "model_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "thinking_level",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "thinking_level"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "input_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "input_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "output_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "output_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "cache_read_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "cache_read_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "cache_write_price_micro_usd_per_million",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "cache_write_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "campaign_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "cost_state",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "cost_state"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "deadline_open!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "02afd56370b329304d01bae0b83f6d03853de86a375c4bab7ee42eec41656c38"
+}

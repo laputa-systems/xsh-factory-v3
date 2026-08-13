@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.audit_log (\n             principal, command_id, operation, command_fingerprint,\n             subject_kind, subject_id, resulting_revision\n         ) VALUES ($1, $2, $3, $4, $5, $6, $7)\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9499c0c51eefeae97eb79b44c45024be91fe1eeeab1215801c3a8e9cad2b5c57"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.sessions (\n                 assignment_id, campaign_id, kernel_build_id, application_revision_id, office,\n                 model_provider, model_id, thinking_level, input_price_micro_usd_per_million,\n                 output_price_micro_usd_per_million, cache_read_price_micro_usd_per_million,\n                 cache_write_price_micro_usd_per_million, pid, pgid,\n                 process_started_at_unix_millis, lifecycle, revision\n             ) SELECT a.id, a.campaign_id, a.kernel_build_id, a.application_revision_id, a.office,\n                 a.model_provider, a.model_id, a.thinking_level, a.input_price_micro_usd_per_million,\n                 a.output_price_micro_usd_per_million, a.cache_read_price_micro_usd_per_million,\n                 a.cache_write_price_micro_usd_per_million, $2, $3, $4, $5, 0\n             FROM factory.assignments a WHERE a.id = $1 RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d9be7be7072a4488c18f550e4f23421b47cc86673d7625235673f3e84d53ed3c"
+}

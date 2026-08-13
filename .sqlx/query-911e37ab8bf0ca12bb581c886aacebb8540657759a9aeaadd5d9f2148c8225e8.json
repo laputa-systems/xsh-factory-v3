@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT kb.build_digest, c.application_revision_id, c.repository_id\n         FROM factory.campaigns AS c\n         JOIN factory.kernel_builds AS kb ON kb.id = c.kernel_build_id\n         WHERE c.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "repository_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "repository_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "911e37ab8bf0ca12bb581c886aacebb8540657759a9aeaadd5d9f2148c8225e8"
+}

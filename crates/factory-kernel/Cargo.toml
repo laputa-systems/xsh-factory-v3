@@ -1,0 +1,21 @@
+[package]
+name = "factory-kernel"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+blake3.workspace = true
+factory-protocol = { path = "../factory-protocol" }
+fastrand.workspace = true
+miniserde.workspace = true
+rustix.workspace = true
+smol.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

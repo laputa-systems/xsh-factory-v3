@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attempt.id AS ticket_attempt_id, attempt.revision AS attempt_revision,\n                    attempt.campaign_id, attempt.stage, candidate.id AS \"candidate_id?\"\n             FROM factory.ticket_attempts AS attempt\n             LEFT JOIN factory.candidates AS candidate ON candidate.ticket_attempt_id = attempt.id\n             WHERE attempt.ticket_revision_id = $1\n             ORDER BY attempt.created_at DESC, attempt.id DESC\n             LIMIT 20",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "stage",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "candidate_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "80f361069f26e5333fd9f7d55f42a7f30a1fb5d78437edfbe4dc7708fbe59f09"
+}

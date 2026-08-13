@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT kb.build_digest, a.digest AS \"receipt_digest!\",\n                    a.byte_length AS \"receipt_byte_length!\", a.cas_relative_path\n             FROM factory.kernel_builds AS kb\n             JOIN factory.artifacts AS a ON a.id = kb.qualification_receipt_artifact_id\n             WHERE kb.is_current\n             LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "receipt_digest!",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "receipt_byte_length!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cas_relative_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "cas_relative_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bc72033a68e3d5913231dcef6bc15faeab26e87386892b307d6ae0bd91dcab8a"
+}

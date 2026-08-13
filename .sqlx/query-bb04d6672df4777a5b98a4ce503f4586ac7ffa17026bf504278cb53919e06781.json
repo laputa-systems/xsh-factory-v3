@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.forum_posts (\n                 thread_id, author_kind, author_session_id, author_office, body,\n                 kind, reply_to_post_id, supersedes_post_id\n             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n             RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.forum_posts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int8",
+        "Int2",
+        "Text",
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bb04d6672df4777a5b98a4ce503f4586ac7ffa17026bf504278cb53919e06781"
+}

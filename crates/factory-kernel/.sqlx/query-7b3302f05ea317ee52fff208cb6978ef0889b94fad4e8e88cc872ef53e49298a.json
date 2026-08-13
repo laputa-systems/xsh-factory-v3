@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT application_key, ticket_maximum\n                 FROM factory.application_revisions WHERE id = $1 FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "application_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "application_key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ticket_maximum",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.application_revisions",
+            "name": "ticket_maximum"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7b3302f05ea317ee52fff208cb6978ef0889b94fad4e8e88cc872ef53e49298a"
+}

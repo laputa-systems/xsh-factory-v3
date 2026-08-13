@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.sessions SET lifecycle = $1, transcript_artifact_id = $2,\n                 stdout_artifact_id = $3, stderr_artifact_id = $4,\n                 partial_transcript_artifact_id = $5, required_read_manifest_artifact_id = $6,\n                 required_read_expected_count = $7, required_read_satisfied_count = $8,\n                 input_tokens = $9, output_tokens = $10, cache_read_tokens = $11,\n                 cache_write_tokens = $12, reasoning_tokens = $13,\n                 reported_cost_micro_usd = $14, cost_state = $15, cost_micro_usd = $16,\n                 stop_reason = $17, terminal_operation = $18, failure_class = $19,\n                 terminal_at = CURRENT_TIMESTAMP, revision = $20\n             WHERE id = $21 AND lifecycle = $22",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int8",
+        "Int2",
+        "Int2",
+        "Int2",
+        "Int8",
+        "Int8",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb91706da11781931a00012032583240aea5f42f1389b6e2ad83c6373eb15f57"
+}

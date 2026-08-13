@@ -1,0 +1,167 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.ticket_revision_id, ta.stage, ta.released_at IS NOT NULL AS \"released!\",\n                ta.revision AS attempt_revision,\n                tr.ticket_id, tr.application_revision_id,\n                tr.lifecycle AS ticket_revision_lifecycle,\n                tr.revision AS ticket_revision_aggregate_revision,\n                tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id,\n                t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,\n                t.current_ticket_revision_id\n         FROM factory.ticket_attempts AS ta\n         JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id\n         JOIN factory.tickets AS t ON t.id = tr.ticket_id\n         WHERE ta.id = $1 FOR UPDATE OF ta, tr, t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "ticket_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "stage",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "stage"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "released!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ticket_revision_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ticket_revision_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "ticket_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "ticket_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "current_ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "current_ticket_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c3b821dcc64dcecf2b52b80485fd85dd8979e9ddda6f53289babab0fc6c98c82"
+}

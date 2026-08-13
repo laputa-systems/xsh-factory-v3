@@ -1,0 +1,424 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.revision, s.assignment_id, s.campaign_id,\n                    s.kernel_build_id, s.application_revision_id, s.office AS session_office,\n                    s.model_provider AS session_model_provider, s.model_id AS session_model_id,\n                    s.thinking_level AS session_thinking_level,\n                    s.input_price_micro_usd_per_million AS session_input_price,\n                    s.output_price_micro_usd_per_million AS session_output_price,\n                    s.cache_read_price_micro_usd_per_million AS session_cache_read_price,\n                    s.cache_write_price_micro_usd_per_million AS session_cache_write_price,\n                    s.pid, s.pgid,\n                    s.process_started_at_unix_millis,\n                    a.office AS assignment_office, a.target,\n                    a.packet_artifact_id, a.packet_digest,\n                    a.system_prompt_artifact_id, a.assignment_prompt_artifact_id,\n                    a.required_read_manifest_artifact_id,\n                    a.model_provider AS assignment_model_provider,\n                    a.model_id AS assignment_model_id,\n                    a.thinking_level AS assignment_thinking_level,\n                    a.input_price_micro_usd_per_million AS assignment_input_price,\n                    a.output_price_micro_usd_per_million AS assignment_output_price,\n                    a.cache_read_price_micro_usd_per_million AS assignment_cache_read_price,\n                    a.cache_write_price_micro_usd_per_million AS assignment_cache_write_price,\n                    artifact.digest AS packet_artifact_digest,\n                    artifact.byte_length AS packet_artifact_byte_length,\n                    build.build_digest AS kernel_build_digest\n             FROM factory.sessions s\n             JOIN factory.assignments a ON a.id = s.assignment_id\n             JOIN factory.artifacts artifact ON artifact.id = a.packet_artifact_id\n             JOIN factory.kernel_builds build ON build.id = s.kernel_build_id\n             WHERE s.lifecycle = $1\n             ORDER BY s.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "assignment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "assignment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "kernel_build_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "kernel_build_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "session_office",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "office"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "session_model_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "model_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "session_model_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "session_thinking_level",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "thinking_level"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "session_input_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "input_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "session_output_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "output_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "session_cache_read_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cache_read_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "session_cache_write_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cache_write_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "pid",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "pid"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "pgid",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "pgid"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "process_started_at_unix_millis",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "process_started_at_unix_millis"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "assignment_office",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "office"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "target",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "target"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "packet_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "packet_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "packet_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "system_prompt_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "system_prompt_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "assignment_prompt_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "assignment_prompt_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "required_read_manifest_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "required_read_manifest_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "assignment_model_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "model_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "assignment_model_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "assignment_thinking_level",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "thinking_level"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "assignment_input_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "input_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 28,
+        "name": "assignment_output_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "output_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 29,
+        "name": "assignment_cache_read_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "cache_read_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 30,
+        "name": "assignment_cache_write_price",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.assignments",
+            "name": "cache_write_price_micro_usd_per_million"
+          }
+        }
+      },
+      {
+        "ordinal": 31,
+        "name": "packet_artifact_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "ordinal": 32,
+        "name": "packet_artifact_byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.artifacts",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 33,
+        "name": "kernel_build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f41bac843c1dee8f256e2deb94dd535eb3fb93250906e4f9ab15843989bf8c92"
+}

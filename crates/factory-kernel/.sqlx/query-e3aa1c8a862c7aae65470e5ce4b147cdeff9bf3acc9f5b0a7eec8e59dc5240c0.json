@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tr.ticket_id, tr.application_revision_id, tr.lifecycle AS ticket_revision_lifecycle,\n                tr.revision AS ticket_revision_aggregate_revision,\n                tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id,\n                t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,\n                t.current_ticket_revision_id\n         FROM factory.ticket_revisions AS tr\n         JOIN factory.tickets AS t ON t.id = tr.ticket_id\n         WHERE tr.id = $1 FOR UPDATE OF tr, t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "ticket_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ticket_revision_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ticket_revision_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expected_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "expected_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "discovery_observation_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "discovery_observation_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ticket_lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ticket_aggregate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "current_ticket_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.tickets",
+            "name": "current_ticket_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e3aa1c8a862c7aae65470e5ce4b147cdeff9bf3acc9f5b0a7eec8e59dc5240c0"
+}

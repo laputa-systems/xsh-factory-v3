@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lifecycle, campaign_id, cost_state, cost_micro_usd FROM factory.sessions WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "campaign_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "campaign_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cost_state",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cost_state"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cost_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.sessions",
+            "name": "cost_micro_usd"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "f49f702613ad6e229c4fd60aeb9dcec8a3386222a5bc8a8018645a525711ef89"
+}

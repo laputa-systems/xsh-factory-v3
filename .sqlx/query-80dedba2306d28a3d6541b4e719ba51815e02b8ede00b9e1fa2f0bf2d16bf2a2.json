@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT to_timestamp($1::DOUBLE PRECISION / 1000.0) > CURRENT_TIMESTAMP AS \"open!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "open!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "80dedba2306d28a3d6541b4e719ba51815e02b8ede00b9e1fa2f0bf2d16bf2a2"
+}

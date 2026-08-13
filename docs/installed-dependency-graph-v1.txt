@@ -1,0 +1,10 @@
+factory-v3-installed-dependency-graph-v1
+deno-version=2.9.4
+pi-sdk-version=0.84.1
+entrypoint=packages/factory-pi-host/main.ts
+deno-json-blake3=086a5b4cd61d6b241112b59310a979f567aab86153125156561dd89498ff60ed
+deno-lock-blake3=aaa75cdb5163589d3f5c209b18309b417753ca03f30e60496788418bd5416251
+node-modules-dir=none
+lock-mode=frozen
+qualification=deno check --frozen --cached-only packages/factory-pi-host/main.ts
+direct-pi-dependency=npm:@earendil-works/pi-coding-agent@0.84.1

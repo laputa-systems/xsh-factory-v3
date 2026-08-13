@@ -1,0 +1,108 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH search AS (\n                SELECT websearch_to_tsquery('simple', $1::text) AS query\n             ), matches AS (\n                SELECT t.id AS topic_id, th.id AS thread_id, p.id AS post_id,\n                       ts_rank_cd(p.search_vector, search.query) AS rank,\n                       0::smallint AS source_precedence,\n                       p.body AS matched_text\n                FROM factory.forum_posts AS p\n                JOIN factory.forum_threads AS th ON th.id = p.thread_id\n                JOIN factory.forum_topics AS t ON t.id = th.topic_id\n                CROSS JOIN search\n                WHERE p.search_vector @@ search.query\n                UNION ALL\n                SELECT t.id, th.id, p.id, ts_rank_cd(th.search_vector, search.query),\n                       1::smallint, th.title\n                FROM factory.forum_threads AS th\n                JOIN factory.forum_topics AS t ON t.id = th.topic_id\n                JOIN factory.forum_posts AS p ON p.thread_id = th.id\n                CROSS JOIN search\n                WHERE th.search_vector @@ search.query\n                UNION ALL\n                SELECT t.id, th.id, p.id, ts_rank_cd(t.search_vector, search.query),\n                       2::smallint, t.name || ' — ' || t.description\n                FROM factory.forum_topics AS t\n                JOIN factory.forum_threads AS th ON th.topic_id = t.id\n                JOIN factory.forum_posts AS p ON p.thread_id = th.id\n                CROSS JOIN search\n                WHERE t.search_vector @@ search.query\n             ), best AS (\n                SELECT DISTINCT ON (post_id)\n                       topic_id, thread_id, post_id, rank, source_precedence, matched_text\n                FROM matches\n                ORDER BY post_id, rank DESC, source_precedence ASC\n             )\n             SELECT best.topic_id AS \"topic_id!\", best.thread_id AS \"thread_id!\",\n                    best.post_id AS \"post_id!\", p.kind AS \"kind!\", p.author_office,\n                    best.rank AS \"rank!\",\n                    ts_headline(\n                      'simple', best.matched_text, search.query,\n                      'MaxWords=80, MinWords=12, MaxFragments=2, StartSel=<mark>, StopSel=</mark>'\n                    ) AS \"snippet!\",\n                    t.name AS \"topic_name!\", th.title AS \"thread_title!\"\n             FROM best\n             JOIN factory.forum_posts AS p ON p.id = best.post_id\n             JOIN factory.forum_threads AS th ON th.id = best.thread_id\n             JOIN factory.forum_topics AS t ON t.id = best.topic_id\n             CROSS JOIN search\n             WHERE ($2::bigint IS NULL OR best.topic_id = $2)\n               AND ($3::bigint IS NULL OR best.thread_id = $3)\n               AND ($4::smallint IS NULL OR p.author_office = $4)\n               AND ($5::smallint IS NULL OR p.kind = $5)\n               AND ($6::bigint IS NULL OR p.created_at >= to_timestamp($6::double precision / 1000000.0))\n               AND ($7::bigint IS NULL OR p.created_at < to_timestamp($7::double precision / 1000000.0))\n               AND ($8::real IS NULL OR best.rank < $8 OR (best.rank = $8 AND best.post_id > $9))\n             ORDER BY best.rank DESC, best.post_id ASC\n             LIMIT $10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "topic_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "thread_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "post_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind!",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.forum_posts",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "author_office",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.forum_posts",
+            "name": "author_office"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "rank!",
+        "type_info": "Float4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "snippet!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "topic_name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.forum_topics",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "thread_title!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.forum_threads",
+            "name": "title"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int2",
+        "Int2",
+        "Int8",
+        "Int8",
+        "Float4",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      false,
+      true,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "1cff95d2c60a40787fb116223f8c7e1bc50e988d6545a4937a5d7e599656aee6"
+}

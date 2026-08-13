@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE factory.ticket_attempts\n             SET stage = $1, failed_at = CURRENT_TIMESTAMP, failure_reason = $2, revision = $3\n             WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28c348d049d0f2f8d5ef26d0671a28488083666605d7a1fe81ae9f029578534c"
+}

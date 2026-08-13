@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.lifecycle, c.aggregate_budget_micro_usd, c.measured_cost_micro_usd,\n                    c.cost_state, c.revision, c.application_revision_id, c.repository_id,\n                    c.delivery_target,\n                    FLOOR(EXTRACT(EPOCH FROM c.deadline) * 1000)::BIGINT AS \"deadline_unix_millis!\",\n                    kb.build_digest\n             FROM factory.campaigns AS c\n             JOIN factory.kernel_builds AS kb ON kb.id = c.kernel_build_id\n             WHERE c.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lifecycle",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "aggregate_budget_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "aggregate_budget_micro_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "measured_cost_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "measured_cost_micro_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cost_state",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "cost_state"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "repository_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "repository_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "delivery_target",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "delivery_target"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "deadline_unix_millis!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "build_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "factory.kernel_builds",
+            "name": "build_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "7bc4c9eb1d7e013e496e2134480a41724c9ab5620017f1a38a4a3e2be5e9aa10"
+}

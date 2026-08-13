@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, canonical_local_path, default_branch, delivery_mode\n             FROM factory.repositories WHERE repository_key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.repositories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "canonical_local_path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.repositories",
+            "name": "canonical_local_path"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "default_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "factory.repositories",
+            "name": "default_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "delivery_mode",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.repositories",
+            "name": "delivery_mode"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9bc596fbedbabb4ebd62ae64980883a2795312cd55855b4342d0486adce62764"
+}

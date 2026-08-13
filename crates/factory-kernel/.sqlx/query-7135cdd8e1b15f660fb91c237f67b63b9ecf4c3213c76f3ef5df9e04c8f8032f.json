@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(MAX(revision), 0)::BIGINT AS \"revision!\" FROM factory.kernel_builds",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7135cdd8e1b15f660fb91c237f67b63b9ecf4c3213c76f3ef5df9e04c8f8032f"
+}
