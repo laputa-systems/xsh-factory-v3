@@ -551,7 +551,7 @@ impl DurableAuthorityResolver {
             DurableAssignmentTarget::Engineering { ticket_attempt_id } => {
                 let row = sqlx::query!(
                     "SELECT claimed_commit, claimed_tree, tr.proposal_artifact_id,
-                            tr.ticket_id, tr.id AS ticket_revision_id
+                            tr.reproducer_artifact_id, tr.ticket_id, tr.id AS ticket_revision_id
                        FROM factory.ticket_attempts ta
                        JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
                       WHERE ta.id = $1 AND ta.campaign_id = $2
@@ -578,6 +578,15 @@ impl DurableAuthorityResolver {
                             .to_owned(),
                     );
                 }
+                let engineering_checkpoint = self
+                    .engineering_checkpoint_contract(
+                        &application.bundle,
+                        ticket_attempt_id,
+                        proposal_artifact_id,
+                        ArtifactId::new(row.reproducer_artifact_id)
+                            .map_err(|error| error.to_string())?,
+                    )
+                    .await?;
                 Ok(DurableAssignmentLaunchContext {
                     application_revision_id: assignment.application_revision_id,
                     target: DurableAssignmentTarget::Engineering { ticket_attempt_id },
@@ -592,6 +601,7 @@ impl DurableAuthorityResolver {
                             .map_err(|error| error.to_string())?,
                     ),
                     validation_id: None,
+                    engineering_checkpoint: Some(engineering_checkpoint),
                     proposal: Some(self.reference(proposal_artifact_id).await?),
                     evidence: DurableAssignmentEvidence {
                         proposal: Some(
@@ -657,6 +667,7 @@ impl DurableAuthorityResolver {
                         factory_protocol::ValidationId::new(row.validation_id)
                             .map_err(|error| error.to_string())?,
                     ),
+                    engineering_checkpoint: None,
                     proposal: Some(
                         self.reference(
                             ArtifactId::new(row.proposal_artifact_id)
@@ -697,6 +708,7 @@ impl DurableAuthorityResolver {
                 ticket_id: None,
                 ticket_revision_id: None,
                 validation_id: None,
+                engineering_checkpoint: None,
                 proposal: None,
                 evidence: DurableAssignmentEvidence {
                     proposal: None,
@@ -1517,6 +1529,54 @@ impl DurableAuthorityResolver {
         })
     }
 
+    /// The checkpoint action echoes two fixed ticket-bound values. Render
+    /// them into the Engineering prompt from the same admitted profile that
+    /// the later live resolver verifies, so the actor never has to infer an
+    /// opaque string from a command line or an artifact layout.
+    async fn engineering_checkpoint_contract(
+        &self,
+        application: &ApplicationBundleV1,
+        ticket_attempt_id: TicketAttemptId,
+        proposal_artifact_id: ArtifactId,
+        reproducer_artifact_id: ArtifactId,
+    ) -> Result<EngineeringCheckpointContract, String> {
+        let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
+        let proposal = parse_product_ticket_proposal_v1(
+            &proposal_bytes,
+            &application.ticket_policy.ticket_bounds,
+        )
+        .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
+        self.verify_proposal_artifacts(&proposal).await?;
+        let stored_profile =
+            parse_command_profile_v1(&self.artifact_bytes(reproducer_artifact_id).await?)
+                .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
+        let proposal_profile = parse_command_profile_v1(
+            &self
+                .artifact_bytes(proposal.reproducer.command.artifact_id)
+                .await?,
+        )
+        .map_err(|error| format!("ticket proposal reproducer profile is invalid: {error}"))?;
+        if stored_profile != proposal_profile
+            || application
+                .reproducer_profiles
+                .iter()
+                .find(|profile| profile.name == proposal.reproducer_profile)
+                != Some(&stored_profile)
+        {
+            return Err(
+                "stored ticket reproducer no longer matches its admitted profile".to_owned(),
+            );
+        }
+        Ok(EngineeringCheckpointContract {
+            regression_command: stored_profile.name.clone(),
+            expected_failure: format!(
+                "ticket-attempt-{}-{}",
+                ticket_attempt_id.get(),
+                stored_profile.name,
+            ),
+        })
+    }
+
     /// Resolves the exact evidence closure already attached to one validated
     /// candidate.  Every artifact is converted through `reference`, which
     /// proves the registered CAS seal remains readable before the assignment
@@ -1929,6 +1989,9 @@ pub struct DurableAssignmentLaunchContext {
     /// The passed hard Candidate validation that authorizes Quality. It is
     /// absent for Product and Engineering; Quality launch refuses without it.
     pub validation_id: Option<factory_protocol::ValidationId>,
+    /// The exact fixed values the Engineering checkpoint must echo. This is
+    /// absent outside Engineering so no unrelated assignment can render it.
+    pub engineering_checkpoint: Option<EngineeringCheckpointContract>,
     /// Exact sealed Product contract upstream of an Engineering/Quality
     /// assignment. Product has no preceding ticket proposal.
     pub proposal: Option<SealedArtifactReferenceV1>,
@@ -1942,6 +2005,12 @@ pub struct DurableAssignmentLaunchContext {
     /// Ticket-specific contract reads, parsed from the sealed admitted
     /// proposal. Product has none because it has no upstream ticket target.
     pub ticket_contract_reads: Vec<TicketContractReadV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineeringCheckpointContract {
+    pub regression_command: String,
+    pub expected_failure: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

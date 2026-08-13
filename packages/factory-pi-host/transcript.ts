@@ -29,28 +29,61 @@ export class TranscriptWriter {
   #file: Deno.FsFile | undefined;
   #sequence = 0;
   #writesSinceSync = 0;
+  #writtenBytes = 0;
+  #truncated = false;
+  readonly #byteLimit: number;
 
-  private constructor(path: string, file: Deno.FsFile) {
+  private constructor(path: string, file: Deno.FsFile, byteLimit: number) {
     this.path = path;
     this.#file = file;
+    this.#byteLimit = byteLimit;
   }
 
-  static async open(path: string): Promise<TranscriptWriter> {
+  static async open(path: string, byteLimit: number): Promise<TranscriptWriter> {
+    if (!Number.isSafeInteger(byteLimit) || byteLimit < 1) {
+      throw new Error("transcript byte limit is invalid");
+    }
     await Deno.mkdir(dirname(path), { recursive: true });
     return new TranscriptWriter(
       path,
       await Deno.open(path, { create: true, truncate: true, write: true }),
+      byteLimit,
     );
   }
 
-  async append(event: unknown): Promise<void> {
+  /**
+   * Retains ordered raw SDK events only while their exact NDJSON encoding
+   * fits the assigned bound. Pi may emit cumulative snapshots that dwarf the
+   * streamed text delta, so model-output accounting alone cannot safely cap
+   * this durable artifact.
+   */
+  async append(event: unknown): Promise<{ readonly truncated: boolean }> {
     if (this.#file === undefined) throw new Error("transcript is closed");
+    if (this.#truncated) return { truncated: true };
     const bytes = jsonLine({ sequence: this.#sequence++, event });
+    if (this.#writtenBytes + bytes.byteLength > this.#byteLimit) {
+      this.#truncated = true;
+      const marker = jsonLine({
+        sequence: this.#sequence++,
+        event: {
+          type: "factory.transcript_truncated.v1",
+          omitted_event_byte_length: bytes.byteLength,
+          retained_byte_limit: this.#byteLimit,
+        },
+      });
+      if (this.#writtenBytes + marker.byteLength <= this.#byteLimit) {
+        await writeAll(this.#file, marker);
+        this.#writtenBytes += marker.byteLength;
+      }
+      return { truncated: true };
+    }
     await writeAll(this.#file, bytes);
+    this.#writtenBytes += bytes.byteLength;
     if (++this.#writesSinceSync >= 32) {
       await this.#file.sync();
       this.#writesSinceSync = 0;
     }
+    return { truncated: false };
   }
 
   async close(): Promise<void> {

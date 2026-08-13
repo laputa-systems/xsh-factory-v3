@@ -26,3 +26,9 @@ Deno.test("assignment templates structurally hide control-plane identities", () 
     );
   }
 });
+
+Deno.test("Engineering templates may name their fixed checkpoint contract", () => {
+  for (const placeholder of ["REGRESSION_COMMAND", "REGRESSION_EXPECTED_FAILURE"]) {
+    validateTemplateForOfficeV1(`\${${placeholder}}`, template(placeholder), "engineering");
+  }
+});

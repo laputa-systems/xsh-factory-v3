@@ -97,8 +97,24 @@ Deno.test("XSH application pins exact repository, reads, and deterministic comma
   assertEquals(xshApplicationV1.repository.default_branch, "master");
   for (const profile of xshApplicationV1.office_profiles) {
     assertEquals(profile.system_template.placeholders, ["ASSIGNMENT_ID", "MISSION"]);
-    assertEquals(profile.assignment_template.placeholders, ["ASSIGNMENT_ID", "TARGET"]);
+    assertEquals(
+      profile.assignment_template.placeholders,
+      profile.office === "engineering"
+        ? [
+          "ASSIGNMENT_ID",
+          "TARGET",
+          "REGRESSION_COMMAND",
+          "REGRESSION_EXPECTED_FAILURE",
+        ]
+        : ["ASSIGNMENT_ID", "TARGET"],
+    );
   }
+  const product = xshApplicationV1.office_profiles.find((profile) =>
+    profile.office === "product_research"
+  );
+  assert(product !== undefined);
+  assertEquals(product.model.model_id, "deepseek/deepseek-v4-flash-0731");
+  assertEquals(product.limits.output_byte_limit, 16_777_216);
   assertEquals(
     xshApplicationV1.required_reads.map((read) => read.path),
     ["AGENTS.md", "docs/CHAPTER-01-why-xsh.md", "docs/TEST-MAP.md"],

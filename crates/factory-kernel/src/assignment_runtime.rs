@@ -779,6 +779,19 @@ fn prompt_values(
                     .get()
                     .to_string(),
             );
+            let checkpoint = context.engineering_checkpoint.as_ref().ok_or_else(|| {
+                AssignmentRuntimeError::Application(
+                    "Engineering target lacks its checkpoint contract".to_owned(),
+                )
+            })?;
+            values.insert(
+                "REGRESSION_COMMAND".to_owned(),
+                checkpoint.regression_command.clone(),
+            );
+            values.insert(
+                "REGRESSION_EXPECTED_FAILURE".to_owned(),
+                checkpoint.expected_failure.clone(),
+            );
         }
         DurableAssignmentTarget::Quality { candidate_id, .. } => {
             values.insert(

@@ -334,8 +334,10 @@ Deno.test("Engineering and Quality adapters expose their exact closed tool schem
   assertEquals(schema("candidate_submit").additionalProperties, false);
   assert(schema("candidate_submit").required?.includes("engineering_report"));
   assert(!schema("candidate_submit").required?.includes("candidate_tree_artifact_id"));
+  assert(!schema("candidate_submit").required?.includes("client_command_id"));
+  assert(!schema("candidate_submit").required?.includes("expected_revision"));
   assertEquals(schema("quality_run_full_suite").additionalProperties, false);
-  assert(schema("quality_run_full_suite").required?.includes("client_command_id"));
+  assert(!schema("quality_run_full_suite").required?.includes("client_command_id"));
   assertEquals(schema("quality_submit_review").additionalProperties, false);
   assert(schema("quality_submit_review").required?.includes("full_suite_validation_id"));
   assert(!schema("quality_submit_review").required?.includes("reasons"));

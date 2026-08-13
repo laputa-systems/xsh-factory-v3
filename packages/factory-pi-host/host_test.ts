@@ -393,7 +393,11 @@ Deno.test("1,000 raw events are streamed and gzip is complete", async () => {
     (_, index) => ({ type: "message_update", index }),
   );
   events.push({ type: "terminal", cost_micro_usd: 1, stop_reason: "completed" });
-  const result = await runAssignment(packet(root, false), deps(new FakeFactory(events)));
+  const source = packet(root, false);
+  const result = await runAssignment(
+    { ...source, limits: { ...source.limits, output_byte_limit: 128_000 } },
+    deps(new FakeFactory(events)),
+  );
   assertEquals(result.status, "succeeded");
   const compressed = await Deno.readFile(result.summary.transcript_gzip_path);
   const decompressed = await new Response(
@@ -1219,6 +1223,25 @@ Deno.test("output byte limit aborts the one session and remains explicit", async
   assertEquals(result.summary.stop_reason, "output_limit");
   assertEquals(result.summary.output_bytes, 4);
   assertEquals(factory.lastSession?.aborted, true);
+});
+
+Deno.test("transcript cap stops cumulative SDK snapshots before durable evidence grows unbounded", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-transcript-limit-" });
+  const factory = new FakeFactory([
+    { type: "tool_execution_end", result: { cumulative_snapshot: "x".repeat(20_000) } },
+    terminal(1),
+  ]);
+  const source = packet(root, false);
+  const result = await runAssignment(
+    { ...source, limits: { ...source.limits, output_byte_limit: 1_024 } },
+    deps(factory),
+  );
+  assertEquals(result.status, "failed");
+  assertEquals(result.summary.stop_reason, "output_limit");
+  assertEquals(factory.lastSession?.aborted, true);
+  const transcript = await Deno.readTextFile(result.summary.transcript_path);
+  assert(transcript.includes("factory.transcript_truncated.v1"));
+  assert(new TextEncoder().encode(transcript).byteLength <= 1_024);
 });
 
 Deno.test("turn, wall, and aggregate allowance limits halt before success", async () => {

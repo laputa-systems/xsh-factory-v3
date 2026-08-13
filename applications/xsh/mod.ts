@@ -156,7 +156,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "c2ee717562f802451b898eb09526356b4d1ae58b2ecc664663af6a47cc320c61",
+        "15308404a1af32eca0613cff48b875a979e2d88c24ca94cefe956f998e408571",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
@@ -169,11 +169,10 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "product_submit_ticket",
         "work_complete",
       ],
-      // Product receives one bounded semantic question and must independently
-      // verify it before proposing work. The same model can later implement
-      // the accepted contract without changing the provider/runtime boundary.
-      model: engineeringModel,
-      limits: { turn_limit: 32, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
+      // Product's bounded investigation favors the lower-cost research
+      // profile; the separate Engineering assignment owns implementation.
+      model: researchReviewModel,
+      limits: { turn_limit: 32, wall_limit_millis: 1_800_000, output_byte_limit: 16_777_216 },
     },
     {
       office: "engineering",
@@ -184,8 +183,13 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       ),
       assignment_template: template(
         "templates/engineering-assignment.md",
-        "3160178e4d7c5981d60522f174afa6b43cf275ff863a4b30bc497709a64122b5",
-        ["ASSIGNMENT_ID", "TARGET"],
+        "c0eb2b4d89ad2f223aa808374785b117d73eb13b45dcb760c9cb2ed86a59ff64",
+        [
+          "ASSIGNMENT_ID",
+          "TARGET",
+          "REGRESSION_COMMAND",
+          "REGRESSION_EXPECTED_FAILURE",
+        ],
       ),
       tools: [
         ...commonActorTools,

@@ -433,7 +433,12 @@ fn allowed_placeholders(office: Option<Office>) -> std::collections::BTreeSet<&'
         ["ASSIGNMENT_ID", "MISSION", "TARGET"].into_iter().collect();
     match office {
         Some(Office::ProductResearch) => {}
-        Some(Office::Engineering) => allowed.extend(["TICKET_ID", "TICKET_REVISION_ID"]),
+        Some(Office::Engineering) => allowed.extend([
+            "TICKET_ID",
+            "TICKET_REVISION_ID",
+            "REGRESSION_COMMAND",
+            "REGRESSION_EXPECTED_FAILURE",
+        ]),
         Some(Office::Quality) => allowed.extend([
             "TICKET_ID",
             "TICKET_REVISION_ID",

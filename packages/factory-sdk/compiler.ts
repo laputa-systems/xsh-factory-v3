@@ -182,7 +182,12 @@ function allowedPlaceholders(office: OfficeV1 | "mission"): ReadonlySet<string> 
   ];
   const officeSpecific: Record<OfficeV1, readonly string[]> = {
     product_research: [],
-    engineering: ["TICKET_ID", "TICKET_REVISION_ID"],
+    engineering: [
+      "TICKET_ID",
+      "TICKET_REVISION_ID",
+      "REGRESSION_COMMAND",
+      "REGRESSION_EXPECTED_FAILURE",
+    ],
     quality: ["TICKET_ID", "TICKET_REVISION_ID", "CANDIDATE_ID", "VALIDATION_ID"],
   };
   return new Set([...common, ...officeSpecific[office]]);

@@ -303,10 +303,41 @@ const FORUM_POST_KINDS = [
 
 const EMPTY_INPUT_SCHEMA = { type: "object", additionalProperties: false } as const;
 
+/**
+ * Per-session transport facts minted by the daemon admission frame. These are
+ * host bookkeeping, never model inputs: an actor should describe the work,
+ * not guess an optimistic revision or manufacture an idempotency key.
+ */
+export interface FramedToolCommandContext {
+  readonly session_revision: number;
+  readonly next_command_id: () => number;
+}
+
+const defaultCommandContext: FramedToolCommandContext = {
+  session_revision: 0,
+  next_command_id: (() => {
+    let next = 0;
+    return () => ++next;
+  })(),
+};
+
+const SESSION_MUTATING_TOOLS = new Set<HostToolName>([
+  "artifact_seal",
+  "product_submit_ticket",
+  "candidate_checkpoint_regression",
+  "candidate_submit",
+  "quality_run_full_suite",
+  "quality_submit_review",
+  "forum_create_topic",
+  "forum_create_thread",
+  "forum_post",
+]);
+
 /** Converts admitted tool names into assigned operation-specific wrappers. */
 export function createFramedToolAdapters(
   client: FramedActorClient,
   names: readonly HostToolName[],
+  commandContext: FramedToolCommandContext = defaultCommandContext,
 ): readonly PiToolAdapter[] {
   return names.flatMap((name) => {
     const operation = TOOL_OPERATIONS[name];
@@ -327,7 +358,10 @@ export function createFramedToolAdapters(
         input_schema: modelToolInputSchema(name),
         invoke: async (input: unknown) => {
           try {
-            const result = await client.call(operation, modelToolWireInput(name, input));
+            const result = await client.call(
+              operation,
+              modelToolWireInput(name, input, commandContext),
+            );
             return modelVisibleToolResult(name, result);
           } catch (error) {
             // Wire and authority diagnostics remain in host/kernel evidence.
@@ -414,15 +448,8 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
     return {
       type: "object",
       additionalProperties: false,
-      required: [
-        "client_command_id",
-        "expected_revision",
-        "workspace_relative_path",
-        "byte_limit",
-      ],
+      required: ["workspace_relative_path", "byte_limit"],
       properties: {
-        client_command_id: { type: "string", minLength: 1, maxLength: 160 },
-        expected_revision: { type: "integer", minimum: 0 },
         workspace_relative_path: { type: "string", minLength: 1 },
         byte_limit: { type: "integer", minimum: 1 },
       },
@@ -439,13 +466,19 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
       },
     };
   }
-  if (name === "product_submit_ticket") return PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1;
-  if (name === "candidate_checkpoint_regression") {
-    return CANDIDATE_CHECKPOINT_REGRESSION_INPUT_SCHEMA_V1;
+  if (name === "product_submit_ticket") {
+    return withoutCommandEnvelope(PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1);
   }
-  if (name === "candidate_submit") return CANDIDATE_SUBMIT_INPUT_SCHEMA_V1;
-  if (name === "quality_run_full_suite") return QUALITY_RUN_FULL_SUITE_INPUT_SCHEMA_V1;
-  if (name === "quality_submit_review") return QUALITY_SUBMIT_REVIEW_INPUT_SCHEMA_V1;
+  if (name === "candidate_checkpoint_regression") {
+    return withoutCommandEnvelope(CANDIDATE_CHECKPOINT_REGRESSION_INPUT_SCHEMA_V1);
+  }
+  if (name === "candidate_submit") return withoutCommandEnvelope(CANDIDATE_SUBMIT_INPUT_SCHEMA_V1);
+  if (name === "quality_run_full_suite") {
+    return withoutCommandEnvelope(QUALITY_RUN_FULL_SUITE_INPUT_SCHEMA_V1);
+  }
+  if (name === "quality_submit_review") {
+    return withoutCommandEnvelope(QUALITY_SUBMIT_REVIEW_INPUT_SCHEMA_V1);
+  }
   if (name === "forum_list_topics") return forumListSchema();
   if (name === "forum_list_threads") {
     return {
@@ -544,26 +577,37 @@ function forumMutationSchema(
   return {
     type: "object",
     additionalProperties: false,
-    required: ["client_command_id", "expected_revision", ...required],
-    properties: {
-      client_command_id: { type: "string", minLength: 1, maxLength: 160 },
-      expected_revision: { type: "integer", minimum: 0 },
-      ...properties,
-    },
+    required,
+    properties,
   };
 }
 
-function modelToolWireInput(name: HostToolName, input: unknown): unknown {
+function withoutCommandEnvelope(
+  schema: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const required = (schema.required as readonly string[]).filter((field) =>
+    field !== "client_command_id" && field !== "expected_revision"
+  );
+  const properties = { ...(schema.properties as Readonly<Record<string, unknown>>) };
+  delete properties.client_command_id;
+  delete properties.expected_revision;
+  return { ...schema, required, properties };
+}
+
+function modelToolWireInput(
+  name: HostToolName,
+  input: unknown,
+  commandContext: FramedToolCommandContext,
+): unknown {
   const value = object(input) ?? {};
+  let semantic: unknown;
   if (name === "forum_list_topics") {
-    return { cursor: value.cursor ?? "", limit: value.limit };
-  }
-  if (name === "forum_list_threads") {
-    return { topic_id: value.topic_id, cursor: value.cursor ?? "", limit: value.limit };
-  }
-  if (name === "forum_search") {
+    semantic = { cursor: value.cursor ?? "", limit: value.limit };
+  } else if (name === "forum_list_threads") {
+    semantic = { topic_id: value.topic_id, cursor: value.cursor ?? "", limit: value.limit };
+  } else if (name === "forum_search") {
     const kind = value.post_kind;
-    return {
+    semantic = {
       query: value.query,
       topic_id: value.topic_id ?? null,
       thread_id: value.thread_id ?? null,
@@ -574,24 +618,31 @@ function modelToolWireInput(name: HostToolName, input: unknown): unknown {
       cursor: value.cursor ?? "",
       limit: value.limit,
     };
-  }
-  if (name === "forum_read_thread") {
-    return {
+  } else if (name === "forum_read_thread") {
+    semantic = {
       thread_id: value.thread_id,
       after_post_id: value.after_post_id ?? 0,
       limit: value.limit,
     };
-  }
-  if (name === "forum_post") {
-    return {
+  } else if (name === "forum_post") {
+    semantic = {
       ...value,
       kind: FORUM_POST_KINDS.indexOf(value.kind as never),
       reply_to: value.reply_to ?? null,
       supersedes: value.supersedes ?? null,
       attachments: value.attachments ?? [],
     };
+  } else {
+    semantic = input;
   }
-  return input;
+  if (!SESSION_MUTATING_TOOLS.has(name)) return semantic;
+  const fields = object(semantic);
+  if (fields === undefined) return semantic;
+  return {
+    ...fields,
+    client_command_id: `actor-${name}-${commandContext.next_command_id()}`,
+    expected_revision: commandContext.session_revision,
+  };
 }
 
 const HIDDEN_MODEL_RESULT_FIELDS = new Set([

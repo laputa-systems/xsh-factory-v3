@@ -116,7 +116,13 @@ export async function runPiHostMain(bindings: PiHostMainBindings = {}): Promise<
               () => ++nextCommandId,
             )),
       custom_tool_factory: bindings.custom_tools === undefined
-        ? (packet) => createInheritedCommonTools(client, packet.tools)
+        ? (packet, admission) =>
+          createInheritedCommonTools(
+            client,
+            packet.tools,
+            admission.session_revision,
+            () => ++nextCommandId,
+          )
         : undefined,
     });
   } finally {
@@ -142,8 +148,16 @@ export async function createInheritedActorClient(): Promise<FramedActorClient> {
 export function createInheritedCommonTools(
   client: FramedActorClient,
   names: Parameters<typeof createFramedToolAdapters>[1],
+  sessionRevision = 0,
+  nextCommandId: () => number = (() => {
+    let next = 0;
+    return () => ++next;
+  })(),
 ): readonly PiToolAdapter[] {
-  return createFramedToolAdapters(client, names);
+  return createFramedToolAdapters(client, names, {
+    session_revision: safeNumber(sessionRevision, "session_revision", 0),
+    next_command_id: nextCommandId,
+  });
 }
 
 function createFramedArtifactSealer(

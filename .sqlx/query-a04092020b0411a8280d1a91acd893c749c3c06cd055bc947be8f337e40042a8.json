@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT claimed_commit, claimed_tree, tr.proposal_artifact_id,\n                            tr.ticket_id, tr.id AS ticket_revision_id\n                       FROM factory.ticket_attempts ta\n                       JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                      WHERE ta.id = $1 AND ta.campaign_id = $2\n                        AND tr.application_revision_id = $3 AND ta.stage IN (0, 4)",
+  "query": "SELECT claimed_commit, claimed_tree, tr.proposal_artifact_id,\n                            tr.reproducer_artifact_id, tr.ticket_id, tr.id AS ticket_revision_id\n                       FROM factory.ticket_attempts ta\n                       JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n                      WHERE ta.id = $1 AND ta.campaign_id = $2\n                        AND tr.application_revision_id = $3 AND ta.stage IN (0, 4)",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "reproducer_artifact_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "reproducer_artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "ticket_id",
         "type_info": "Int8",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "ticket_revision_id",
         "type_info": "Int8",
         "origin": {
@@ -71,8 +82,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "ce4c9f14bccc8183950d58ba32f9587bda42a0725deaf4776fd202418e34f4f7"
+  "hash": "a04092020b0411a8280d1a91acd893c749c3c06cd055bc947be8f337e40042a8"
 }

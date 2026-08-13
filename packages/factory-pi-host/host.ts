@@ -134,7 +134,7 @@ export async function runAssignment(
   }
   const customTools = validateToolAllowlist(packet, dependencies.custom_tools ?? []);
   const paths = transcriptPaths(packet.staging_root);
-  const writer = await TranscriptWriter.open(paths.ndjson);
+  const writer = await TranscriptWriter.open(paths.ndjson, packet.limits.output_byte_limit);
   const observed: RequiredReadObservation[] = [];
   const metrics: MutableMetrics = {
     turns: 0,
@@ -154,6 +154,7 @@ export async function runAssignment(
   let readVerifications = Promise.resolve();
   let disconnected = false;
   let outputLimitExceeded = false;
+  let transcriptLimitExceeded = false;
   let limitReason: "output_limit" | "turn_limit" | "wall_limit" | "aggregate_cost" | undefined;
   let wallTimer: ReturnType<typeof setTimeout> | undefined;
   let session: Awaited<ReturnType<PiSessionFactory["create"]>> | undefined;
@@ -177,7 +178,14 @@ export async function runAssignment(
   });
 
   const onEvent = (event: unknown): void => {
-    eventWrites = eventWrites.then(() => writer.append(event));
+    eventWrites = eventWrites.then(async () => {
+      const append = await writer.append(event);
+      if (append.truncated && !transcriptLimitExceeded) {
+        transcriptLimitExceeded = true;
+        outputLimitExceeded = true;
+        void session?.abort?.();
+      }
+    });
     metrics.output_bytes += outputBytes(event);
     const eventCost = eventCostMicroUsd(event);
     if (eventCost !== undefined) {
