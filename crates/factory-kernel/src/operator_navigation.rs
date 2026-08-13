@@ -563,7 +563,9 @@ impl OperatorNavigationRpc {
                   AND audit.subject_kind IN (30, 31, 33, 34, 39)
                  LEFT JOIN factory.ticket_attempts AS attempt
                    ON audit.subject_id = attempt.id
-                  AND audit.subject_kind IN (32, 35, 36, 37, 38)
+                  AND (audit.subject_kind IN (32, 35, 36, 37, 38, 45)
+                       OR (audit.subject_kind = 40
+                           AND audit.operation = 'ticket_attempt.retry_quality'))
                  LEFT JOIN factory.ticket_revisions AS attempt_revision
                    ON attempt_revision.id = attempt.ticket_revision_id
                  WHERE direct_revision.ticket_id = $1 OR attempt_revision.ticket_id = $1
@@ -580,7 +582,9 @@ impl OperatorNavigationRpc {
                         audit.subject_id, audit.resulting_revision
                  FROM factory.audit_log AS audit
                  LEFT JOIN factory.candidates AS direct_candidate
-                   ON audit.subject_kind = 40 AND audit.subject_id = direct_candidate.id
+                   ON audit.subject_kind = 40
+                  AND audit.operation IN ('candidate.submit', 'candidate.commit.attach')
+                  AND audit.subject_id = direct_candidate.id
                  LEFT JOIN factory.validations AS validation
                    ON audit.subject_kind = 41 AND audit.subject_id = validation.id
                  LEFT JOIN factory.reviews AS review

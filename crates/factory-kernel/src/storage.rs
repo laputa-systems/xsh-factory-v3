@@ -1017,6 +1017,15 @@ impl KernelStore {
                      SELECT 1 FROM factory.campaigns AS subject
                      WHERE subject.id = audit.subject_id
                  ))
+                 -- The first implementation of Quality retry accidentally
+                 -- reused candidate subject kind 40. Keep restore compatible
+                 -- with its sealed receipts while new retries use kind 45.
+                 OR (audit.subject_kind = 40
+                     AND audit.operation = 'ticket_attempt.retry_quality'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_attempts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
                  OR (audit.subject_kind = 40
                      AND audit.operation IN ('candidate.submit', 'candidate.commit.attach')
                      AND EXISTS (
@@ -1045,6 +1054,12 @@ impl KernelStore {
                      AND audit.operation = 'delivery.record'
                      AND EXISTS (
                      SELECT 1 FROM factory.deliveries AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 45
+                     AND audit.operation = 'ticket_attempt.retry_quality'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_attempts AS subject
                      WHERE subject.id = audit.subject_id
                  ))
              )

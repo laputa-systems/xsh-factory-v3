@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT audit.id, audit.subject_kind, audit.subject_id\n             FROM factory.audit_log AS audit\n             WHERE NOT (\n                 (audit.subject_kind = 0\n                  AND audit.operation = 'kernel_build.install'\n                  AND EXISTS (\n                     SELECT 1 FROM factory.kernel_builds AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 1\n                     AND audit.operation IN ('application_revision.admit', 'application_revision.activate')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.application_revisions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 2\n                     AND audit.operation = 'repository.register'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.repositories AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 3\n                     AND audit.operation = 'artifact.register'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.artifacts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 4\n                     AND audit.operation IN ('campaign.start', 'campaign.cancel', 'campaign.fail')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.campaigns AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 5\n                     AND audit.operation = 'assignment.create'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.assignments AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 6\n                     AND audit.operation IN ('session.start', 'session.terminal')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.sessions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 10\n                     AND audit.operation IN ('forum.topic.create', 'forum.topic.supersede')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.forum_topics AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 11\n                     AND audit.operation IN ('forum.thread.create', 'forum.thread.supersede')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.forum_threads AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 12\n                     AND audit.operation = 'forum.post.append'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.forum_posts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 30\n                     AND audit.operation = 'ticket.propose'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_revisions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 31\n                     AND audit.operation = 'ticket.sponsor'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_revisions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind IN (33, 34)\n                     AND audit.operation = 'ticket.claim'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_revisions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 32\n                     AND audit.operation = 'ticket.claim'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_attempts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 35\n                     AND audit.operation = 'ticket_attempt.fail'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_attempts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind IN (36, 37, 38)\n                     AND audit.operation = 'ticket_attempt.release'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_attempts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 39\n                     AND audit.operation = 'campaign.complete_delivery_target'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.campaigns AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 -- The first implementation of Quality retry accidentally\n                 -- reused candidate subject kind 40. Keep restore compatible\n                 -- with its sealed receipts while new retries use kind 45.\n                 OR (audit.subject_kind = 40\n                     AND audit.operation = 'ticket_attempt.retry_quality'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_attempts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 40\n                     AND audit.operation IN ('candidate.submit', 'candidate.commit.attach')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.candidates AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 41\n                     AND audit.operation = 'validation.record'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.validations AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 42\n                     AND audit.operation = 'quality.review.submit'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.reviews AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 43\n                     AND audit.operation IN ('architect.ticket.sponsor', 'architect.ticket.release', 'architect.candidate.decide')\n                     AND EXISTS (\n                     SELECT 1 FROM factory.architect_decisions AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 44\n                     AND audit.operation = 'delivery.record'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.deliveries AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n                 OR (audit.subject_kind = 45\n                     AND audit.operation = 'ticket_attempt.retry_quality'\n                     AND EXISTS (\n                     SELECT 1 FROM factory.ticket_attempts AS subject\n                     WHERE subject.id = audit.subject_id\n                 ))\n             )\n             ORDER BY audit.id ASC\n             LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "subject_kind",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "subject_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.audit_log",
+            "name": "subject_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d4c771c49645eff6bd429c9a91304eef0dae252608fe2a1557c4437df130edb0"
+}

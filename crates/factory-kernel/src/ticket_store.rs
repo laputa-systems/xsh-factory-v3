@@ -59,7 +59,9 @@ const RELEASED_ATTEMPT_SUBJECT: i16 = 36;
 const RELEASE_RESOLVED_SUBJECT: i16 = 37;
 const RELEASE_BLOCKED_SUBJECT: i16 = 38;
 const CAMPAIGN_COMPLETED_SUBJECT: i16 = 39;
-const QUALITY_RETRY_SUBJECT: i16 = 40;
+// Subject kind 40 is the stable candidate subject family. Quality retry was
+// added later and must retain its own ticket-attempt subject family.
+const QUALITY_RETRY_SUBJECT: i16 = 45;
 
 const PROPOSE_OPERATION: &str = "ticket.propose";
 const SPONSOR_OPERATION: &str = "ticket.sponsor";
