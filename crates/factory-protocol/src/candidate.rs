@@ -1,7 +1,7 @@
 //! Closed candidate and independent Quality-review contracts.
 //!
-//! The Engineering actor can submit only bounded text and sealed report
-//! artifacts. The kernel captures every tree, patch, validation, and commit
+//! The Engineering actor can submit only bounded text. The kernel captures
+//! every tree, patch, report, risk record, validation, and commit
 //! identity itself, then exposes one immutable [`CandidatePacketV1`] to the
 //! fresh Quality assignment. Quality prose is likewise sealed before the
 //! review becomes durable. Neither office can turn a narrative into a hard
@@ -103,11 +103,9 @@ impl CandidatePacketV1 {
 /// worktree after this operation is submitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CandidateSubmissionV1 {
-    pub engineering_report: SealedArtifactReferenceV1,
     pub commit_subject: String,
     pub commit_body: String,
     pub regression_test_identity: String,
-    pub risks: SealedArtifactReferenceV1,
 }
 
 impl CandidateSubmissionV1 {
@@ -136,13 +134,7 @@ impl CandidateSubmissionV1 {
             CANDIDATE_REGRESSION_IDENTITY_BYTE_LIMIT,
             false,
         )?;
-        self.engineering_report.validate(
-            "Engineering report",
-            CANDIDATE_REPORT_BYTE_LIMIT,
-            false,
-        )?;
-        self.risks
-            .validate("candidate risks", CANDIDATE_RISKS_BYTE_LIMIT, false)
+        Ok(())
     }
 }
 
@@ -236,24 +228,13 @@ fn validate_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArtifactId, ContentDigest};
-
-    fn artifact(id: i64, length: u64) -> SealedArtifactReferenceV1 {
-        SealedArtifactReferenceV1 {
-            artifact_id: ArtifactId::new(id).unwrap(),
-            digest: ContentDigest::from_bytes([id as u8; 32]),
-            byte_length: length,
-        }
-    }
 
     #[test]
-    fn candidate_submission_is_bounded_and_never_accepts_a_tree_from_an_actor() {
+    fn candidate_submission_is_bounded_and_never_requires_actor_sealed_prose() {
         let submission = CandidateSubmissionV1 {
-            engineering_report: artifact(1, 4),
             commit_subject: "Fix visible behavior".into(),
             commit_body: String::new(),
             regression_test_identity: "cargo test regression".into(),
-            risks: artifact(2, 4),
         };
         assert!(submission.validate().is_ok());
 

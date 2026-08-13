@@ -1,9 +1,9 @@
 /**
  * Engineering's closed terminal candidate submission.
  *
- * An Engineering actor supplies only its report, proposed message, regression
- * identity, and risks. The kernel—not this SDK and not the actor—captures the
- * worktree tree/patch and runs hard validation. It attaches the candidate
+ * An Engineering actor supplies only its proposed message and regression
+ * identity. The kernel—not this SDK and not the actor—captures the worktree,
+ * patches, report, risks, and hard validation. It attaches the candidate
  * commit only after the terminal transcript is sealed for provenance.
  */
 
@@ -20,19 +20,6 @@ export const CANDIDATE_LIMITS_V1 = {
   commitSubjectByteLimit: 120,
   commitBodyByteLimit: 8 * 1024,
   regressionTestIdentityByteLimit: 4 * 1024,
-  reportByteLimit: 128 * 1024,
-  risksByteLimit: 64 * 1024,
-} as const;
-
-const sealedArtifactSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["artifact_id", "digest", "byte_length"],
-  properties: {
-    artifact_id: { type: "integer", minimum: 1 },
-    digest: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    byte_length: { type: "integer", minimum: 0 },
-  },
 } as const;
 
 /** Exact Pi custom-tool input for Engineering's sole terminal action. */
@@ -42,16 +29,13 @@ export const CANDIDATE_SUBMIT_INPUT_SCHEMA_V1 = {
   required: [
     "client_command_id",
     "expected_revision",
-    "engineering_report",
     "commit_subject",
     "commit_body",
     "regression_test_identity",
-    "risks",
   ],
   properties: {
     client_command_id: { type: "string", minLength: 1, maxLength: 160 },
     expected_revision: { type: "integer", minimum: 0 },
-    engineering_report: sealedArtifactSchema,
     commit_subject: {
       type: "string",
       minLength: 1,
@@ -63,7 +47,6 @@ export const CANDIDATE_SUBMIT_INPUT_SCHEMA_V1 = {
       minLength: 1,
       maxLength: CANDIDATE_LIMITS_V1.regressionTestIdentityByteLimit,
     },
-    risks: sealedArtifactSchema,
   },
 } as const;
 
@@ -111,19 +94,11 @@ export function validateCandidateSubmissionV1(input: CandidateSubmissionV1): voi
   exactObject(input, "candidate submission", [
     "client_command_id",
     "expected_revision",
-    "engineering_report",
     "commit_subject",
     "commit_body",
     "regression_test_identity",
-    "risks",
   ]);
   command(input.client_command_id, input.expected_revision);
-  sealedArtifact(
-    input.engineering_report,
-    "Engineering report",
-    CANDIDATE_LIMITS_V1.reportByteLimit,
-    false,
-  );
   text(
     input.commit_subject,
     "candidate commit subject",
@@ -143,7 +118,6 @@ export function validateCandidateSubmissionV1(input: CandidateSubmissionV1): voi
     "candidate regression test identity",
     CANDIDATE_LIMITS_V1.regressionTestIdentityByteLimit,
   );
-  sealedArtifact(input.risks, "candidate risks", CANDIDATE_LIMITS_V1.risksByteLimit, false);
 }
 
 export function validateCandidateRegressionCheckpointV1(

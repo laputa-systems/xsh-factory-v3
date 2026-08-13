@@ -120,6 +120,7 @@ export async function runPiHostMain(bindings: PiHostMainBindings = {}): Promise<
           createInheritedCommonTools(
             client,
             packet.tools,
+            packet.office,
             admission.session_revision,
             () => ++nextCommandId,
           )
@@ -148,13 +149,17 @@ export async function createInheritedActorClient(): Promise<FramedActorClient> {
 export function createInheritedCommonTools(
   client: FramedActorClient,
   names: Parameters<typeof createFramedToolAdapters>[1],
+  office: string,
   sessionRevision = 0,
   nextCommandId: () => number = (() => {
     let next = 0;
     return () => ++next;
   })(),
 ): readonly PiToolAdapter[] {
-  return createFramedToolAdapters(client, names, {
+  const effectiveNames = office === "engineering"
+    ? names.filter((name) => name !== "artifact_seal")
+    : names;
+  return createFramedToolAdapters(client, effectiveNames, {
     session_revision: safeNumber(sessionRevision, "session_revision", 0),
     next_command_id: nextCommandId,
   });

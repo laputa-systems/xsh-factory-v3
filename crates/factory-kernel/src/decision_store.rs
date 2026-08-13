@@ -157,6 +157,12 @@ pub struct SubmitCandidate {
     pub regression_command_set: SealedArtifactReferenceV1,
     pub regression_log: SealedArtifactReferenceV1,
     pub candidate_patch: SealedArtifactReferenceV1,
+    /// Kernel-composed completion record derived from the captured worktree
+    /// and validation receipts; Engineering cannot manufacture this evidence.
+    pub engineering_report: SealedArtifactReferenceV1,
+    /// Kernel-composed statement that no actor-authored risk report was
+    /// required for this capture. Quality may add its own sealed risks later.
+    pub engineering_risks: SealedArtifactReferenceV1,
     pub submission: CandidateSubmissionV1,
 }
 
@@ -377,6 +383,12 @@ impl DecisionStore {
         command
             .candidate_patch
             .validate("candidate binary patch", 16 * 1024 * 1024, false)?;
+        command
+            .engineering_report
+            .validate("kernel Engineering report", 128 * 1024, false)?;
+        command
+            .engineering_risks
+            .validate("kernel Engineering risks", 64 * 1024, false)?;
         let fingerprint = submit_candidate_fingerprint(command);
         let mut tx = self.pool.begin().await?;
         lock_attempt(&mut tx, command.ticket_attempt_id.get()).await?;
@@ -424,8 +436,8 @@ impl DecisionStore {
         require_artifact(&mut tx, &command.regression_command_set, build_id).await?;
         require_artifact(&mut tx, &command.regression_log, build_id).await?;
         require_artifact(&mut tx, &command.candidate_patch, build_id).await?;
-        require_artifact(&mut tx, &command.submission.engineering_report, build_id).await?;
-        require_artifact(&mut tx, &command.submission.risks, build_id).await?;
+        require_artifact(&mut tx, &command.engineering_report, build_id).await?;
+        require_artifact(&mut tx, &command.engineering_risks, build_id).await?;
         require_session(
             &mut tx,
             command.engineering_session_id,
@@ -462,11 +474,11 @@ impl DecisionStore {
             command.regression_log.artifact_id.get(),
             command.candidate_patch.artifact_id.get(),
             command.engineering_session_id.get(),
-            command.submission.engineering_report.artifact_id.get(),
+            command.engineering_report.artifact_id.get(),
             &command.submission.commit_subject,
             &command.submission.commit_body,
             &command.submission.regression_test_identity,
-            command.submission.risks.artifact_id.get(),
+            command.engineering_risks.artifact_id.get(),
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -2734,11 +2746,11 @@ fn submit_candidate_fingerprint(command: &SubmitCandidate) -> ContentDigest {
     hash_artifact(&mut hasher, &command.regression_command_set);
     hash_artifact(&mut hasher, &command.regression_log);
     hash_artifact(&mut hasher, &command.candidate_patch);
-    hash_artifact(&mut hasher, &command.submission.engineering_report);
+    hash_artifact(&mut hasher, &command.engineering_report);
     hash_string(&mut hasher, &command.submission.commit_subject);
     hash_string(&mut hasher, &command.submission.commit_body);
     hash_string(&mut hasher, &command.submission.regression_test_identity);
-    hash_artifact(&mut hasher, &command.submission.risks);
+    hash_artifact(&mut hasher, &command.engineering_risks);
     finish_hash(hasher)
 }
 

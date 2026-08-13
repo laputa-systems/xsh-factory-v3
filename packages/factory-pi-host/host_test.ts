@@ -1364,6 +1364,16 @@ Deno.test("partial transcript gzip remains readable and tool allowlists are exac
     legal_terminal_operations: ["candidate_submit"] as const,
   };
   assertEquals(validateToolAllowlist(artifactPacket, [adapter]), [adapter]);
+  const legacyEngineeringPacket = {
+    ...artifactPacket,
+    office: "engineering",
+    tools: ["artifact_seal", "candidate_submit"] as const,
+  };
+  assertEquals(
+    validateToolAllowlist(legacyEngineeringPacket, [adapter]),
+    [adapter],
+    "an immutable pre-transition Engineering packet cannot require optional report sealing",
+  );
   await assertRejects(
     () => {
       try {

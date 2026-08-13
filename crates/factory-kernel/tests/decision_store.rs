@@ -602,12 +602,12 @@ impl Fixture {
             regression_command_set: self.common.reference(),
             regression_log: self.common.reference(),
             candidate_patch: self.common.reference(),
+            engineering_report: self.common.reference(),
+            engineering_risks: self.common.reference(),
             submission: CandidateSubmissionV1 {
-                engineering_report: self.common.reference(),
                 commit_subject: "Fix observable behavior".to_owned(),
                 commit_body: String::new(),
                 regression_test_identity: "cargo test visible_regression".to_owned(),
-                risks: self.common.reference(),
             },
         }
     }

@@ -146,8 +146,14 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       throw new Error(`Engineering must read handed-off ${evidenceName} evidence`);
     }
   }
-  if (!engineeringSystem.includes("`engineering-report.md`") || !engineeringSystem.includes("`risks.md`")) {
-    throw new Error("Engineering must create the named report files before sealing them");
+  if (!/Do not create or seal\s+implementation-report or risk files/u.test(engineeringSystem)) {
+    throw new Error("Engineering must leave completion evidence capture to the controller");
+  }
+  const engineeringProfile = xshApplicationV1.office_profiles.find((profile) =>
+    profile.office === "engineering"
+  );
+  if (engineeringProfile?.tools.includes("artifact_seal")) {
+    throw new Error("Engineering must not own report or risk artifact sealing");
   }
 
   for (const profile of xshApplicationV1.office_profiles) {

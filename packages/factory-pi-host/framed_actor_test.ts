@@ -406,7 +406,7 @@ Deno.test("Engineering and Quality adapters expose their exact closed tool schem
         readonly required?: readonly string[];
       };
   assertEquals(schema("candidate_submit").additionalProperties, false);
-  assert(schema("candidate_submit").required?.includes("engineering_report"));
+  assert(!schema("candidate_submit").required?.includes("engineering_report"));
   assert(!schema("candidate_submit").required?.includes("candidate_tree_artifact_id"));
   assert(!schema("candidate_submit").required?.includes("client_command_id"));
   assert(!schema("candidate_submit").required?.includes("expected_revision"));

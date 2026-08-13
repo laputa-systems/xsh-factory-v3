@@ -30,13 +30,9 @@ cleanup out. Do not run formatters, autofixers, pre-commit hooks, remote Git com
 dependency changes.
 
 Do not commit, merge, change HEAD, update refs, or push. Leave intended changes uncommitted for the
-provided tooling to capture. After useful focused checks, create these two workspace-root files before
-sealing:
-
-- `engineering-report.md`: concise root cause, implementation, and focused checks.
-- `risks.md`: residual risks, limitations, and any checks not run.
-
-Seal exactly `engineering-report.md` with `artifact_seal`'s 12,000-byte cap and `risks.md` with its
-8,000-byte cap, preferably in separate calls. Pass both resulting references to `candidate_submit`
-exactly once. Candidate tree, patch, hard validation, commit construction, and delivery are derived
-from the assigned worktree and evidence, not from actor claims.
+provided tooling to capture. After useful focused checks, call `candidate_submit` exactly once with a
+concise normalized commit message and the assigned regression identity. Do not create or seal
+implementation-report or risk files: the controller derives and seals those durable records from the
+captured worktree, changed paths, regression checkpoint, and hard-validation receipts. Candidate
+tree, patch, hard validation, commit construction, and delivery are derived from that custody, not
+from actor claims.

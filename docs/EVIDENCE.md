@@ -39,10 +39,12 @@ transcript is diagnostic provenance, not the only source of accepted facts.
 ## Worktree evidence
 
 An Engineering candidate is not accepted from a reported tree identity. The
-kernel captures its owned worktree, computes its portable binary patch, checks
-changed paths, materializes fresh validation worktrees, and seals command
-receipts. The resulting CAS patch and Git identities are the durable product
-artifact; the full temporary worktree is not retained.
+engineer supplies only its normalized commit message and regression identity;
+the kernel captures the owned worktree, computes its portable binary patch,
+checks changed paths, materializes fresh validation worktrees, and seals
+command receipts plus the Engineering completion/risk records. The resulting
+CAS patch and Git identities are the durable product artifact; the full
+temporary worktree is not retained.
 
 This boundary still needs controller-owned recovery when an actor dies before
 candidate submission. That gap is tracked in `PLAN.md`; do not attempt manual

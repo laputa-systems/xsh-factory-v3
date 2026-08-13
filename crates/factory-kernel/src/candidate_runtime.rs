@@ -529,13 +529,6 @@ pub async fn submit_candidate(
     if submission.regression_test_identity != checkpoint.regression_identity {
         return Err(CandidateRuntimeError::RegressionIdentityMismatch);
     }
-    verify_actor_artifacts(
-        process,
-        cas,
-        authority.actor.principal,
-        candidate_artifacts(&submission),
-    )
-    .await?;
     validate_commit_message_policy(authority.application, &submission)?;
 
     let capture = git.capture_tree(authority.actor_worktree)?;
@@ -623,6 +616,20 @@ pub async fn submit_candidate(
             (ValidationResult::Interrupted, evidence)
         }
     };
+    let engineering_evidence = seal_engineering_completion_evidence(
+        process,
+        cas,
+        authority.actor.principal,
+        &request.client_command_id,
+        authority.actor.packet.kernel_build_id,
+        checkpoint,
+        &capture,
+        &changed_paths,
+        &candidate_patch,
+        &hard_evidence,
+        hard_result,
+    )
+    .await?;
     // All physical capture, command execution, and evidence sealing precede
     // the first durable candidate transition.  A local CAS/worktree failure
     // therefore cannot strand a submitted candidate with no validation row.
@@ -643,6 +650,8 @@ pub async fn submit_candidate(
             regression_command_set: checkpoint.command_set.clone(),
             regression_log: checkpoint.log.clone(),
             candidate_patch: candidate_patch.clone(),
+            engineering_report: engineering_evidence.report,
+            engineering_risks: engineering_evidence.risks,
             submission: submission.clone(),
         })
         .await?;
@@ -1323,10 +1332,6 @@ async fn verify_actor_artifacts(
     Ok(())
 }
 
-fn candidate_artifacts(submission: &CandidateSubmissionV1) -> Vec<&SealedArtifactReferenceV1> {
-    vec![&submission.engineering_report, &submission.risks]
-}
-
 fn review_artifacts(
     submission: &factory_protocol::QualityReviewSubmissionV1,
 ) -> Vec<&SealedArtifactReferenceV1> {
@@ -1335,6 +1340,73 @@ fn review_artifacts(
         &submission.risks,
         &submission.additional_probes,
     ]
+}
+
+struct EngineeringCompletionEvidence {
+    report: SealedArtifactReferenceV1,
+    risks: SealedArtifactReferenceV1,
+}
+
+/// Produces the two Engineering narrative slots from custody facts, not
+/// workspace files supplied by an actor. These compact records leave Quality
+/// with useful navigation evidence while a missing optional prose file cannot
+/// discard a finished product change.
+#[allow(clippy::too_many_arguments)]
+async fn seal_engineering_completion_evidence(
+    process: &ProcessStore,
+    cas: &CasStore,
+    principal: &str,
+    command_id: &str,
+    kernel_build_id: factory_protocol::KernelBuildId,
+    checkpoint: &RegressionCheckpoint,
+    capture: &TreeCapture,
+    changed_paths: &SealedArtifactReferenceV1,
+    candidate_patch: &SealedArtifactReferenceV1,
+    hard_evidence: &ValidationEvidence,
+    hard_result: ValidationResult,
+) -> Result<EngineeringCompletionEvidence, CandidateRuntimeError> {
+    let report_bytes = json::to_string(&KernelEngineeringReportEvidence {
+        format: "factory-kernel-engineering-report-v1",
+        regression_tree: checkpoint.regression.tree().as_str().to_owned(),
+        candidate_tree: capture.tree().as_str().to_owned(),
+        regression_identity: checkpoint.regression_identity.clone(),
+        expected_failure: checkpoint.expected_failure.clone(),
+        changed_paths: artifact_log(changed_paths.clone()),
+        candidate_patch: artifact_log(candidate_patch.clone()),
+        hard_validation_result: validation_result_name(hard_result),
+        hard_validation_command_set: artifact_log(hard_evidence.command_set.clone()),
+        hard_validation_log: artifact_log(hard_evidence.log.clone()),
+    })
+    .into_bytes();
+    let report = seal_bytes(
+        process,
+        cas,
+        principal,
+        &derived_command_id(command_id, "kernel-engineering-report")?,
+        kernel_build_id,
+        &report_bytes,
+        "kernel Engineering report",
+        usize::try_from(factory_protocol::CANDIDATE_REPORT_BYTE_LIMIT).unwrap_or(usize::MAX),
+    )
+    .await?;
+    let risks_bytes = json::to_string(&KernelEngineeringRisksEvidence {
+        format: "factory-kernel-engineering-risks-v1",
+        actor_risks_collected: false,
+        note: "The kernel derived this candidate from the owned worktree and deterministic validation; Quality must assess residual product risk independently.".to_owned(),
+    })
+    .into_bytes();
+    let risks = seal_bytes(
+        process,
+        cas,
+        principal,
+        &derived_command_id(command_id, "kernel-engineering-risks")?,
+        kernel_build_id,
+        &risks_bytes,
+        "kernel Engineering risks",
+        usize::try_from(factory_protocol::CANDIDATE_RISKS_BYTE_LIMIT).unwrap_or(usize::MAX),
+    )
+    .await?;
+    Ok(EngineeringCompletionEvidence { report, risks })
 }
 
 async fn seal_changed_paths(
@@ -1771,6 +1843,27 @@ struct ChangedPathsEvidence {
 }
 
 #[derive(Serialize)]
+struct KernelEngineeringReportEvidence {
+    format: &'static str,
+    regression_tree: String,
+    candidate_tree: String,
+    regression_identity: String,
+    expected_failure: String,
+    changed_paths: ArtifactLogEvidence,
+    candidate_patch: ArtifactLogEvidence,
+    hard_validation_result: &'static str,
+    hard_validation_command_set: ArtifactLogEvidence,
+    hard_validation_log: ArtifactLogEvidence,
+}
+
+#[derive(Serialize)]
+struct KernelEngineeringRisksEvidence {
+    format: &'static str,
+    actor_risks_collected: bool,
+    note: String,
+}
+
+#[derive(Serialize)]
 struct CommandSetEvidence {
     format: &'static str,
     profile: String,
@@ -1889,6 +1982,14 @@ fn artifact_log(reference: SealedArtifactReferenceV1) -> ArtifactLogEvidence {
         artifact_id: reference.artifact_id.get(),
         digest: reference.digest.to_hex(),
         byte_length: reference.byte_length,
+    }
+}
+
+const fn validation_result_name(value: ValidationResult) -> &'static str {
+    match value {
+        ValidationResult::Passed => "passed",
+        ValidationResult::Failed => "failed",
+        ValidationResult::Interrupted => "interrupted",
     }
 }
 

@@ -181,11 +181,9 @@ Deno.test("XSH Engineering uses the closed candidate validator", () => {
   const candidate: CandidateSubmissionV1 = {
     client_command_id: "engineering-1",
     expected_revision: 4,
-    engineering_report: artifact(20, "a", 20),
     commit_subject: "Fix the public behavior",
     commit_body: "",
     regression_test_identity: "tests/integration.rs::public_behavior",
-    risks: artifact(21, "b", 20),
   };
   validateXshCandidateSubmissionV1(candidate);
   assertThrows(

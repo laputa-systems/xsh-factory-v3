@@ -53,7 +53,6 @@ const commonActorTools: readonly ActorToolV1[] = [
   "forum_create_topic",
   "forum_create_thread",
   "forum_post",
-  "artifact_seal",
 ];
 
 // Product is deliberately a narrow evidence collector.  It can read the
@@ -194,12 +193,12 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "engineering",
       system_template: template(
         "templates/engineering-system.md",
-        "de12748b6171a884a77ab52c7039f2f84f0fa3f361bc57fb1f08fa1b836a048b",
+        "7e96b5c147fee2da3163087eb6c1c3e361425859372bdd4b387467d6f827adda",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/engineering-assignment.md",
-        "c0eb2b4d89ad2f223aa808374785b117d73eb13b45dcb760c9cb2ed86a59ff64",
+        "dd247f1695771d16d869bf126cf1121086b976eb91ea48b039b5a91a500d86c0",
         [
           "ASSIGNMENT_ID",
           "TARGET",
@@ -230,6 +229,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       ),
       tools: [
         ...commonActorTools,
+        "artifact_seal",
         "artifact_read",
         "quality_run_full_suite",
         "quality_submit_review",

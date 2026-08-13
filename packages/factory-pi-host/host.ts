@@ -433,6 +433,13 @@ export function validateToolAllowlist(
     if (!seen.add(name)) throw new Error(`assignment repeats tool ${name}`);
     if (!(name in BUILTIN_TOOL_NAMES)) {
       const adapter = byName.get(name);
+      // Older immutable Engineering application revisions still advertise
+      // report sealing. Completion evidence is now kernel-owned, so omit this
+      // strictly less-powerful legacy tool rather than making a changed
+      // worktree depend on an optional workspace prose file.
+      if (adapter === undefined && name === "artifact_seal" && packet.office === "engineering") {
+        continue;
+      }
       if (adapter === undefined) throw new Error(`assignment tool ${name} has no bound adapter`);
       resolved.push(adapter);
     }

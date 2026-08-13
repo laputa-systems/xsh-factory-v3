@@ -14,10 +14,11 @@
    first human judgement gate.
 5. Engineering receives that ticket and an isolated worktree. It must obtain a
    kernel-captured failing regression checkpoint before changing source.
-6. Engineering submits its candidate. The kernel captures the final tree,
-   changed paths, and binary patch; runs the reproducer and full suite on a
-   pristine materialization; and records the result. A passing candidate is
-   not yet delivered.
+6. Engineering submits its candidate using only a normalized commit message
+   and checkpoint identity. The kernel captures the final tree, changed paths,
+   binary patch, completion record, and risk record; runs the reproducer and
+   full suite on a pristine materialization; and records the result. A passing
+   candidate is not yet delivered.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery

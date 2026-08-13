@@ -9,21 +9,12 @@ import {
 import type { FrameTransport } from "./protocol.ts";
 import { encodeJsonFrame, LocalProtocolClient, OPERATION } from "./protocol.ts";
 
-const digest = (character: string): string => character.repeat(64);
-const artifact = (artifact_id: number, character: string, byte_length = 1) => ({
-  artifact_id,
-  digest: digest(character),
-  byte_length,
-});
-
 const submission = () => ({
   client_command_id: "candidate-1",
   expected_revision: 7,
-  engineering_report: artifact(1, "a", 64),
   commit_subject: "Correct user-visible behavior",
   commit_body: "",
   regression_test_identity: "cargo test --locked regression",
-  risks: artifact(2, "b", 32),
 });
 
 const checkpoint = () => ({
@@ -48,7 +39,7 @@ Deno.test("candidate checkpoint is a closed nonterminal adapter input", () => {
   );
 });
 
-Deno.test("candidate terminal submission excludes actor-supplied trees and validates sealed evidence", () => {
+Deno.test("candidate terminal submission excludes actor trees and actor-sealed prose", () => {
   validateCandidateSubmissionV1(submission());
   assertEquals(CANDIDATE_SUBMIT_INPUT_SCHEMA_V1.additionalProperties, false);
   assert(
@@ -56,11 +47,25 @@ Deno.test("candidate terminal submission excludes actor-supplied trees and valid
       "candidate_tree_artifact_id",
     ),
   );
+  assert(
+    !(CANDIDATE_SUBMIT_INPUT_SCHEMA_V1.required as readonly string[]).includes(
+      "engineering_report",
+    ),
+  );
   assertThrows(
     () =>
       validateCandidateSubmissionV1({
         ...submission(),
         candidate_tree: "actor-claim",
+      } as unknown as ReturnType<typeof submission>),
+    TypeError,
+    "unknown",
+  );
+  assertThrows(
+    () =>
+      validateCandidateSubmissionV1({
+        ...submission(),
+        engineering_report: { artifact_id: 1, digest: "a".repeat(64), byte_length: 1 },
       } as unknown as ReturnType<typeof submission>),
     TypeError,
     "unknown",

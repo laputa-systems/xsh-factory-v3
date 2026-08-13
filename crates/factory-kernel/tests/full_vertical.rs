@@ -187,7 +187,7 @@ impl Fixture {
         .expect("product contract");
         write_script(
             &repository.join("reproduce.sh"),
-            "#!/bin/sh\nprintf 'actual\\n'\nprintf 'none\\n' >&2\n",
+            "#!/bin/sh\nprintf 'actual\\n'\nprintf 'none\\n' >&2\nexit 1\n",
         );
         write_script(
             &repository.join("validate.sh"),
@@ -906,8 +906,7 @@ if (ROLE === 'engineering') {
   await Deno.writeTextFile(`${packet.workspace_root}/regression-expected.txt`, 'expected\n');
   await call('candidate.checkpoint_regression', {client_command_id:'checkpoint', expected_revision:admission.session_revision, regression_command:regressionCommand, expected_failure:expectedFailure});
   await Deno.writeTextFile(`${packet.workspace_root}/reproduce.sh`, '#!/bin/sh\nprintf \'expected\\n\'\nprintf \'none\\n\' >&2\n'); await Deno.chmod(`${packet.workspace_root}/reproduce.sh`, 0o755);
-  const report = await seal('engineering-report.md', 'changed reproducer after kernel checkpoint\n'); const risks = await seal('engineering-risks.md', 'none\n');
-  await call('candidate.submit', {client_command_id:'candidate-submit', expected_revision:admission.session_revision, engineering_report:report, commit_subject:'Repair synthetic reproducer output', commit_body:'', regression_test_identity:'reproduce', risks});
+  await call('candidate.submit', {client_command_id:'candidate-submit', expected_revision:admission.session_revision, commit_subject:'Repair synthetic reproducer output', commit_body:'', regression_test_identity:'reproduce'});
 }
 if (ROLE === 'quality') {
   const suite = await call('quality.run_full_suite', {client_command_id:'quality-suite', expected_revision:admission.session_revision, validation_profile:'full'});

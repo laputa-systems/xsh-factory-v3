@@ -1288,13 +1288,13 @@ impl DurableAuthorityResolver {
         let candidate_patch = self
             .reference(ArtifactId::new(row.patch_artifact_id).map_err(|error| error.to_string())?)
             .await?;
-        let engineering_report = self
+        let _ = self
             .reference(
                 ArtifactId::new(row.engineering_report_artifact_id)
                     .map_err(|error| error.to_string())?,
             )
             .await?;
-        let risks = self
+        let _ = self
             .reference(ArtifactId::new(row.risks_artifact_id).map_err(|error| error.to_string())?)
             .await?;
         let ticket_id = TicketId::new(row.ticket_id).map_err(|error| error.to_string())?;
@@ -1331,11 +1331,9 @@ impl DurableAuthorityResolver {
                 .map_err(|error| format!("stored regression tree is invalid: {error}"))?,
             candidate_patch,
             submission: factory_protocol::CandidateSubmissionV1 {
-                engineering_report,
                 commit_subject: row.commit_subject,
                 commit_body: row.commit_body,
                 regression_test_identity: row.regression_test_identity,
-                risks,
             },
             product_reproducer: self
                 .command_from_reproducer(&stored_profile, &proposal)

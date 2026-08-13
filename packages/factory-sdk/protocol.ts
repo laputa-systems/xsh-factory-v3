@@ -958,11 +958,9 @@ export interface CandidateCheckpointRegressionCall extends MutatingCall {
   readonly expected_failure: string;
 }
 export interface CandidateSubmitCall extends MutatingCall {
-  readonly engineering_report: SealedArtifactReferenceV1;
   readonly commit_subject: string;
   readonly commit_body: string;
   readonly regression_test_identity: string;
-  readonly risks: SealedArtifactReferenceV1;
 }
 export interface QualityRunFullSuiteCall extends MutatingCall {
   readonly validation_profile: string;

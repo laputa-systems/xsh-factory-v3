@@ -557,11 +557,9 @@ impl CandidateSubmitRequest {
     /// Engineering worktree after this request has passed all input checks.
     pub fn submission(&self) -> Result<CandidateSubmissionV1, ContractError> {
         let submission = CandidateSubmissionV1 {
-            engineering_report: self.engineering_report.clone().into_domain()?,
             commit_subject: self.commit_subject.clone(),
             commit_body: self.commit_body.clone(),
             regression_test_identity: self.regression_test_identity.clone(),
-            risks: self.risks.clone().into_domain()?,
         };
         submission.validate()?;
         Ok(submission)
@@ -736,11 +734,9 @@ mutating_request!(CandidateCheckpointRegressionRequest {
     expected_failure: String,
 });
 mutating_request!(CandidateSubmitRequest {
-    engineering_report: SealedArtifactReferenceWireV1,
     commit_subject: String,
     commit_body: String,
     regression_test_identity: String,
-    risks: SealedArtifactReferenceWireV1,
 });
 mutating_request!(QualityRunFullSuiteRequest {
     validation_profile: String

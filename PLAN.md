@@ -10,8 +10,8 @@ work.
    paths, and validation. After a successful regression checkpoint, terminal
    reconciliation must preserve a changed worktree as controller-owned
    recovery evidence and offer an explicit, bounded continuation or
-   validation path. Actor report/risk seals should enrich that record, not be
-   a prerequisite for salvaging the work.
+   validation path. Candidate completion records and risk records are already
+   kernel-sealed; the remaining gap is recovery before `candidate_submit`.
 2. **Terminal-cost recovery.** A host protocol failure after paid work can
    leave cost `unknown` and fail a campaign even when the provider response and
    product changes are otherwise usable. The host/kernel boundary needs a
