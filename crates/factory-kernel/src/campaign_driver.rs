@@ -30,7 +30,7 @@ use crate::{
     storage::{KernelStore, StoreError},
     ticket_store::{
         ClaimOutcome, ClaimTicketReceipt, DownstreamActionContext, DownstreamActionStage,
-        FailTicketAttempt,
+        FailTicketAttempt, RetryQualityAttempt,
     },
 };
 
@@ -54,6 +54,10 @@ pub enum CampaignDriverOutcome {
         ticket_attempt_id: factory_protocol::TicketAttemptId,
         /// Bounded durable fault detail recorded on the exact attempt.
         failure_detail: String,
+    },
+    QualityRetryScheduled {
+        campaign_id: CampaignId,
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
     },
     ClaimSettled(ClaimTicketReceipt),
     HardValidationResumed,
@@ -152,6 +156,23 @@ impl CampaignDriver {
             return Ok(CampaignDriverOutcome::NoRunningCampaign);
         };
         let campaign = process.campaign_status(campaign_id).await?;
+        let ticket = self.store.ticket_store();
+        if let Some(recovery) = ticket.recoverable_quality_failure(campaign_id).await? {
+            self.retry_quality_attempt(
+                recovery.ticket_attempt_id,
+                recovery.candidate_id,
+                "retrying the validated candidate after a Quality session fault",
+            )
+            .await?;
+            return self
+                .continue_downstream(
+                    daemon,
+                    campaign_id,
+                    campaign.application_revision_id,
+                    recovery,
+                )
+                .await;
+        }
         let scheduler = self.store.ticket_scheduler();
         let action = scheduler.next_action(campaign_id).await?;
         self.execute(
@@ -442,10 +463,7 @@ impl CampaignDriver {
                     failure_detail: reason.to_owned(),
                 })
             }
-            DurableAssignmentTarget::Engineering { ticket_attempt_id }
-            | DurableAssignmentTarget::Quality {
-                ticket_attempt_id, ..
-            } => {
+            DurableAssignmentTarget::Engineering { ticket_attempt_id } => {
                 self.fail_ticket_attempt(ticket_attempt_id, reason).await?;
                 Ok(CampaignDriverOutcome::TicketAttemptFailed {
                     campaign_id,
@@ -453,6 +471,27 @@ impl CampaignDriver {
                     failure_detail: reason.to_owned(),
                 })
             }
+            DurableAssignmentTarget::Quality {
+                ticket_attempt_id,
+                candidate_id,
+            } => match self
+                .retry_quality_attempt(ticket_attempt_id, candidate_id, reason)
+                .await
+            {
+                Ok(()) => Ok(CampaignDriverOutcome::QualityRetryScheduled {
+                    campaign_id,
+                    ticket_attempt_id,
+                }),
+                Err(CampaignDriverError::Store(StoreError::TicketAttemptNotReleasable)) => {
+                    self.fail_ticket_attempt(ticket_attempt_id, reason).await?;
+                    Ok(CampaignDriverOutcome::TicketAttemptFailed {
+                        campaign_id,
+                        ticket_attempt_id,
+                        failure_detail: reason.to_owned(),
+                    })
+                }
+                Err(error) => Err(error),
+            },
         }
     }
 
@@ -499,6 +538,34 @@ impl CampaignDriver {
                     context.ticket_revision.get(),
                 ),
                 ticket_attempt_id,
+                expected_attempt_revision: ExpectedRevision::new(context.attempt_revision),
+                expected_ticket_revision: ExpectedRevision::new(context.ticket_revision),
+                reason: reason.to_owned(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn retry_quality_attempt(
+        &self,
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
+        candidate_id: factory_protocol::CandidateId,
+        reason: &str,
+    ) -> Result<(), CampaignDriverError> {
+        let ticket = self.store.ticket_store();
+        let context = ticket.failure_context(ticket_attempt_id).await?;
+        ticket
+            .retry_quality_attempt(&RetryQualityAttempt {
+                principal: DRIVER_PRINCIPAL.to_owned(),
+                command_id: format!(
+                    "attempt-{}-candidate-{}-quality-retry-ar{}-tr{}",
+                    ticket_attempt_id.get(),
+                    candidate_id.get(),
+                    context.attempt_revision.get(),
+                    context.ticket_revision.get(),
+                ),
+                ticket_attempt_id,
+                candidate_id,
                 expected_attempt_revision: ExpectedRevision::new(context.attempt_revision),
                 expected_ticket_revision: ExpectedRevision::new(context.ticket_revision),
                 reason: reason.to_owned(),

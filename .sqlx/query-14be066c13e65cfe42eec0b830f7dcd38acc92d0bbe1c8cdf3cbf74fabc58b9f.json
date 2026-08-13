@@ -1,0 +1,79 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ta.id AS attempt_id, ta.revision AS attempt_revision,\n                    tr.revision AS ticket_revision, c.id AS candidate_id,\n                    c.revision AS candidate_revision\n             FROM factory.ticket_attempts AS ta\n             JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id\n             JOIN factory.tickets AS t ON t.id = tr.ticket_id\n             JOIN factory.candidates AS c ON c.ticket_attempt_id = ta.id\n             WHERE ta.campaign_id = $1\n               AND ta.stage = $2\n               AND t.current_ticket_revision_id = tr.id\n               AND t.lifecycle = $3\n               AND tr.lifecycle = $3\n               AND c.lifecycle = $4\n               AND c.candidate_commit IS NOT NULL\n               AND NOT EXISTS (\n                   SELECT 1 FROM factory.reviews AS r WHERE r.candidate_id = c.id\n               )\n             ORDER BY ta.failed_at ASC NULLS LAST, ta.id ASC, c.id ASC\n             LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "attempt_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_attempts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ticket_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.ticket_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "candidate_revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "14be066c13e65cfe42eec0b830f7dcd38acc92d0bbe1c8cdf3cbf74fabc58b9f"
+}
