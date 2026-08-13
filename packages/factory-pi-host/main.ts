@@ -70,9 +70,13 @@ export async function runPiHostMain(bindings: PiHostMainBindings = {}): Promise<
   // produces the Deno.FsFile required for framed replies; it neither discovers
   // nor connects to a socket path. Actor sessions run under the plan's
   // deliberate `-A` cooperative same-user trust model.
-  const inheritedFile = await Deno.open("/dev/fd/0", { read: true, write: true });
+  // Deno serializes operations per FsFile resource. Duplicate the inherited
+  // full-duplex socket so the long-lived response reader cannot prevent a
+  // later request write on the same resource lock.
+  const inheritedReadFile = await Deno.open("/dev/fd/0", { read: true });
+  const inheritedWriteFile = await Deno.open("/dev/fd/0", { write: true });
   const inheritedTransport = bindings.actor_client === undefined
-    ? new InheritedFrameTransport(inheritedFile)
+    ? new InheritedFrameTransport(inheritedReadFile, inheritedWriteFile)
     : undefined;
   const client = bindings.actor_client ?? new FramedActorClient(inheritedTransport!);
   let nextCommandId = 0;
@@ -96,7 +100,7 @@ export async function runPiHostMain(bindings: PiHostMainBindings = {}): Promise<
       ...bindings,
       packet_integrity_verifier: packetVerifier,
       required_read_verifier: bindings.required_read_verifier ?? new DaemonRequiredReadVerifier(),
-      authority: bindings.authority ?? inheritedAuthority(inheritedFile, inheritedTransport),
+      authority: bindings.authority ?? inheritedAuthority(inheritedReadFile, inheritedTransport),
       session_factory: bindings.session_factory ?? createSdkPiSessionFactory(),
       artifact_sealer_factory: bindings.artifact_sealer_factory ??
         ((packet, admission) =>
@@ -116,14 +120,18 @@ export async function runPiHostMain(bindings: PiHostMainBindings = {}): Promise<
         : undefined,
     });
   } finally {
-    inheritedFile.close();
+    inheritedReadFile.close();
+    inheritedWriteFile.close();
   }
 }
 
 /** Creates the generic framed operation seam used by process-custody wiring. */
 export async function createInheritedActorClient(): Promise<FramedActorClient> {
-  const inheritedFile = await Deno.open("/dev/fd/0", { read: true, write: true });
-  return new FramedActorClient(new InheritedFrameTransport(inheritedFile));
+  const inheritedReadFile = await Deno.open("/dev/fd/0", { read: true });
+  const inheritedWriteFile = await Deno.open("/dev/fd/0", { write: true });
+  return new FramedActorClient(
+    new InheritedFrameTransport(inheritedReadFile, inheritedWriteFile),
+  );
 }
 
 /**

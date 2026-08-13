@@ -65,6 +65,50 @@ class SerializedResourceDuplex {
   close(): void {}
 }
 
+class ScriptedSplitDuplex {
+  readonly written: Uint8Array[] = [];
+  readonly reader: Pick<Deno.FsFile, "read" | "close">;
+  readonly writer: Pick<Deno.FsFile, "write" | "close">;
+  readonly #responses: Uint8Array[];
+  #available: Uint8Array | undefined;
+  #offset = 0;
+  #wake: (() => void) | undefined;
+
+  constructor(responses: Uint8Array[]) {
+    this.#responses = responses.slice();
+    this.reader = {
+      read: async (target: Uint8Array): Promise<number | null> => {
+        while (this.#available === undefined) {
+          await new Promise<void>((resolve) => this.#wake = resolve);
+        }
+        const count = Math.min(target.byteLength, this.#available.byteLength - this.#offset);
+        target.set(this.#available.subarray(this.#offset, this.#offset + count));
+        this.#offset += count;
+        if (this.#offset === this.#available.byteLength) {
+          this.#available = undefined;
+          this.#offset = 0;
+        }
+        return count;
+      },
+      close: () => {},
+    };
+    this.writer = {
+      write: (bytes: Uint8Array): Promise<number> => {
+        this.written.push(bytes.slice());
+        const response = this.#responses.shift();
+        if (response === undefined || this.#available !== undefined) {
+          throw new Error("unexpected scripted transport write");
+        }
+        this.#available = response;
+        this.#wake?.();
+        this.#wake = undefined;
+        return Promise.resolve(bytes.byteLength);
+      },
+      close: () => {},
+    };
+  }
+}
+
 Deno.test("inherited actor transport handles short writes and validates response identity", async () => {
   const response = encodeJsonFrame({
     protocol_version: 1,
@@ -110,6 +154,27 @@ Deno.test("inherited full-duplex transport writes before reading one serialized 
     operation: "test.request",
     request: true,
   });
+});
+
+Deno.test("split inherited resources support repeated framed exchanges", async () => {
+  const duplex = new ScriptedSplitDuplex([
+    encodeJsonFrame({ operation: "test.response", ordinal: 1 }),
+    encodeJsonFrame({ operation: "test.response", ordinal: 2 }),
+  ]);
+  const transport = new InheritedFrameTransport(
+    duplex.reader as Deno.FsFile,
+    duplex.writer as Deno.FsFile,
+  );
+  for (const ordinal of [1, 2]) {
+    assertEquals(
+      decodeJsonFrame(
+        await transport.exchange(encodeJsonFrame({ operation: "test.request", ordinal })),
+        "test.response",
+      ),
+      { operation: "test.response", ordinal },
+    );
+  }
+  assertEquals(duplex.written.length, 2);
 });
 
 Deno.test("inherited actor transport stops on a truncated response", async () => {

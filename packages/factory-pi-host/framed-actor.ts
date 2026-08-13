@@ -24,7 +24,8 @@ import type {
 
 /** Reads and writes the daemon's already-connected big-endian length frames. */
 export class InheritedFrameTransport implements FrameTransport {
-  readonly #file: Deno.FsFile;
+  readonly #readFile: Deno.FsFile;
+  readonly #writeFile: Deno.FsFile;
   #tail = Promise.resolve();
   #reader: Promise<void> | undefined;
   #waiting: Array<{
@@ -34,8 +35,9 @@ export class InheritedFrameTransport implements FrameTransport {
   #lossListeners = new Set<() => void>();
   #loss: unknown | undefined;
 
-  constructor(file: Deno.FsFile) {
-    this.#file = file;
+  constructor(readFile: Deno.FsFile, writeFile: Deno.FsFile = readFile) {
+    this.#readFile = readFile;
+    this.#writeFile = writeFile;
   }
 
   exchange(frame: Uint8Array): Promise<Uint8Array> {
@@ -45,7 +47,7 @@ export class InheritedFrameTransport implements FrameTransport {
         this.#waiting.push({ resolve, reject });
       });
       try {
-        await writeAll(this.#file, frame);
+        await writeAll(this.#writeFile, frame);
         // Deno serializes operations on one FsFile resource. Starting the
         // blocking response read first prevents the request write on an
         // inherited full-duplex socket and deadlocks both peers. A socket
@@ -81,7 +83,7 @@ export class InheritedFrameTransport implements FrameTransport {
   async #readResponses(): Promise<void> {
     try {
       while (true) {
-        const frame = await readFrame(this.#file);
+        const frame = await readFrame(this.#readFile);
         const waiter = this.#waiting.shift();
         if (waiter === undefined) {
           throw new FrameProtocolError(
