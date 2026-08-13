@@ -1213,8 +1213,11 @@ impl TicketStore {
         })
     }
 
-    /// Finds the one failed Quality attempt that can be recovered without
-    /// changing its validated candidate. This is read-only; the driver must
+    /// Finds one failed Quality attempt that can be recovered without changing
+    /// its validated candidate. Recovery is limited to the newest candidate
+    /// for each current ticket revision: a later Engineering attempt
+    /// supersedes every earlier candidate, even when the earlier candidate has
+    /// not received a Quality review. This is read-only; the driver must
     /// immediately consume the returned revisions through
     /// [`Self::retry_quality_attempt`].
     pub async fn recoverable_quality_failure(
@@ -1239,7 +1242,15 @@ impl TicketStore {
                AND NOT EXISTS (
                    SELECT 1 FROM factory.reviews AS r WHERE r.candidate_id = c.id
                )
-             ORDER BY ta.failed_at ASC NULLS LAST, ta.id ASC, c.id ASC
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM factory.candidates AS newer
+                   JOIN factory.ticket_attempts AS newer_attempt
+                     ON newer_attempt.id = newer.ticket_attempt_id
+                   WHERE newer_attempt.ticket_revision_id = ta.ticket_revision_id
+                     AND newer.id > c.id
+               )
+             ORDER BY ta.failed_at ASC NULLS LAST, ta.id ASC, c.id DESC
              LIMIT 1",
             campaign_id.get(),
             ATTEMPT_FAILED,
