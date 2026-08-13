@@ -342,6 +342,7 @@ impl DurableAuthorityResolver {
         let prefix = claim_requalification_command_prefix(
             action.campaign_id.get(),
             action.ticket.ticket_revision_id.get(),
+            action.ticket.revision.get(),
         );
         let first = seal_command_observation_manifest(
             &process,
@@ -2199,8 +2200,14 @@ async fn seal_command_observation_manifest(
     Ok(manifest_receipt.artifact_id)
 }
 
-fn claim_requalification_command_prefix(campaign_id: i64, ticket_revision_id: i64) -> String {
-    format!("claim-campaign-{campaign_id}-ticket-revision-{ticket_revision_id}")
+fn claim_requalification_command_prefix(
+    campaign_id: i64,
+    ticket_revision_id: i64,
+    ticket_revision: u64,
+) -> String {
+    format!(
+        "claim-campaign-{campaign_id}-ticket-revision-{ticket_revision_id}-revision-{ticket_revision}"
+    )
 }
 
 /// Ticket store requalification predates status-only Product discovery and
@@ -2269,11 +2276,12 @@ mod tests {
     use super::{canonical_requalification_observations, claim_requalification_command_prefix};
 
     #[test]
-    fn claim_requalification_keys_reuse_only_within_one_campaign() {
-        let first = claim_requalification_command_prefix(17, 4);
-        assert_eq!(first, claim_requalification_command_prefix(17, 4));
-        assert_ne!(first, claim_requalification_command_prefix(18, 4));
-        assert_ne!(first, claim_requalification_command_prefix(17, 5));
+    fn claim_requalification_keys_reuse_only_for_one_exact_sponsored_revision() {
+        let first = claim_requalification_command_prefix(17, 4, 8);
+        assert_eq!(first, claim_requalification_command_prefix(17, 4, 8));
+        assert_ne!(first, claim_requalification_command_prefix(18, 4, 8));
+        assert_ne!(first, claim_requalification_command_prefix(17, 5, 8));
+        assert_ne!(first, claim_requalification_command_prefix(17, 4, 9));
     }
 
     #[test]
