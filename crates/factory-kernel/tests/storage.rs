@@ -39,12 +39,10 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
         let inspection = sqlx::PgPool::connect(&test_database_url())
             .await
             .expect("connect schema inspection pool");
-        let migration_count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM _sqlx_migrations",
-        )
-        .fetch_one(&inspection)
-        .await
-        .expect("canonical migration count");
+        let migration_count: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
+            .fetch_one(&inspection)
+            .await
+            .expect("canonical migration count");
         assert_eq!(migration_count, 1, "fresh V3 uses one canonical migration");
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)

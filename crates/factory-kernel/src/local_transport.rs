@@ -63,7 +63,6 @@ use crate::{
     operator_artifact_rpc::{
         OperatorArtifactCapability, OperatorArtifactRpc, OperatorArtifactRpcError,
     },
-    session_runtime::ActiveSessionCancellationRegistry,
     operator_forum_rpc::{OperatorForumRpc, OperatorForumRpcError},
     operator_navigation::{
         OperatorNavigationCapability, OperatorNavigationRpc, OperatorNavigationRpcError,
@@ -73,6 +72,7 @@ use crate::{
         OperatorArchitectCapability, OperatorCampaignCapability, OperatorRpc, OperatorRpcError,
     },
     process::ProcessStore,
+    session_runtime::ActiveSessionCancellationRegistry,
     storage::{DaemonLock, KernelStore, StoreError},
     ticket_store::TicketStore,
 };
@@ -2420,11 +2420,8 @@ mod tests {
             let server = server
                 .with_assignment_read_deadline(Duration::from_millis(100))
                 .expect("assignment wall limit is a valid actor read deadline");
-            let task = smol::spawn(async move {
-                server
-                    .serve(|_| async { Ok(br#"{}"#.to_vec()) })
-                    .await
-            });
+            let task =
+                smol::spawn(async move { server.serve(|_| async { Ok(br#"{}"#.to_vec()) }).await });
             Timer::after(Duration::from_millis(30)).await;
             write_known_request(&mut client, "assignment-read-deadline").await;
             read_stream_frame(
@@ -2436,7 +2433,10 @@ mod tests {
             .expect("read actor response")
             .expect("actor response exists");
             drop(client);
-            assert_eq!(task.await.expect("actor server"), ActorDisconnect::PeerClosed);
+            assert_eq!(
+                task.await.expect("actor server"),
+                ActorDisconnect::PeerClosed
+            );
 
             let config = LocalTransportConfig::new(test_runtime_root("operation-deadline"))
                 .with_deadlines(Duration::from_secs(1), Duration::from_millis(10));

@@ -472,6 +472,9 @@ function assignmentEvidenceRole(
   value: unknown,
   field: string,
 ): PiAssignmentPacket["assignment_evidence"][number]["role"] {
-  return oneOf(value, ASSIGNMENT_EVIDENCE_ROLES_V1, field) as
-    PiAssignmentPacket["assignment_evidence"][number]["role"];
+  return oneOf(
+    value,
+    ASSIGNMENT_EVIDENCE_ROLES_V1,
+    field,
+  ) as PiAssignmentPacket["assignment_evidence"][number]["role"];
 }

@@ -49,6 +49,7 @@ use factory_protocol::{
 use sqlx::Row;
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
+static FIXTURE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../schema/migrations");
 
 #[test]
 #[ignore = "requires FACTORY_TEST_DATABASE_URL for one disposable PostgreSQL database"]
@@ -147,6 +148,13 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        // `make provider-free-vertical` deliberately runs all three scenarios
+        // against one caller-created disposable database. Each scenario owns a
+        // live campaign while it proves its boundary, so reset only the
+        // explicitly name-guarded fixture schema before starting the next one.
+        // This keeps the production one-running-campaign invariant intact
+        // instead of teaching the fixture to bypass it.
+        reset_fixture_schema().await;
         let root = std::env::temp_dir().join(unique("factory-v3-full-vertical"));
         fs::create_dir_all(&root).expect("fixture root");
         // macOS exposes its temporary root through `/var`, while Git reports
@@ -574,7 +582,6 @@ impl Fixture {
                 .expect("durable audit/material consistency"),
             "all retained CAS and audit facts must remain mutually consistent",
         );
-
     }
 
     async fn reject_invalid_engineering_terminal_provenance(&self) {
@@ -593,7 +600,10 @@ impl Fixture {
             .next()
             .expect("one unseeded ticket");
         let sponsorship_rationale = self
-            .seal_kernel("negative-architect-sponsor-rationale", b"valuable product fix\n")
+            .seal_kernel(
+                "negative-architect-sponsor-rationale",
+                b"valuable product fix\n",
+            )
             .await;
         self.store
             .decision_store()
@@ -662,8 +672,12 @@ impl Fixture {
             .execute(&inspection)
             .await
             .expect("simulate a non-succeeded Engineering terminal");
-        self.assert_attachment_refused(action, "non-succeeded Engineering terminal", &candidate_ref)
-            .await;
+        self.assert_attachment_refused(
+            action,
+            "non-succeeded Engineering terminal",
+            &candidate_ref,
+        )
+        .await;
 
         sqlx::query(
             "UPDATE factory.sessions
@@ -1328,6 +1342,28 @@ fn test_database_url() -> String {
     ));
     url
 }
+
+async fn reset_fixture_schema() {
+    let pool = sqlx::PgPool::connect(&test_database_url())
+        .await
+        .expect("fixture database connection");
+    sqlx::query("DROP SCHEMA IF EXISTS factory CASCADE")
+        .execute(&pool)
+        .await
+        .expect("reset explicitly guarded fixture schema");
+    // Reapply the canonical schema before `migrate_and_verify` checks its
+    // identity; this is the same checked-in migration path as production.
+    sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations")
+        .execute(&pool)
+        .await
+        .expect("reset fixture migration ledger");
+    FIXTURE_MIGRATOR
+        .run(&pool)
+        .await
+        .expect("restore fixture schema through canonical migration");
+    pool.close().await;
+}
+
 fn deno() -> PathBuf {
     for candidate in ["/opt/homebrew/bin/deno", "/usr/local/bin/deno"] {
         let path = PathBuf::from(candidate);

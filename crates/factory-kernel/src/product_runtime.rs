@@ -230,7 +230,14 @@ fn discover_clean_snapshot(
     runner: &CommandRunner,
     workspace: &CommandWorkspace,
 ) -> Result<(String, String), ProductRuntimeError> {
-    let status = git_probe(runner, workspace, &["status", "--porcelain=v1"])?;
+    // Product seals its report and reproducer bytes from the assigned
+    // workspace. Those untracked evidence files are not product-source
+    // mutations; tracked changes remain a fail-closed discovery violation.
+    let status = git_probe(
+        runner,
+        workspace,
+        &["status", "--porcelain=v1", "--untracked-files=no"],
+    )?;
     if !status.is_empty() {
         return Err(ProductRuntimeError::ProposalContract(
             "discovery workspace is not clean".to_owned(),

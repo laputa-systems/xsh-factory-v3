@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::OpenOptions,
     future::Future,
-    io::Write as _,
+    io::{Read as _, Write as _},
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -64,6 +64,7 @@ const ARTIFACT_READ_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub const SESSION_STDOUT_RELATIVE_PATH: &str = "stdout.log";
 pub const SESSION_STDERR_RELATIVE_PATH: &str = "stderr.log";
 pub const SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH: &str = "session.ndjson";
+const SESSION_BOUNDED_PARTIAL_TRANSCRIPT_RELATIVE_PATH: &str = "session.partial.ndjson";
 
 /// Daemon-local registry for the one admitted paid process. A cancellation
 /// selects by durable session ID, while the stored handle itself names no PID
@@ -450,6 +451,9 @@ pub enum SessionRuntimeError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("the {maximum}-byte CAS limit cannot hold a bounded partial-transcript marker")]
+    PartialTranscriptLimitTooSmall { maximum: u64 },
 }
 
 #[derive(Clone, Copy)]
@@ -911,8 +915,10 @@ impl KernelSessionRpc {
                 "revision or byte limit is outside assignment authority",
             ));
         }
-        let relative = RepositoryRelativePath::parse(request.workspace_relative_path)
-            .map_err(|_| invalid_rpc("artifact.seal_workspace_file", "workspace path is invalid"))?;
+        let relative =
+            RepositoryRelativePath::parse(request.workspace_relative_path).map_err(|_| {
+                invalid_rpc("artifact.seal_workspace_file", "workspace path is invalid")
+            })?;
         let (seal, receipt) = self
             .process
             .adopt_and_register_actor_artifact(
@@ -2134,13 +2140,18 @@ async fn reconcile_terminal(
     } else {
         let partial_path = staging_root.join(SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH);
         ensure_partial_transcript(&partial_path)?;
+        let bounded_partial_path = bounded_partial_transcript_path(
+            &staging_root,
+            &partial_path,
+            cas.maximum_object_bytes(),
+        )?;
         let partial = adopt_runtime_artifact(
             process,
             cas,
             request,
             session.session_id,
             "partial-transcript",
-            &partial_path,
+            &bounded_partial_path,
             cas.maximum_object_bytes(),
         )
         .await?;
@@ -2310,6 +2321,64 @@ fn ensure_partial_transcript(path: &Path) -> Result<(), SessionRuntimeError> {
             path: path.to_owned(),
             source,
         })
+}
+
+/// Returns the direct transcript unless it fits the CAS object contract. An
+/// actor that disconnects before sealing its compressed transcript can leave
+/// an arbitrarily large raw NDJSON file behind; terminal reconciliation still
+/// needs a durable, bounded record to close its exact session. The generated
+/// replacement explicitly identifies itself as truncated and leaves the raw
+/// file untouched in the staging directory for local incident recovery.
+fn bounded_partial_transcript_path(
+    staging_root: &Path,
+    source_path: &Path,
+    maximum_bytes: u64,
+) -> Result<std::path::PathBuf, SessionRuntimeError> {
+    let source_bytes = std::fs::metadata(source_path)
+        .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
+            path: source_path.to_owned(),
+            source,
+        })?
+        .len();
+    if source_bytes <= maximum_bytes {
+        return Ok(source_path.to_owned());
+    }
+
+    let marker = format!(
+        "{{\"type\":\"factory.partial_transcript.v1\",\"source\":\"{SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH}\",\"source_byte_length\":{source_bytes},\"truncated\":true}}\\n"
+    );
+    let marker = marker.into_bytes();
+    let retained_bytes = maximum_bytes
+        .checked_sub(u64::try_from(marker.len()).unwrap_or(u64::MAX))
+        .ok_or(SessionRuntimeError::PartialTranscriptLimitTooSmall {
+            maximum: maximum_bytes,
+        })?;
+    let bounded_path = staging_root.join(SESSION_BOUNDED_PARTIAL_TRANSCRIPT_RELATIVE_PATH);
+    let source = std::fs::File::open(source_path).map_err(|source| {
+        SessionRuntimeError::TerminalEvidenceIo {
+            path: source_path.to_owned(),
+            source,
+        }
+    })?;
+    let mut bounded = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&bounded_path)
+        .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
+            path: bounded_path.clone(),
+            source,
+        })?;
+    bounded
+        .write_all(&marker)
+        .and_then(|()| std::io::copy(&mut source.take(retained_bytes), &mut bounded).map(|_| ()))
+        .and_then(|()| bounded.flush())
+        .and_then(|()| bounded.sync_all())
+        .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
+            path: bounded_path.clone(),
+            source,
+        })?;
+    Ok(bounded_path)
 }
 
 fn infrastructure_stop_reason(
@@ -2833,7 +2902,7 @@ mod tests {
             factory_protocol::OP_WORKSPACE_READ.to_owned(),
             Err(WorkspaceReadError::Io {
                 operation: "canonicalize workspace file",
-                path: std::path::PathBuf::from("missing.xsh"),
+                path: std::path::PathBuf::from("missing-workspace-file"),
                 source: std::io::Error::from(std::io::ErrorKind::NotFound),
             }),
         )

@@ -27,6 +27,6 @@
   "tasks": {
     "cache": "deno cache --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts tools/backup_restore_check.ts",
     "check": "deno check --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts tools/backup_restore_check.ts",
-    "test": "deno test -A --no-prompt --frozen --cached-only"
+    "test": "deno test -A --no-prompt --frozen --cached-only applications/xsh packages/factory-sdk packages/factory-pi-host tests tools"
   }
 }

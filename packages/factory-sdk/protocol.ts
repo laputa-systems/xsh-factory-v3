@@ -656,12 +656,14 @@ export function validateProtocolResponse(
           `response for ${expectedOperation} exceeds the session cost aggregate bound`,
         );
       }
-      for (const field of [
-        "base_commit",
-        "candidate_tree",
-        "candidate_commit",
-        "delivered_commit",
-      ]) {
+      for (
+        const field of [
+          "base_commit",
+          "candidate_tree",
+          "candidate_commit",
+          "delivered_commit",
+        ]
+      ) {
         if (response[field] !== null && typeof response[field] !== "string") {
           throw new FrameProtocolError(
             "invalid_json",
@@ -760,13 +762,15 @@ export function validateProtocolResponse(
         for (const field of ["office", "model_provider", "model_id", "outcome"]) {
           responseString(row, field, expectedOperation);
         }
-        for (const field of [
-          "session_count",
-          "accounted_cost_micro_usd",
-          "pending_cost_session_count",
-          "unknown_cost_session_count",
-          "exceeded_cost_session_count",
-        ]) {
+        for (
+          const field of [
+            "session_count",
+            "accounted_cost_micro_usd",
+            "pending_cost_session_count",
+            "unknown_cost_session_count",
+            "exceeded_cost_session_count",
+          ]
+        ) {
           responseInteger(row, field, expectedOperation);
         }
         if (

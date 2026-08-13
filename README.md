@@ -80,8 +80,8 @@ RUNTIME_ROOT=/absolute/path/to/factory-runtime
 SOCKET="$RUNTIME_ROOT/factoryd.operator.sock"
 
 factoryctl init --database-url "$DATABASE_URL" --runtime-root "$RUNTIME_ROOT"
-factoryd serve \
-  --database-url "$DATABASE_URL" --runtime-root "$RUNTIME_ROOT" &
+FACTORY_DATABASE_URL="$DATABASE_URL" FACTORY_RUNTIME_ROOT="$RUNTIME_ROOT" \
+  make factoryd-serve &
 DAEMON_PID=$!
 trap 'kill "$DAEMON_PID"' EXIT
 

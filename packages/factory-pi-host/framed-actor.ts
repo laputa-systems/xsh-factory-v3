@@ -329,16 +329,76 @@ export function createFramedToolAdapters(
           try {
             const result = await client.call(operation, modelToolWireInput(name, input));
             return modelVisibleToolResult(name, result);
-          } catch {
+          } catch (error) {
             // Wire and authority diagnostics remain in host/kernel evidence.
             // A model sees only a task-level failure, never internal service
             // names, lifecycle identities, or transport wording.
-            throw new Error(`The assigned ${name} operation failed.`);
+            throw taskLevelToolFailure(name, error);
           }
         },
       },
     }];
   });
+}
+
+/**
+ * Maps a closed, task-level correction that the actor can safely act on while
+ * keeping all transport and authority details in the durable host evidence.
+ */
+function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
+  const detail = error instanceof Error ? error.message : "";
+  if (
+    name === "product_submit_ticket" &&
+    detail.includes(
+      "Product named a reproducer profile that is not in the admitted application revision",
+    )
+  ) {
+    return new Error(
+      "The admitted reproducer profile name is `reproducer`. Set `reproducer_profile` to " +
+        "`reproducer`; it names the profile, not the command bytes. Keep `reproducer.command` " +
+        "as the exact canonical JSON profile supplied in the assignment, then submit again.",
+    );
+  }
+  if (
+    name === "product_submit_ticket" &&
+    detail.includes("command bytes are not canonical V1 JSON")
+  ) {
+    return new Error(
+      "The sealed command artifact must be the canonical JSON profile, not a shell command " +
+        "string. Use the exact profile JSON supplied in the assignment, keep `reproducer_profile` " +
+        "as `reproducer`, and put the behavioral XSH program only in the sealed stdin artifact.",
+    );
+  }
+  if (
+    name === "product_submit_ticket" &&
+    detail.includes("sealed reproducer command differs from its named admitted profile")
+  ) {
+    return new Error(
+      "The sealed reproducer command must exactly match the assigned `reproducer` profile. " +
+        "Use the exact canonical JSON profile supplied in the assignment as the command artifact; " +
+        "keep `target/debug/xsh` only inside the sealed stdin program, then submit again.",
+    );
+  }
+  if (
+    name === "product_submit_ticket" &&
+    detail.includes("ticket contract reads paths must be unique")
+  ) {
+    return new Error(
+      "Use one `contract_reads` entry per repository path. Combine the relevant constraints from " +
+        "the same file in that entry's reason, then submit again.",
+    );
+  }
+  if (
+    name === "product_submit_ticket" &&
+    detail.includes("ticket contract read reason")
+  ) {
+    return new Error(
+      "Each `contract_reads` reason must be nonempty, contain no NUL, and fit within 240 UTF-8 " +
+        "bytes so downstream implementation can read the same exact contract. Tighten the reason " +
+        "without changing its path, then submit again.",
+    );
+  }
+  return new Error(`The assigned ${name} operation failed.`);
 }
 
 function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unknown>> {

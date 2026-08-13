@@ -918,8 +918,8 @@ impl ProcessStore {
             tx.commit().await?;
             return Ok(CampaignCancellationAdmission::ActiveSession { session_id });
         }
-        let receipt = cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint)
-            .await?;
+        let receipt =
+            cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint).await?;
         tx.commit().await?;
         Ok(CampaignCancellationAdmission::Completed(receipt))
     }
@@ -979,8 +979,8 @@ impl ProcessStore {
         // runtime has directly waited this exact daemon-owned child and
         // committed its terminal evidence. Rechecking a caller-selectable row
         // here would weaken that capability boundary and add no authority.
-        let receipt = cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint)
-            .await?;
+        let receipt =
+            cancel_campaign_in_transaction(&mut tx, command, current_revision, fingerprint).await?;
         tx.commit().await?;
         Ok(receipt)
     }
@@ -2058,18 +2058,12 @@ impl ProcessStore {
                         .map_err(|_| StoreError::CorruptCostColumn)?,
                     accounted_cost_micro_usd: u64::try_from(row.accounted_cost_micro_usd)
                         .map_err(|_| StoreError::CorruptCostColumn)?,
-                    pending_cost_session_count: u32::try_from(
-                        row.pending_cost_session_count,
-                    )
-                    .map_err(|_| StoreError::CorruptCostColumn)?,
-                    unknown_cost_session_count: u32::try_from(
-                        row.unknown_cost_session_count,
-                    )
-                    .map_err(|_| StoreError::CorruptCostColumn)?,
-                    exceeded_cost_session_count: u32::try_from(
-                        row.exceeded_cost_session_count,
-                    )
-                    .map_err(|_| StoreError::CorruptCostColumn)?,
+                    pending_cost_session_count: u32::try_from(row.pending_cost_session_count)
+                        .map_err(|_| StoreError::CorruptCostColumn)?,
+                    unknown_cost_session_count: u32::try_from(row.unknown_cost_session_count)
+                        .map_err(|_| StoreError::CorruptCostColumn)?,
+                    exceeded_cost_session_count: u32::try_from(row.exceeded_cost_session_count)
+                        .map_err(|_| StoreError::CorruptCostColumn)?,
                 })
             })
             .collect()

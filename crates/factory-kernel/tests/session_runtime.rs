@@ -33,10 +33,10 @@ use factory_kernel::{
 use factory_protocol::{
     ASSIGNMENT_PACKET_V1_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationKey,
     ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV1, ContentDigest,
-    CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1, Office, ReadExactFileV1,
-    ReadObservationV1, RepositoryRelativePath, RuntimeIdentityV1, SealedArtifactReferenceV1,
-    OperatorCancelCampaignRequest, PROTOCOL_VERSION_V1, SessionLimitsV1, TerminalCostV1,
-    TerminalOperationV1,
+    CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1, Office,
+    OperatorCancelCampaignRequest, PROTOCOL_VERSION_V1, ReadExactFileV1, ReadObservationV1,
+    RepositoryRelativePath, RuntimeIdentityV1, SealedArtifactReferenceV1, SessionLimitsV1,
+    TerminalCostV1, TerminalOperationV1,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -368,6 +368,31 @@ fn real_deno_fake_actor_unknown_cost_fails_closed_without_a_resume() {
 
 #[test]
 #[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn oversized_unsealed_partial_transcript_is_bounded_and_terminally_reconciled() {
+    smol::block_on(async {
+        let fixture = RuntimeFixture::new(FakeTerminalMode::OversizedUnsealedTranscript).await;
+        let outcome = fixture
+            .launch()
+            .await
+            .expect("oversized unsealed transcript is reconciled");
+
+        assert_eq!(
+            outcome.terminal.session_state,
+            factory_protocol::SessionState::Interrupted
+        );
+        let status = fixture
+            .process
+            .campaign_status(fixture.campaign_id)
+            .await
+            .expect("campaign after oversized transcript");
+        assert_eq!(status.state, factory_protocol::CampaignState::Failed);
+        assert_eq!(status.measured_cost, TerminalCostV1::Unknown);
+        fixture.close().await;
+    });
+}
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
 fn product_mutation_before_daemon_read_writes_no_ticket_authority() {
     smol::block_on(async {
         let fixture = RuntimeFixture::new(FakeTerminalMode::ProductMutationBeforeRead).await;
@@ -418,6 +443,7 @@ enum FakeTerminalMode {
     CompletedWithThousandEvents,
     UnknownCost,
     ProductMutationBeforeRead,
+    OversizedUnsealedTranscript,
     WaitForCancellation,
 }
 
@@ -428,6 +454,7 @@ impl FakeTerminalMode {
             Self::CompletedWithThousandEvents => "completed_thousand_events",
             Self::UnknownCost => "unknown_cost",
             Self::ProductMutationBeforeRead => "product_mutation_before_read",
+            Self::OversizedUnsealedTranscript => "oversized_unsealed_transcript",
             Self::WaitForCancellation => "wait_for_cancellation",
         }
     }
@@ -1404,6 +1431,13 @@ const required = packet.required_reads[0];
 const read = await call("workspace.read", { repository_relative_path: required.path });
 if (read.blake3 !== required.digest || read.canonical_path !== required.path) {
   throw new Error("wrapped required read did not return the pinned bytes");
+}
+if (FAKE_TERMINAL_MODE === "oversized_unsealed_transcript") {
+  await Deno.writeFile(
+    `${packet.staging_root}/session.ndjson`,
+    new Uint8Array(4 * 1024 * 1024 + 1).fill(65),
+  );
+  Deno.exit(0);
 }
 const completed = FAKE_TERMINAL_MODE === "completed" ||
   FAKE_TERMINAL_MODE === "completed_thousand_events";

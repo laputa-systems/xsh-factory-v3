@@ -1,6 +1,6 @@
 DENO_VERSION := 2.9.4
 
-.PHONY: cache check rust-check deno-check deno-version postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
+.PHONY: cache check rust-check deno-check deno-version factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
 
 cache:
 	deno task cache
@@ -20,6 +20,16 @@ deno-check: deno-version
 	deno task test
 
 check: rust-check deno-check
+
+# The credential is introduced only at the daemon process boundary. Callers
+# must choose the dedicated database and runtime root explicitly; this target
+# never starts a provider-backed actor on its own.
+factoryd-serve:
+	test -n "$$FACTORY_DATABASE_URL"
+	test -n "$$FACTORY_RUNTIME_ROOT"
+	vault OPENROUTER_API_KEY -- target/release/factoryd serve \
+		--database-url "$$FACTORY_DATABASE_URL" \
+		--runtime-root "$$FACTORY_RUNTIME_ROOT"
 
 postgres-test:
 	test -n "$$FACTORY_TEST_DATABASE_URL"

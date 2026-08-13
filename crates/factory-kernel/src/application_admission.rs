@@ -16,8 +16,7 @@ use sqlx::{Postgres, Transaction};
 use super::{
     ADMIT_APPLICATION_REVISION_OPERATION, APPLICATION_REVISION_SUBJECT, CasArtifact, CasStore,
     KernelStore, REGISTER_REPOSITORY_OPERATION, REPOSITORY_SUBJECT, RegisterRepository, StoreError,
-    aggregate_revision_from_sql, find_idempotent_audit, insert_audit_receipt,
-    require_subject_kind,
+    aggregate_revision_from_sql, find_idempotent_audit, insert_audit_receipt, require_subject_kind,
 };
 use crate::storage::ApplicationRevisionReceipt;
 

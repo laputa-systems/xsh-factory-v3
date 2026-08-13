@@ -226,6 +226,96 @@ Deno.test("Product submission custom tool exposes the closed proposal schema", (
   assert("narrative" in (schema.properties ?? {}));
 });
 
+Deno.test("Product submission names a safe correction for a rejected reproducer profile", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "invalid_json: the sealed reproducer command differs from its named admitted profile",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "Use the exact canonical JSON profile supplied in the assignment as the command artifact",
+  );
+});
+
+Deno.test("Product submission names the admitted profile after a profile-name rejection", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "invalid_json: Product named a reproducer profile that is not in the admitted application revision",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "Keep `reproducer.command` as the exact canonical JSON profile supplied in the assignment",
+  );
+});
+
+Deno.test("Product submission names the canonical command-profile artifact after its parser rejects", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "invalid_json: Product proposal contract is invalid: invalid_json: command bytes are not canonical V1 JSON or contain unknown fields",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "The sealed command artifact must be the canonical JSON profile",
+  );
+});
+
+Deno.test("Product submission corrects duplicate ticket contract-read paths", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "Product proposal contract is invalid: ticket contract reads paths must be unique",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "one `contract_reads` entry per repository path",
+  );
+});
+
+Deno.test("Product submission corrects an oversized ticket contract-read reason", async () => {
+  const client = new FramedActorClient({
+    exchange: () =>
+      Promise.reject(
+        new Error(
+          "Product proposal contract is invalid: ticket contract read reason: text is empty, oversized, or contains NUL",
+        ),
+      ),
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+
+  await assertRejects(
+    () => tool.sdk_definition.invoke({}),
+    Error,
+    "fit within 240 UTF-8 bytes",
+  );
+});
+
 Deno.test("Engineering and Quality adapters expose their exact closed tool schemas", () => {
   const client = new FramedActorClient({
     exchange: () => Promise.reject(new Error("not invoked while inspecting schema")),

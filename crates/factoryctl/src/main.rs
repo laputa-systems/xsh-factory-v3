@@ -1656,7 +1656,9 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
 
 fn discover_installation_root() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
-    candidates.push(env::current_dir().map_err(|error| format!("cannot read current directory: {error}"))?);
+    candidates.push(
+        env::current_dir().map_err(|error| format!("cannot read current directory: {error}"))?,
+    );
     if let Ok(executable) = env::current_exe() {
         if let Some(parent) = executable.parent() {
             candidates.push(parent.to_owned());
@@ -1688,7 +1690,11 @@ fn default_factoryd_executable() -> Result<PathBuf, String> {
     let parent = executable
         .parent()
         .ok_or_else(|| "factoryctl executable has no parent directory".to_owned())?;
-    let name = if cfg!(windows) { "factoryd.exe" } else { "factoryd" };
+    let name = if cfg!(windows) {
+        "factoryd.exe"
+    } else {
+        "factoryd"
+    };
     let sibling = parent.join(name);
     if sibling.is_file() {
         Ok(sibling)
@@ -1701,7 +1707,8 @@ fn default_factoryd_executable() -> Result<PathBuf, String> {
 }
 
 fn resolve_executable(name: &str) -> Result<PathBuf, String> {
-    let path = env::var_os("PATH").ok_or_else(|| format!("PATH is unavailable while resolving {name}"))?;
+    let path =
+        env::var_os("PATH").ok_or_else(|| format!("PATH is unavailable while resolving {name}"))?;
     for directory in env::split_paths(&path) {
         let candidate = directory.join(name);
         if candidate.is_file() {
@@ -1724,7 +1731,9 @@ fn closed_kernel_source_files(root: &Path) -> Result<Vec<String>, String> {
         "crates/factoryctl/Cargo.toml",
     ] {
         if !root.join(relative).is_file() {
-            return Err(format!("installation is missing required source file {relative}"));
+            return Err(format!(
+                "installation is missing required source file {relative}"
+            ));
         }
         files.push(relative.to_owned());
     }
@@ -1750,25 +1759,40 @@ fn closed_regular_file_inventory(root: &Path) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
-fn append_regular_files(root: &Path, directory: &Path, files: &mut Vec<String>) -> Result<(), String> {
+fn append_regular_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<String>,
+) -> Result<(), String> {
     let entries = fs::read_dir(directory)
         .map_err(|error| format!("cannot inventory {}: {error}", directory.display()))?;
     for entry in entries {
-        let entry = entry.map_err(|error| format!("cannot read source inventory entry: {error}"))?;
+        let entry =
+            entry.map_err(|error| format!("cannot read source inventory entry: {error}"))?;
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("source inventory refuses symlink {}", path.display()));
+            return Err(format!(
+                "source inventory refuses symlink {}",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
             append_regular_files(root, &path, files)?;
         } else if metadata.is_file() {
-            let relative = path.strip_prefix(root)
+            let relative = path
+                .strip_prefix(root)
                 .map_err(|_| format!("source path {} escaped its root", path.display()))?;
-            files.push(safe_relative(relative.to_string_lossy().into_owned(), "source inventory")?);
+            files.push(safe_relative(
+                relative.to_string_lossy().into_owned(),
+                "source inventory",
+            )?);
         } else {
-            return Err(format!("source inventory refuses non-regular entry {}", path.display()));
+            return Err(format!(
+                "source inventory refuses non-regular entry {}",
+                path.display()
+            ));
         }
     }
     Ok(())

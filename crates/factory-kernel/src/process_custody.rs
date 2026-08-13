@@ -33,7 +33,8 @@ use thiserror::Error;
 
 /// Environment names supplied by the kernel itself rather than by an
 /// application command or credential descriptor.
-const KERNEL_ENVIRONMENT_NAMES: [&str; 4] = ["DENO_DIR", "DENO_NO_UPDATE_CHECK", "NO_COLOR", "PATH"];
+const KERNEL_ENVIRONMENT_NAMES: [&str; 4] =
+    ["DENO_DIR", "DENO_NO_UPDATE_CHECK", "NO_COLOR", "PATH"];
 
 /// Immutable process inputs for one Deno Pi host.
 #[derive(Clone, Debug, PartialEq, Eq)]

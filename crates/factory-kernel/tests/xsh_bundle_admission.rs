@@ -388,10 +388,7 @@ async fn activate_xsh_revision(
     assert!(activation.is_active);
 }
 
-async fn assert_repository_binding_and_audit(
-    database_url: &str,
-    bundle: &ApplicationBundleV1,
-) {
+async fn assert_repository_binding_and_audit(database_url: &str, bundle: &ApplicationBundleV1) {
     let pool = PgPool::connect(database_url)
         .await
         .expect("open repository inspection connection");

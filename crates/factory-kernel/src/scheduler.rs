@@ -167,9 +167,9 @@ impl TicketScheduler {
         }
 
         // The bounded FIFO read must agree with the aggregate ready count
-        // before buffer pressure can choose Product over Engineering. A
-        // cross-query snapshot race therefore fails closed rather than
-        // discarding ready work or inventing another replenishment request.
+        // before choosing either a sponsored Engineering claim or Product
+        // replenishment. A cross-query snapshot race therefore fails closed
+        // rather than discarding ready work or inventing another request.
         match (status.ready_count, status.oldest_sponsored_ticket) {
             (0, Some(_)) => {
                 return SchedulerNextAction::Blocked(
@@ -183,18 +183,22 @@ impl TicketScheduler {
         }
 
         let expected_campaign_revision = ExpectedRevision::new(status.campaign_revision);
-        if status.ready_count < status.low_water && status.proposed_count == 0 {
-            return SchedulerNextAction::ReplenishProduct {
-                campaign_id: status.campaign_id,
-                expected_campaign_revision,
-            };
-        }
+        // A sponsored revision is the oldest approved delivery work. Claim it
+        // before refilling the discovery buffer: otherwise a low-water buffer
+        // can indefinitely spend the sole paid-session slot on Product while
+        // a ready implementation waits behind it.
         if let Some(ticket) = status.oldest_sponsored_ticket {
             return SchedulerNextAction::ClaimReadyTicket(ClaimReadyTicketAction {
                 campaign_id: status.campaign_id,
                 expected_campaign_revision,
                 ticket,
             });
+        }
+        if status.ready_count < status.low_water && status.proposed_count == 0 {
+            return SchedulerNextAction::ReplenishProduct {
+                campaign_id: status.campaign_id,
+                expected_campaign_revision,
+            };
         }
         if status.proposed_count > 0 {
             return SchedulerNextAction::AwaitArchitectDecision {
@@ -324,10 +328,15 @@ mod tests {
             oldest_sponsored_ticket: Some(ready_ticket(30, 4)),
             ..status()
         };
-        assert!(matches!(
+        assert_eq!(
             TicketScheduler::decide(&low),
-            SchedulerNextAction::ReplenishProduct { .. }
-        ));
+            SchedulerNextAction::ClaimReadyTicket(ClaimReadyTicketAction {
+                campaign_id: low.campaign_id,
+                expected_campaign_revision: ExpectedRevision::new(low.campaign_revision),
+                ticket: ready_ticket(30, 4),
+            }),
+            "a sponsored ready ticket is implementation work, not a reason to spend on buffer refill"
+        );
 
         let target = TicketBufferStatus {
             ready_count: 3,

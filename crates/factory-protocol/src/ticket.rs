@@ -20,7 +20,10 @@ pub const PRODUCT_TICKET_SCOPE_BYTE_LIMIT: usize = 4096;
 pub const PRODUCT_TICKET_CONTRACT_OWNER_BYTE_LIMIT: usize = 240;
 pub const PRODUCT_TICKET_RISK_BYTE_LIMIT: usize = 4096;
 pub const PRODUCT_TICKET_ACCEPTANCE_ITEM_BYTE_LIMIT: usize = 4096;
-pub const PRODUCT_TICKET_CONTRACT_READ_REASON_BYTE_LIMIT: usize = 4096;
+/// Ticket contract reads become exact assignment reads for downstream work,
+/// whose closed packet permits at most 240 bytes of reason text. Admission
+/// must reject a proposal that cannot later be materialized.
+pub const PRODUCT_TICKET_CONTRACT_READ_REASON_BYTE_LIMIT: usize = 240;
 pub const PRODUCT_TICKET_EVIDENCE_BYTE_LIMIT: u64 = 64 * 1024;
 pub const PRODUCT_REPRODUCER_COMMAND_BYTE_LIMIT: u64 = 64 * 1024;
 pub const PRODUCT_REPRODUCER_STDIN_BYTE_LIMIT: u64 = 256 * 1024;
@@ -405,5 +408,9 @@ mod tests {
         let mut invalid_search = proposal();
         invalid_search.duplicate_search.limit = 0;
         assert!(invalid_search.validate(&bounds()).is_err());
+
+        let mut materialization_safe_reason = proposal();
+        materialization_safe_reason.contract_reads[0].reason = "x".repeat(241);
+        assert!(materialization_safe_reason.validate(&bounds()).is_err());
     }
 }

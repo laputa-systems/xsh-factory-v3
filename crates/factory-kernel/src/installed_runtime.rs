@@ -2708,14 +2708,18 @@ mod tests {
             .find_map(|(name, value)| (name == OsStr::new("PATH")).then_some(value))
             .expect("kernel-owned actor PATH");
         let actor_directories = env::split_paths(actor_path).collect::<Vec<_>>();
-        assert!(actor_directories.contains(
-            &fs::canonicalize(fixture.cargo.parent().expect("Cargo parent"))
-                .expect("canonical Cargo parent")
-        ));
-        assert!(actor_directories.contains(
-            &fs::canonicalize(fixture.git.parent().expect("Git parent"))
-                .expect("canonical Git parent")
-        ));
+        assert!(
+            actor_directories.contains(
+                &fs::canonicalize(fixture.cargo.parent().expect("Cargo parent"))
+                    .expect("canonical Cargo parent")
+            )
+        );
+        assert!(
+            actor_directories.contains(
+                &fs::canonicalize(fixture.git.parent().expect("Git parent"))
+                    .expect("canonical Git parent")
+            )
+        );
         assert!(
             restored
                 .pi_host_spawn_spec_for_provider(

@@ -1,4 +1,4 @@
-import { assert, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import { type ApplicationBundleV1, defineApplicationV1 } from "@factory/sdk";
 
@@ -29,6 +29,16 @@ Deno.test("defineApplicationV1 rejects unrecognized fields instead of carrying m
     unexpected: "not admitted",
   } as unknown as ApplicationBundleV1;
   assertThrows(() => defineApplicationV1(withUnknown), TypeError, "unknown");
+});
+
+Deno.test("Deno test task limits discovery to factory-owned test roots", () => {
+  const config = JSON.parse(
+    Deno.readTextFileSync(new URL("../deno.json", import.meta.url)),
+  ) as { tasks?: Record<string, unknown> };
+  assertEquals(
+    config.tasks?.test,
+    "deno test -A --no-prompt --frozen --cached-only applications/xsh packages/factory-sdk packages/factory-pi-host tests tools",
+  );
 });
 
 function collectTypeScriptSources(root: string): readonly string[] {

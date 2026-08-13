@@ -21,9 +21,9 @@ use factory_protocol::{
     AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentEvidenceWireV1, AssignmentId,
     AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1, AssignmentPacketWireV1,
     AssignmentReadWireV1, AssignmentRuntimeWireV1, CampaignId, ContentDigest, ExpectedRevision,
-    MicroUsd, Office, ReadExactFileV1, SealedArtifactReferenceV1, TerminalOperationV1,
-    canonical_assignment_packet_json_v1, parse_application_bundle_v1, render_template_v1,
-    unsigned_assignment_packet_digest_v1,
+    MicroUsd, Office, ReadExactFileV1, RequiredReadV1, SealedArtifactReferenceV1,
+    TerminalOperationV1, TicketContractReadV1, canonical_assignment_packet_json_v1,
+    parse_application_bundle_v1, render_template_v1, unsigned_assignment_packet_digest_v1,
 };
 use thiserror::Error;
 
@@ -179,7 +179,11 @@ pub async fn materialize_and_launch_assignment(
     )
     .await?;
 
-    let required_reads = exact_required_reads(&context, workspace.path())?;
+    let required_reads = exact_required_reads(
+        &context.application_required_reads,
+        &context.ticket_contract_reads,
+        workspace.path(),
+    )?;
     let required_manifest_bytes = canonical_required_manifest(&required_reads);
     let required_manifest = register_kernel_bytes(
         &process,
@@ -567,23 +571,26 @@ fn checked_template_bytes(
 }
 
 fn exact_required_reads(
-    context: &DurableAssignmentLaunchContext,
+    application_required_reads: &[RequiredReadV1],
+    ticket_contract_reads: &[TicketContractReadV1],
     workspace: &Path,
 ) -> Result<Vec<ReadExactFileV1>, AssignmentRuntimeError> {
     let mut values = Vec::new();
-    for read in &context.application_required_reads {
+    for read in application_required_reads {
         values.push((read.path.clone(), read.reason.clone()));
     }
-    for read in &context.ticket_contract_reads {
+    for read in ticket_contract_reads {
         values.push((read.path.clone(), read.reason.clone()));
     }
     let mut paths = BTreeSet::new();
     let mut result = Vec::with_capacity(values.len());
     for (path, reason) in values {
         if !paths.insert(path.clone()) {
-            return Err(AssignmentRuntimeError::Application(
-                "application and ticket required reads overlap".to_owned(),
-            ));
+            // Each source is admitted with unique paths. Across sources, the
+            // same materialized file is one exact read obligation, not an
+            // inconsistency: the application wording wins deterministically
+            // and its digest proves both the application and ticket contract.
+            continue;
         }
         result.push(ReadExactFileV1 {
             digest: WorkspaceReadAuthority::digest_materialized_required_read(
@@ -1306,6 +1313,7 @@ fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{env, fs};
 
     #[test]
     fn target_evidence_uses_neutral_external_decision_vocabulary() {
@@ -1322,5 +1330,39 @@ mod tests {
             !rendered.to_ascii_lowercase().contains("architect"),
             "worker-visible TARGET leaked authority vocabulary: {rendered}"
         );
+    }
+
+    #[test]
+    fn exact_required_reads_reuses_an_application_read_for_the_same_ticket_contract_path() {
+        let workspace = env::temp_dir().join(format!(
+            "factory-assignment-required-reads-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(workspace.join("docs")).unwrap();
+        fs::write(workspace.join("docs/contract.md"), b"the exact contract").unwrap();
+        let workspace = fs::canonicalize(workspace).unwrap();
+        let path = factory_protocol::RepositoryRelativePath::parse("docs/contract.md").unwrap();
+
+        let reads = exact_required_reads(
+            &[RequiredReadV1 {
+                path: path.clone(),
+                reason: "application orientation".to_owned(),
+            }],
+            &[TicketContractReadV1 {
+                path,
+                reason: "ticket acceptance contract".to_owned(),
+            }],
+            &workspace,
+        )
+        .unwrap();
+
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].path.as_str(), "docs/contract.md");
+        assert_eq!(reads[0].reason, "application orientation");
+        fs::remove_dir_all(workspace).unwrap();
     }
 }
