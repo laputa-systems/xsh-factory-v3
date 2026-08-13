@@ -60,7 +60,7 @@ fn real_xsh_bundle_compiles_twice_and_admits_through_typed_cas_authority() {
         store
             .migrate_and_verify()
             .await
-            .expect("migrate fresh PostgreSQL v12 fixture");
+            .expect("migrate canonical fresh PostgreSQL fixture");
 
         let cas = CasStore::new_with_seed(root.join("runtime"), 4 * 1024 * 1024, 17)
             .expect("create isolated CAS");

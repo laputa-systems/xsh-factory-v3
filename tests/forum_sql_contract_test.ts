@@ -2,8 +2,8 @@ function source(path: string): string {
   return Deno.readTextFileSync(new URL(`../${path}`, import.meta.url));
 }
 
-Deno.test("Forum forward migration has four immutable, indexed text owners", () => {
-  const sql = source("schema/migrations/0002_forum.sql");
+Deno.test("Canonical schema has four immutable, indexed Forum text owners", () => {
+  const sql = source("schema/migrations/0001_initial_authority.sql");
   for (const table of ["forum_topics", "forum_threads", "forum_posts", "forum_attachments"]) {
     if (!sql.includes(`CREATE TABLE factory.${table}`)) throw new Error(`missing ${table}`);
   }

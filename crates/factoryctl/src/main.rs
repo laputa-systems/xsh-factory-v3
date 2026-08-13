@@ -2959,7 +2959,7 @@ mod tests {
             }) if factoryd == PathBuf::from("/opt/factory/bin/factoryd")
                 && kernel_source_root == fs::canonicalize(installation_root()).expect("canonical installation")
                 && kernel_source_files.contains(&"Cargo.lock".to_owned())
-                && kernel_source_files.contains(&"schema/migrations/0013_campaign_failure_reason.sql".to_owned())
+                && kernel_source_files.contains(&"schema/migrations/0001_initial_authority.sql".to_owned())
                 && kernel_source_files.contains(&"crates/factoryd/src/main.rs".to_owned())
                 && pi_host_source_root == installation_root().join("packages")
                 && pi_host_source_files.contains(&"factory-pi-host/main.ts".to_owned())

@@ -9,7 +9,7 @@ simplifications that the implementation must preserve while adding Tranches
 ## Measured shape at the gate
 
 - The Rust workspace still has exactly four crates.
-- PostgreSQL has 15 Factory-owned tables after the ticket-buffer migration.
+- PostgreSQL has the fixed 20 Factory-owned tables in one canonical fresh-schema migration.
 - The generic Rust source remains below the 20,000 non-test-line review
   threshold, but the remaining vertical slice would cross it without an
   explicit constraint.
@@ -17,7 +17,7 @@ simplifications that the implementation must preserve while adding Tranches
 - There is no HTTP stack, ORM, workflow framework, application callback, or
   internal event bus.
 
-The initial migration now records the fixed seven application templates as
+The canonical migration records the fixed seven application templates as
 named artifact foreign keys on `application_revisions`. The former generic
 `application_revision_templates` relation is intentionally absent. With the
 three ticket tables added in Tranche 6, the remaining candidate, validation,

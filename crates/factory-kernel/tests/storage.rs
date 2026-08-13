@@ -36,6 +36,26 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("idempotent migrate");
         store.verify_schema_identity().await.expect("identity");
+        let inspection = sqlx::PgPool::connect(&test_database_url())
+            .await
+            .expect("connect schema inspection pool");
+        let migration_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM _sqlx_migrations",
+        )
+        .fetch_one(&inspection)
+        .await
+        .expect("canonical migration count");
+        assert_eq!(migration_count, 1, "fresh V3 uses one canonical migration");
+        let table_count: i64 = sqlx::query_scalar(
+            "SELECT count(*)
+             FROM information_schema.tables
+             WHERE table_schema = 'factory' AND table_type = 'BASE TABLE'",
+        )
+        .fetch_one(&inspection)
+        .await
+        .expect("Factory table count");
+        assert_eq!(table_count, 20, "the schema retains the fixed table budget");
+        inspection.close().await;
         let before = store.kernel_build_status().await.expect("read-only status");
         let application = store
             .application_status(&ApplicationKey::parse(unique("read")).expect("key"))
@@ -223,9 +243,9 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             })
             .await
             .expect("activate application");
-        // The initial migration is fresh-only. Its fixed seven-template shape
-        // must admit the first revision without a child relation, preserving
-        // room for all twenty purpose-specific MVP tables.
+        // The canonical fresh schema stores seven fixed templates directly on
+        // the application revision, preserving room for the twenty-purpose-
+        // specific-table MVP budget without a child relation.
         let inspection = sqlx::PgPool::connect(&test_database_url())
             .await
             .expect("read-only schema inspection pool");

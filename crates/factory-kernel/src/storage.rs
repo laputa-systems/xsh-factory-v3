@@ -20,8 +20,8 @@ use sqlx::{
 };
 use thiserror::Error;
 
-/// Comment installed on the factory-owned schema by the first migration.
-pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:initial-authority-v13";
+/// Comment installed on the factory-owned schema by the canonical migration.
+pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:initial-authority-v1";
 
 /// A fixed kernel-local key. PostgreSQL holds it per connection until explicit
 /// release or connection death, so a daemon restart cannot inherit a stale lock.
@@ -68,7 +68,7 @@ impl KernelStore {
         Ok(Self { pool })
     }
 
-    /// Applies the one forward-only migration lineage then proves its schema
+    /// Applies the canonical migration then proves its schema
     /// identity comment. A binary that sees another schema fails before serving.
     pub async fn migrate_and_verify(&self) -> Result<(), StoreError> {
         self.verify_postgres_baseline().await?;

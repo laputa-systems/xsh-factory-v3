@@ -288,7 +288,7 @@ async function databaseFingerprint(psqlPath: string, databaseUrl: string): Promi
   // This deliberately records logical catalog shape, not deparsed CHECK/index
   // expressions: PostgreSQL may remove redundant parse-tree parentheses while
   // restoring semantically identical DDL. The authoritative schema identity
-  // and SQLx migration rows below retain the exact admitted migration lineage.
+  // and canonical SQLx migration row below retain the admitted schema.
   appendFingerprintPart(
     parts,
     "schema",

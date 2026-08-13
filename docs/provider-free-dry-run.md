@@ -135,7 +135,7 @@ The check invokes `pg_dump --format=custom`, `pg_restore --exit-on-error` into t
 and the ignored Rust restore-integrity judge. That judge rechecks schema identity, audit/material
 consistency, every artifact's canonical CAS object/digest/length, and reloads the restored current
 installed-build receipt to requalify its local host source, tools, and frozen Deno cache. The Deno
-wrapper fingerprints stable logical schema shape and identity, exact SQLx migration rows, every
+wrapper fingerprints stable logical schema shape and identity, the canonical SQLx migration row, every
 logical table row, and exact sequence values for the source and clone databases, plus every
 source/clone CAS path, byte length, and file digest, with SHA-256 before and after. It first requires
 the restored database and CAS to equal the source pair. It deliberately excludes deparsed DDL
