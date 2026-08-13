@@ -4,8 +4,10 @@
 //! not proof that those bytes still exist on this host. This module retains a
 //! finite installed manifest and rechecks it immediately before a host is
 //! spawned. It deliberately has no HTTP, package resolver, ambient-home, or
-//! provider path: dependency acquisition is an installation-time effect, and
-//! the only Deno probe here is `check --frozen --cached-only`.
+//! provider path: dependency acquisition is an installation-time effect.
+//! Qualification records Deno's actual `info --json` graph; later preflight
+//! executes one explicit inert module with Deno's supported `--cached-only`
+//! graph/typecheck path and never asks Deno to acquire dependencies.
 
 use std::{
     collections::BTreeSet,
@@ -36,20 +38,26 @@ use crate::{
 };
 
 const MAX_SOURCE_GRAPH_FILES: usize = 1_024;
+/// The Pi host root is intentionally small and closed. Qualification inventories
+/// every local file below it, so a future local import cannot be omitted from
+/// the packet-visible source graph.
+const MAX_HOST_SOURCE_GRAPH_FILES: usize = 256;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
 const SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-installed-source-graph-v1\0";
 const KERNEL_SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-kernel-source-graph-v1\0";
 const KERNEL_BUILD_DOMAIN: &[u8] = b"factory-v3-kernel-build-v1\0";
-const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-v2\0";
+const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-v3\0";
 const MAX_RECEIPT_BYTES: usize = 256 * 1024;
 const OPENROUTER_PROVIDER: &str = "openrouter";
 
 /// Explicit installation inputs for one immutable Deno/Pi runtime.
 ///
 /// This is kernel/operator input during a stopped-daemon deployment, never an
-/// actor wire request. `host_source_files` is the qualified static local graph
-/// for the generic host; remote/npm resolution belongs to the separately
-/// sealed `dependency_graph_receipt` and frozen `DENO_DIR` probe.
+/// actor wire request. `host_source_files` must enumerate the complete regular
+/// file inventory under `host_source_root`; an omitted local import is a
+/// qualification error. The cache probe is an explicit source-relative module
+/// with no host startup action (normally `factory-pi-host/mod.ts`); it proves
+/// the already-qualified graph/typecheck is available from the sealed cache.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledRuntimeQualification {
     pub deno_executable: PathBuf,
@@ -59,7 +67,7 @@ pub struct InstalledRuntimeQualification {
     pub deno_lock: PathBuf,
     pub deno_dir: PathBuf,
     pub host_source_files: Vec<RuntimeRelativePath>,
-    pub dependency_graph_receipt: PathBuf,
+    pub cache_probe_module: RuntimeRelativePath,
     pub pi_version: String,
 }
 
@@ -836,8 +844,8 @@ pub struct InstalledRuntimeManifest {
     source_graph_digest: ContentDigest,
     deno_json_digest: ContentDigest,
     deno_lock_digest: ContentDigest,
-    dependency_graph_receipt: PathBuf,
     resolved_dependency_graph_digest: ContentDigest,
+    cache_probe_module: RuntimeRelativePath,
     pi_version: String,
 }
 
@@ -845,10 +853,10 @@ impl InstalledRuntimeManifest {
     /// Qualifies the exact local Deno/Pi material used by a stopped daemon.
     ///
     /// Qualification captures Deno's complete version output, seals every
-    /// explicit host-source file, seals config/lock/graph-receipt bytes, and
-    /// proves the graph loads from the build-specific cache without network
-    /// acquisition. The returned manifest re-runs those cheap local checks at
-    /// each paid session launch, so post-install drift blocks admission.
+    /// explicit host-source file, and canonicalizes Deno's actual resolved
+    /// module graph under the build-specific cache. It may populate that cache
+    /// while the daemon is stopped. Later verification is strictly cached-only
+    /// and never starts the Pi host entrypoint.
     pub fn qualify(
         qualification: InstalledRuntimeQualification,
     ) -> Result<Self, InstalledRuntimeError> {
@@ -856,10 +864,10 @@ impl InstalledRuntimeManifest {
         if qualification.host_source_files.is_empty() {
             return Err(InstalledRuntimeError::EmptySourceGraph);
         }
-        if qualification.host_source_files.len() > MAX_SOURCE_GRAPH_FILES {
+        if qualification.host_source_files.len() > MAX_HOST_SOURCE_GRAPH_FILES {
             return Err(InstalledRuntimeError::SourceGraphTooLarge {
                 actual: qualification.host_source_files.len(),
-                maximum: MAX_SOURCE_GRAPH_FILES,
+                maximum: MAX_HOST_SOURCE_GRAPH_FILES,
             });
         }
 
@@ -875,11 +883,6 @@ impl InstalledRuntimeManifest {
         let deno_config = canonical_regular_file("Deno config", &qualification.deno_config)?;
         let deno_lock = canonical_regular_file("Deno lock", &qualification.deno_lock)?;
         let deno_dir = canonical_directory("DENO_DIR", &qualification.deno_dir)?;
-        let dependency_graph_receipt = canonical_regular_file(
-            "resolved dependency-graph receipt",
-            &qualification.dependency_graph_receipt,
-        )?;
-
         let (source_files, source_graph_digest) =
             seal_source_graph(&host_source_root, qualification.host_source_files)?;
         let entrypoint_relative = host_entrypoint
@@ -894,12 +897,27 @@ impl InstalledRuntimeManifest {
         {
             return Err(InstalledRuntimeError::EntrypointNotInSourceGraph);
         }
+        if !source_files
+            .iter()
+            .any(|file| file.relative_path == qualification.cache_probe_module)
+        {
+            return Err(InstalledRuntimeError::CacheProbeNotInSourceGraph);
+        }
+        if qualification.cache_probe_module == entrypoint_relative {
+            return Err(InstalledRuntimeError::CacheProbeIsHostEntrypoint);
+        }
 
         let deno_json_digest = digest_regular_file("Deno config", &deno_config)?;
         let deno_lock_digest = digest_regular_file("Deno lock", &deno_lock)?;
-        let resolved_dependency_graph_digest = digest_regular_file(
-            "resolved dependency-graph receipt",
-            &dependency_graph_receipt,
+        let resolved_dependency_graph_digest = qualify_deno_module_graph(
+            &deno_executable,
+            &host_source_root,
+            &host_entrypoint,
+            &deno_config,
+            &deno_lock,
+            &deno_dir,
+            &source_files,
+            false,
         )?;
         let (deno_version, deno_version_output) = run_deno_version(&deno_executable)?;
 
@@ -916,8 +934,8 @@ impl InstalledRuntimeManifest {
             source_graph_digest,
             deno_json_digest,
             deno_lock_digest,
-            dependency_graph_receipt,
             resolved_dependency_graph_digest,
+            cache_probe_module: qualification.cache_probe_module,
             pi_version: qualification.pi_version,
         };
         manifest.verify_installed_material()?;
@@ -966,11 +984,10 @@ impl InstalledRuntimeManifest {
         &self.deno_dir
     }
 
-    /// Canonical receipt for the resolved frozen dependency graph. The receipt
-    /// contains dependency identity only; credential bytes never enter it.
+    /// The explicit safe module used only for cached graph/typecheck preflight.
     #[must_use]
-    pub fn dependency_graph_receipt(&self) -> &Path {
-        &self.dependency_graph_receipt
+    pub fn cache_probe_module(&self) -> &RuntimeRelativePath {
+        &self.cache_probe_module
     }
 
     #[must_use]
@@ -1064,8 +1081,8 @@ impl InstalledRuntimeManifest {
         append_receipt_bytes(bytes, &self.source_graph_digest.as_bytes())?;
         append_receipt_bytes(bytes, &self.deno_json_digest.as_bytes())?;
         append_receipt_bytes(bytes, &self.deno_lock_digest.as_bytes())?;
-        append_receipt_path(bytes, &self.dependency_graph_receipt)?;
         append_receipt_bytes(bytes, &self.resolved_dependency_graph_digest.as_bytes())?;
+        append_receipt_text(bytes, self.cache_probe_module.as_str())?;
         append_receipt_text(bytes, &self.pi_version)
     }
 
@@ -1120,8 +1137,12 @@ impl InstalledRuntimeManifest {
         }
         let deno_json_digest = cursor.digest()?;
         let deno_lock_digest = cursor.digest()?;
-        let dependency_graph_receipt = cursor.absolute_path("resolved dependency-graph receipt")?;
         let resolved_dependency_graph_digest = cursor.digest()?;
+        let cache_probe_module =
+            RuntimeRelativePath::parse(cursor.bounded_text("Pi host cache probe module", 4_096)?)
+                .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                reason: "Pi host cache probe module is invalid",
+            })?;
         let pi_version = cursor.text("Pi SDK version")?;
         validate_text("Deno version", &deno_version)?;
         validate_text("Pi SDK version", &pi_version)?;
@@ -1150,6 +1171,19 @@ impl InstalledRuntimeManifest {
                 reason: "Pi host entrypoint is absent from source graph",
             });
         }
+        if !source_files
+            .iter()
+            .any(|file| file.relative_path == cache_probe_module)
+        {
+            return Err(InstalledRuntimeError::ReceiptInvalid {
+                reason: "Pi host cache probe module is absent from source graph",
+            });
+        }
+        if cache_probe_module == entrypoint_relative {
+            return Err(InstalledRuntimeError::ReceiptInvalid {
+                reason: "Pi host cache probe must not be the host entrypoint",
+            });
+        }
         Ok(Self {
             deno_executable,
             deno_version,
@@ -1163,8 +1197,8 @@ impl InstalledRuntimeManifest {
             source_graph_digest,
             deno_json_digest,
             deno_lock_digest,
-            dependency_graph_receipt,
             resolved_dependency_graph_digest,
+            cache_probe_module,
             pi_version,
         })
     }
@@ -1207,15 +1241,6 @@ impl InstalledRuntimeManifest {
                 evidence: "canonical DENO_DIR path changed",
             });
         }
-        if canonical_regular_file(
-            "resolved dependency-graph receipt",
-            &self.dependency_graph_receipt,
-        )? != self.dependency_graph_receipt
-        {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical resolved dependency-graph receipt path changed",
-            });
-        }
         if digest_regular_file("Deno config", &self.deno_config)? != self.deno_json_digest {
             return Err(InstalledRuntimeError::RuntimeDrift {
                 evidence: "Deno config digest changed",
@@ -1224,15 +1249,6 @@ impl InstalledRuntimeManifest {
         if digest_regular_file("Deno lock", &self.deno_lock)? != self.deno_lock_digest {
             return Err(InstalledRuntimeError::RuntimeDrift {
                 evidence: "Deno lock digest changed",
-            });
-        }
-        if digest_regular_file(
-            "resolved dependency-graph receipt",
-            &self.dependency_graph_receipt,
-        )? != self.resolved_dependency_graph_digest
-        {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "resolved dependency-graph receipt digest changed",
             });
         }
         let source_paths = self
@@ -1253,7 +1269,28 @@ impl InstalledRuntimeManifest {
                 evidence: "exact Deno --version output changed",
             });
         }
-        run_frozen_cache_probe(self)
+        run_frozen_cache_probe(self)?;
+        // The cached-only probe above makes a cache miss fail before this
+        // `info --no-remote` observation. With the complete graph already
+        // proven cache-resident, Deno cannot acquire npm/jsr/remote material;
+        // this re-derives the canonical graph identity instead of merely
+        // testing that some cache files exist.
+        let observed_dependency_graph_digest = qualify_deno_module_graph(
+            &self.deno_executable,
+            &self.host_source_root,
+            &self.host_entrypoint,
+            &self.deno_config,
+            &self.deno_lock,
+            &self.deno_dir,
+            &self.source_files,
+            true,
+        )?;
+        if observed_dependency_graph_digest != self.resolved_dependency_graph_digest {
+            return Err(InstalledRuntimeError::RuntimeDrift {
+                evidence: "Deno resolved dependency graph digest changed",
+            });
+        }
+        Ok(())
     }
 
     fn verify_packet_bytes(
@@ -1370,6 +1407,7 @@ fn seal_source_graph(
     source_root: &Path,
     source_paths: Vec<RuntimeRelativePath>,
 ) -> Result<(Vec<InstalledSourceFile>, ContentDigest), InstalledRuntimeError> {
+    require_complete_host_source_inventory(source_root, &source_paths)?;
     let mut seen = BTreeSet::new();
     let mut files = Vec::with_capacity(source_paths.len());
     for relative_path in source_paths {
@@ -1417,7 +1455,7 @@ fn normalize_host_source_files(
 fn source_graph_digest_for(
     files: &[InstalledSourceFile],
 ) -> Result<ContentDigest, InstalledRuntimeError> {
-    if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
+    if files.is_empty() || files.len() > MAX_HOST_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::ReceiptInvalid {
             reason: "Pi host source graph count is invalid",
         });
@@ -1435,6 +1473,124 @@ fn source_graph_digest_for(
         hasher.update(&file.digest.as_bytes());
     }
     Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
+}
+
+/// Proves that the declared source graph closes every local filesystem input
+/// available under the host root. Deno can resolve a new local import during a
+/// preflight check, so hashing only an operator-provided subset would make the
+/// source-graph receipt dishonest. This deliberately overbinds harmless local
+/// files such as tests and package metadata; the installed host root should be
+/// kept narrow (normally repository `packages/`).
+fn require_complete_host_source_inventory(
+    source_root: &Path,
+    declared: &[RuntimeRelativePath],
+) -> Result<(), InstalledRuntimeError> {
+    let mut declared_paths = BTreeSet::new();
+    for path in declared {
+        if !declared_paths.insert(path.as_str().to_owned()) {
+            return Err(InstalledRuntimeError::DuplicateSourceGraphPath {
+                path: path.as_str().to_owned(),
+            });
+        }
+    }
+    let inventory = inventory_host_source_root(source_root)?;
+    let inventory_paths = inventory
+        .iter()
+        .map(|path| path.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    if let Some(path) = inventory_paths.difference(&declared_paths).next() {
+        return Err(InstalledRuntimeError::UndeclaredSourceFile {
+            path: path.to_owned(),
+        });
+    }
+    if let Some(path) = declared_paths.difference(&inventory_paths).next() {
+        return Err(InstalledRuntimeError::DeclaredSourceFileMissing {
+            path: path.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn inventory_host_source_root(
+    source_root: &Path,
+) -> Result<Vec<RuntimeRelativePath>, InstalledRuntimeError> {
+    let mut paths = Vec::new();
+    inventory_host_source_directory(source_root, source_root, &mut paths)?;
+    if paths.is_empty() {
+        return Err(InstalledRuntimeError::EmptySourceGraph);
+    }
+    if paths.len() > MAX_HOST_SOURCE_GRAPH_FILES {
+        return Err(InstalledRuntimeError::SourceGraphTooLarge {
+            actual: paths.len(),
+            maximum: MAX_HOST_SOURCE_GRAPH_FILES,
+        });
+    }
+    paths.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    Ok(paths)
+}
+
+fn inventory_host_source_directory(
+    source_root: &Path,
+    directory: &Path,
+    paths: &mut Vec<RuntimeRelativePath>,
+) -> Result<(), InstalledRuntimeError> {
+    let entries = fs::read_dir(directory).map_err(|source| InstalledRuntimeError::Read {
+        field: "Pi host source directory",
+        path: directory.to_owned(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| InstalledRuntimeError::Read {
+            field: "Pi host source directory",
+            path: directory.to_owned(),
+            source,
+        })?;
+        let path = entry.path();
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|source| InstalledRuntimeError::Metadata {
+                field: "Pi host source-root entry",
+                path: path.clone(),
+                source,
+            })?;
+        if metadata.file_type().is_symlink() {
+            return Err(InstalledRuntimeError::SourceGraphSymlink { path });
+        }
+        if metadata.is_dir() {
+            let canonical = canonical_directory("Pi host source directory", &path)?;
+            if !canonical.starts_with(source_root) {
+                return Err(InstalledRuntimeError::SourceFileOutsideRoot {
+                    path: canonical.to_string_lossy().to_string(),
+                });
+            }
+            inventory_host_source_directory(source_root, &canonical, paths)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(InstalledRuntimeError::NotRegularFile {
+                field: "Pi host source-root entry",
+                path,
+            });
+        }
+        let canonical = canonical_regular_file("Pi host source file", &path)?;
+        let relative = canonical.strip_prefix(source_root).map_err(|_| {
+            InstalledRuntimeError::SourceFileOutsideRoot {
+                path: canonical.to_string_lossy().to_string(),
+            }
+        })?;
+        let relative =
+            relative
+                .to_str()
+                .ok_or_else(|| InstalledRuntimeError::SourceGraphPathInvalid {
+                    path: relative.to_string_lossy().to_string(),
+                })?;
+        let relative = RuntimeRelativePath::parse(relative.to_owned()).map_err(|_| {
+            InstalledRuntimeError::SourceGraphPathInvalid {
+                path: relative.to_owned(),
+            }
+        })?;
+        paths.push(relative);
+    }
+    Ok(())
 }
 
 fn normalize_kernel_source_files(
@@ -1790,30 +1946,150 @@ fn run_deno_version(
 fn run_frozen_cache_probe(
     manifest: &InstalledRuntimeManifest,
 ) -> Result<(), InstalledRuntimeError> {
+    let cache_probe = manifest
+        .host_source_root
+        .join(manifest.cache_probe_module.as_str());
     let output = exact_deno_command(&manifest.deno_executable)
         .env("DENO_DIR", &manifest.deno_dir)
         .current_dir(&manifest.host_source_root)
-        .arg("check")
+        // Deno 2.9 does not accept `--cached-only` for `check`, but it does
+        // for `run --check`. The qualified probe module is intentionally not
+        // the host entrypoint, so this proves the full graph/typecheck cache
+        // without binding FD0 or starting a Pi actor.
+        .arg("run")
+        .arg("--check")
         .arg("--frozen")
         .arg("--cached-only")
         .arg("--config")
         .arg(&manifest.deno_config)
         .arg("--lock")
         .arg(&manifest.deno_lock)
-        .arg(&manifest.host_entrypoint)
+        .arg(cache_probe)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: "check --frozen --cached-only",
+            operation: "run --check --frozen --cached-only",
             source,
         })?;
-    if output.success() {
-        Ok(())
-    } else {
-        Err(InstalledRuntimeError::FrozenCacheProbeFailed {
+    if !output.success() {
+        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
             status: output.code(),
-        })
+        });
+    }
+    Ok(())
+}
+
+/// Captures Deno's actual resolved graph while installation is allowed to
+/// populate the exact build-specific cache. It does not trust an operator
+/// declaration for the packet's dependency identity. The graph is serialized
+/// from miniserde's ordered JSON object representation before hashing, so
+/// whitespace and object key order do not change the durable digest.
+fn qualify_deno_module_graph(
+    deno_executable: &Path,
+    host_source_root: &Path,
+    host_entrypoint: &Path,
+    deno_config: &Path,
+    deno_lock: &Path,
+    deno_dir: &Path,
+    source_files: &[InstalledSourceFile],
+    cached_only_reverify: bool,
+) -> Result<ContentDigest, InstalledRuntimeError> {
+    let mut command = exact_deno_command(deno_executable);
+    command
+        .env("DENO_DIR", deno_dir)
+        .current_dir(host_source_root)
+        .arg("info")
+        .arg("--json")
+        .arg("--frozen");
+    if cached_only_reverify {
+        command.arg("--no-remote");
+    }
+    let output = command
+        .arg("--config")
+        .arg(deno_config)
+        .arg("--lock")
+        .arg(deno_lock)
+        .arg(host_entrypoint)
+        .output()
+        .map_err(|source| InstalledRuntimeError::DenoCommand {
+            operation: if cached_only_reverify {
+                "info --json --frozen --no-remote"
+            } else {
+                "info --json --frozen"
+            },
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
+            status: output.status.code(),
+        });
+    }
+    if output.stdout.len() > MAX_RECEIPT_BYTES {
+        return Err(InstalledRuntimeError::DenoModuleGraphTooLarge);
+    }
+    let graph: miniserde::json::Value = miniserde::json::from_str(
+        std::str::from_utf8(&output.stdout)
+            .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?,
+    )
+    .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?;
+    let modules = object_array_field(&graph, "modules")?;
+    let declared = source_files
+        .iter()
+        .map(|source| source.relative_path.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    for module in modules {
+        let specifier = object_string_field(module, "specifier")?;
+        if !specifier.starts_with("file:") {
+            continue;
+        }
+        let local = object_string_field(module, "local")?;
+        let local = PathBuf::from(local);
+        let canonical = canonical_regular_file("Deno local module", &local)?;
+        let relative = canonical.strip_prefix(host_source_root).map_err(|_| {
+            InstalledRuntimeError::DenoLocalModuleOutsideSourceRoot {
+                path: canonical.clone(),
+            }
+        })?;
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| InstalledRuntimeError::DenoModuleGraphInvalid)?;
+        let relative = RuntimeRelativePath::parse(relative.to_owned())
+            .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?;
+        if !declared.contains(relative.as_str()) {
+            return Err(InstalledRuntimeError::DenoLocalModuleUndeclared {
+                path: relative.as_str().to_owned(),
+            });
+        }
+    }
+    Ok(ContentDigest::of_bytes(
+        miniserde::json::to_string(&graph).as_bytes(),
+    ))
+}
+
+fn object_array_field<'a>(
+    value: &'a miniserde::json::Value,
+    field: &'static str,
+) -> Result<&'a miniserde::json::Array, InstalledRuntimeError> {
+    let miniserde::json::Value::Object(object) = value else {
+        return Err(InstalledRuntimeError::DenoModuleGraphInvalid);
+    };
+    match object.get(field) {
+        Some(miniserde::json::Value::Array(array)) => Ok(array),
+        _ => Err(InstalledRuntimeError::DenoModuleGraphInvalid),
+    }
+}
+
+fn object_string_field<'a>(
+    value: &'a miniserde::json::Value,
+    field: &'static str,
+) -> Result<&'a str, InstalledRuntimeError> {
+    let miniserde::json::Value::Object(object) = value else {
+        return Err(InstalledRuntimeError::DenoModuleGraphInvalid);
+    };
+    match object.get(field) {
+        Some(miniserde::json::Value::String(value)) if !value.is_empty() => Ok(value),
+        _ => Err(InstalledRuntimeError::DenoModuleGraphInvalid),
     }
 }
 
@@ -1961,6 +2237,18 @@ pub enum InstalledRuntimeError {
     #[error("Pi host source graph repeats {path:?}")]
     DuplicateSourceGraphPath { path: String },
 
+    #[error("Pi host source root contains undeclared regular file {path:?}")]
+    UndeclaredSourceFile { path: String },
+
+    #[error("Pi host source graph declares absent regular file {path:?}")]
+    DeclaredSourceFileMissing { path: String },
+
+    #[error("Pi host source root contains a symlink at {path:?}")]
+    SourceGraphSymlink { path: PathBuf },
+
+    #[error("Pi host source path {path:?} is not a valid safe relative path")]
+    SourceGraphPathInvalid { path: String },
+
     #[error("Pi host source file {path:?} resolves outside the qualified source root")]
     SourceFileOutsideRoot { path: String },
 
@@ -1972,6 +2260,12 @@ pub enum InstalledRuntimeError {
 
     #[error("Pi host entrypoint is absent from the qualified source graph")]
     EntrypointNotInSourceGraph,
+
+    #[error("Pi host cache probe module is absent from the qualified source graph")]
+    CacheProbeNotInSourceGraph,
+
+    #[error("Pi host cache probe module must not be the actor host entrypoint")]
+    CacheProbeIsHostEntrypoint,
 
     #[error("cannot read {field} at {path:?}: {source}")]
     Read {
@@ -2003,6 +2297,18 @@ pub enum InstalledRuntimeError {
     #[error("frozen cached-only Deno graph probe failed with status {status:?}")]
     FrozenCacheProbeFailed { status: Option<i32> },
 
+    #[error("Deno local-module graph receipt is malformed")]
+    DenoModuleGraphInvalid,
+
+    #[error("Deno local-module graph receipt exceeds the installed receipt bound")]
+    DenoModuleGraphTooLarge,
+
+    #[error("Deno resolved local module escapes the Pi host source root: {path:?}")]
+    DenoLocalModuleOutsideSourceRoot { path: PathBuf },
+
+    #[error("Deno resolved an undeclared local host module {path:?}")]
+    DenoLocalModuleUndeclared { path: String },
+
     #[error("installed runtime drift: {evidence}")]
     RuntimeDrift { evidence: &'static str },
 }
@@ -2017,10 +2323,11 @@ mod tests {
 
     use super::*;
     use factory_protocol::{
-        AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentId,
-        CampaignId, CredentialDescriptorV1, DurationMillis, KernelBuildId, MicroUsd,
-        ModelProfileV1, Office, ReadExactFileV1, RepositoryRelativePath, SessionLimitsV1,
-        TerminalOperationV1, ThinkingLevelV1,
+        AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
+        AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, CampaignId,
+        CredentialDescriptorV1, DurationMillis, KernelBuildId, MicroUsd, ModelProfileV1, Office,
+        ReadExactFileV1, RepositoryRelativePath, SessionLimitsV1, TerminalOperationV1,
+        ThinkingLevelV1,
     };
 
     struct Fixture {
@@ -2033,7 +2340,6 @@ mod tests {
         config: PathBuf,
         lock: PathBuf,
         cache: PathBuf,
-        receipt: PathBuf,
     }
 
     impl Fixture {
@@ -2058,7 +2364,12 @@ mod tests {
                  if [ \"$1\" = \"--version\" ]; then\n\
                    printf 'deno 2.9.4 (stable)\\n'; printf 'v8 fake\\n'; printf 'typescript fake\\n'; exit 0\n\
                  fi\n\
-                 if [ \"$1\" = \"check\" ] && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\n\
+                 if [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then\n\
+                   for value in \"$@\"; do entrypoint=\"$value\"; done\n\
+                   directory=$(dirname \"$entrypoint\")\n\
+                   printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"},{\"specifier\":\"file://%s/support.ts\",\"local\":\"%s/support.ts\"}]}' \"$entrypoint\" \"$entrypoint\" \"$directory\" \"$directory\"; exit 0\n\
+                 fi\n\
+                 if { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\n\
                  exit 17\n",
             )
             .expect("fake deno");
@@ -2077,11 +2388,8 @@ mod tests {
                 .expect("support source");
             let config = root.join("deno.json");
             let lock = root.join("deno.lock");
-            let receipt = root.join("resolved-dependency-graph.json");
             fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
             fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
-            fs::write(&receipt, "{\"specifier\":\"npm:@pi/test@0.84.1\"}\n")
-                .expect("dependency receipt");
             Self {
                 root,
                 deno,
@@ -2092,7 +2400,6 @@ mod tests {
                 config,
                 lock,
                 cache,
-                receipt,
             }
         }
 
@@ -2108,7 +2415,8 @@ mod tests {
                     RuntimeRelativePath::parse("main.ts").expect("main path"),
                     RuntimeRelativePath::parse("support.ts").expect("support path"),
                 ],
-                dependency_graph_receipt: self.receipt.clone(),
+                cache_probe_module: RuntimeRelativePath::parse("support.ts")
+                    .expect("safe cache probe path"),
                 pi_version: "0.84.1".to_owned(),
             }
         }
@@ -2184,6 +2492,12 @@ mod tests {
                 path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
                 digest: ContentDigest::of_bytes(b"read"),
                 reason: "test".to_owned(),
+            }],
+            assignment_evidence: vec![AssignmentEvidenceV1 {
+                role: AssignmentEvidenceRoleV1::TicketProposal,
+                artifact_id: ArtifactId::new(7).unwrap(),
+                digest: ContentDigest::of_bytes(b"proposal"),
+                byte_length: 0,
             }],
             terminal_operations: vec![TerminalOperationV1::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(1),
@@ -2317,7 +2631,36 @@ mod tests {
     }
 
     #[test]
-    fn config_lock_and_dependency_receipt_drift_are_individually_observable() {
+    fn host_source_graph_rejects_omitted_local_files_and_later_additions() {
+        let fixture = Fixture::new("closed-root-inventory");
+        fs::write(
+            fixture.source_root.join("omitted-local-import.ts"),
+            "export const omitted = true;\n",
+        )
+        .expect("add omitted local source");
+        assert!(matches!(
+            InstalledRuntimeManifest::qualify(fixture.qualification()),
+            Err(InstalledRuntimeError::UndeclaredSourceFile { path })
+                if path == "omitted-local-import.ts"
+        ));
+
+        fs::remove_file(fixture.source_root.join("omitted-local-import.ts"))
+            .expect("remove omitted local source");
+        let manifest = fixture.qualify();
+        fs::write(
+            fixture.source_root.join("new-local-import.ts"),
+            "export const newlyVisible = true;\n",
+        )
+        .expect("add new local source after qualification");
+        assert!(matches!(
+            manifest.verify_installed_material(),
+            Err(InstalledRuntimeError::UndeclaredSourceFile { path })
+                if path == "new-local-import.ts"
+        ));
+    }
+
+    #[test]
+    fn config_lock_and_cache_drift_are_individually_observable() {
         let fixture = Fixture::new("config-drift");
         let manifest = fixture.qualify();
         fs::write(&fixture.config, "{\"nodeModulesDir\":\"auto\"}\n").expect("mutate config");
@@ -2332,15 +2675,6 @@ mod tests {
         assert_drift(
             manifest.verify_installed_material(),
             "Deno lock digest changed",
-        );
-
-        let fixture = Fixture::new("receipt-drift");
-        let manifest = fixture.qualify();
-        fs::write(&fixture.receipt, "{\"specifier\":\"npm:@pi/test@next\"}\n")
-            .expect("mutate receipt");
-        assert_drift(
-            manifest.verify_installed_material(),
-            "resolved dependency-graph receipt digest changed",
         );
     }
 
@@ -2367,6 +2701,119 @@ mod tests {
             manifest.verify_installed_material(),
             Err(InstalledRuntimeError::FrozenCacheProbeFailed { status: Some(17) })
         ));
+    }
+
+    #[test]
+    fn installed_build_receipt_rejects_cargo_and_git_drift() {
+        for (label, changed) in [("cargo-drift", "cargo"), ("git-drift", "git")] {
+            let fixture = Fixture::new(label);
+            let receipt = installed_build_receipt(&fixture);
+            let path = if changed == "cargo" {
+                &fixture.cargo
+            } else {
+                &fixture.git
+            };
+            fs::write(path, "#!/bin/sh\necho drift\n").expect("mutate approved executable");
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                .expect("retain executable mode after drift");
+            assert!(
+                receipt
+                    .verify_installed_material("factory-v3-schema:test-receipt")
+                    .is_err(),
+                "{changed} drift must reject the installed build before serve"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_deno_check_probe_uses_supported_no_remote_deno_2_9_contract() {
+        let deno = ["/opt/homebrew/bin/deno", "/usr/local/bin/deno"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .expect("the pinned Deno 2.9 runtime is required for installed-runtime qualification");
+        let root = std::env::temp_dir().join(format!(
+            "factory-v3-real-deno-probe-{}-{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        let source = root.join("host");
+        let cache = root.join("deno-cache");
+        fs::create_dir_all(&source).expect("real Deno source root");
+        fs::create_dir(&cache).expect("real Deno cache root");
+        let entrypoint = source.join("main.ts");
+        let cache_probe = source.join("probe.ts");
+        let config = root.join("deno.json");
+        let lock = root.join("deno.lock");
+        fs::write(&entrypoint, "export const qualified = true;\n").expect("entrypoint");
+        fs::write(&cache_probe, "export {};\n").expect("safe cache probe");
+        fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
+        fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
+        let manifest = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
+            deno_executable: deno,
+            host_source_root: source,
+            host_entrypoint: entrypoint,
+            deno_config: config,
+            deno_lock: lock,
+            deno_dir: cache,
+            host_source_files: vec![
+                RuntimeRelativePath::parse("main.ts").expect("path"),
+                RuntimeRelativePath::parse("probe.ts").expect("path"),
+            ],
+            cache_probe_module: RuntimeRelativePath::parse("probe.ts").expect("path"),
+            pi_version: "0.84.1".to_owned(),
+        })
+        .expect("Deno 2.9 qualifies an explicit inert cache probe");
+        manifest
+            .verify_installed_material()
+            .expect("the same real Deno 2.9 probe remains re-verifiable");
+        fs::remove_dir_all(root).expect("remove real Deno probe fixture");
+    }
+
+    #[test]
+    fn deno_resolved_local_import_cannot_escape_closed_host_root() {
+        let deno = ["/opt/homebrew/bin/deno", "/usr/local/bin/deno"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .expect("the pinned Deno 2.9 runtime is required for installed-runtime qualification");
+        let root = std::env::temp_dir().join(format!(
+            "factory-v3-real-deno-outside-import-{}-{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        let source = root.join("host");
+        let cache = root.join("deno-cache");
+        fs::create_dir_all(&source).expect("real Deno source root");
+        fs::create_dir(&cache).expect("real Deno cache root");
+        fs::write(root.join("outside.ts"), "export const outside = true;\n")
+            .expect("outside module");
+        let entrypoint = source.join("main.ts");
+        let cache_probe = source.join("probe.ts");
+        fs::write(&entrypoint, "import '../outside.ts';\n").expect("entrypoint import");
+        fs::write(&cache_probe, "export {};\n").expect("safe cache probe");
+        let config = root.join("deno.json");
+        let lock = root.join("deno.lock");
+        fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
+        fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
+        assert!(matches!(
+            InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
+                deno_executable: deno,
+                host_source_root: source,
+                host_entrypoint: entrypoint,
+                deno_config: config,
+                deno_lock: lock,
+                deno_dir: cache,
+                host_source_files: vec![
+                    RuntimeRelativePath::parse("main.ts").expect("path"),
+                    RuntimeRelativePath::parse("probe.ts").expect("path"),
+                ],
+                cache_probe_module: RuntimeRelativePath::parse("probe.ts").expect("path"),
+                pi_version: "0.84.1".to_owned(),
+            }),
+            Err(InstalledRuntimeError::DenoLocalModuleOutsideSourceRoot { .. })
+        ));
+        fs::remove_dir_all(root).expect("remove real Deno outside-import fixture");
     }
 
     #[test]
@@ -2447,9 +2894,11 @@ mod tests {
         qualification
             .host_source_files
             .push(RuntimeRelativePath::parse("escape.ts").unwrap());
+        let result = InstalledRuntimeManifest::qualify(qualification);
         assert!(matches!(
-            InstalledRuntimeManifest::qualify(qualification),
-            Err(InstalledRuntimeError::SourceFileOutsideRoot { path }) if path == "escape.ts"
+            result,
+            Err(InstalledRuntimeError::SourceGraphSymlink { ref path })
+                if path == &fs::canonicalize(&fixture.source_root).unwrap().join("escape.ts")
         ));
     }
 }

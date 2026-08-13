@@ -3,6 +3,8 @@ import {
   type AgentSession,
   createAgentSession,
   createExtensionRuntime,
+  createSyntheticSourceInfo,
+  type Extension,
   ModelRuntime,
   type ResourceLoader,
   SessionManager,
@@ -46,6 +48,14 @@ export async function createSdkSession(
   packet: PiAssignmentPacket,
   context: PiSessionFactoryContext,
 ): Promise<AgentSession> {
+  const modelRuntime = await createProductionModelRuntime(packet);
+  return await createSdkSessionWithRuntimeForTest(packet, context, modelRuntime);
+}
+
+/** Production-only runtime construction. Test code may construct a native
+ * faux provider runtime and call the narrow helper below; packet/provider
+ * selection remains unchanged in the production factory. */
+async function createProductionModelRuntime(packet: PiAssignmentPacket): Promise<ModelRuntime> {
   const credential = packet.runtime.credential_source;
   const modelRuntime = await ModelRuntime.create({
     // Supplying an explicit store is essential for named environment
@@ -64,12 +74,26 @@ export async function createSdkSession(
     }
     await modelRuntime.setRuntimeApiKey(packet.model.provider, apiKey);
   }
+  return modelRuntime;
+}
+
+/**
+ * Test-only construction seam for Pi's native provider runtime. It exists so
+ * provider-free tests exercise the real `createAgentSession` path, including
+ * custom-tool dispatch and terminal SDK events, without widening production
+ * provider selection or credential authority.
+ */
+export async function createSdkSessionWithRuntimeForTest(
+  packet: PiAssignmentPacket,
+  context: PiSessionFactoryContext,
+  modelRuntime: ModelRuntime,
+): Promise<AgentSession> {
   const model = modelRuntime.getModel(packet.model.provider, packet.model.model_id);
   if (model === undefined) throw new Error("pinned model is not present in the offline Pi catalog");
   verifyModelDescriptor(model, packet);
 
   const systemPrompt = new TextDecoder("utf-8", { fatal: true }).decode(packet.system_prompt_bytes);
-  const resourceLoader = emptyResourceLoader(systemPrompt);
+  const resourceLoader = sealedAssignmentResourceLoader(systemPrompt, packet.workspace_root);
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
     retry: { enabled: false, maxRetries: 0 },
@@ -154,6 +178,61 @@ export function createEphemeralCredentialStore(): EphemeralCredentialStore {
 export function emptyResourceLoader(systemPrompt: string): ResourceLoader {
   return {
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [] }),
+    getSystemPrompt: () => systemPrompt,
+    getSystemPromptSource: () => undefined,
+    getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
+    extendResources: () => {},
+    reload: async () => {},
+  };
+}
+
+/**
+ * Pi's normal coding-agent prompt builder appends a current-working-directory
+ * disclosure.  That is useful interactively, but this host must pass the
+ * immutable sealed system prompt as final bytes: the workspace path is not
+ * packet prompt content and can accidentally carry factory-only vocabulary.
+ *
+ * This one inline extension is a host envelope, not discovered extension
+ * code.  It has exactly one handler, performs no I/O, registers no tools or
+ * providers, and replaces each turn's system prompt with the sealed bytes
+ * before Pi makes a provider request.  All ambient extension resources remain
+ * empty below.
+ */
+function sealedAssignmentResourceLoader(
+  systemPrompt: string,
+  _cwd: string,
+): ResourceLoader {
+  const runtime = createExtensionRuntime();
+  // `createAgentSession` consumes an already-loaded extension collection.
+  // Construct exactly one closed handler in memory rather than invoking Pi's
+  // extension loader/discovery path. The erased handler map is Pi's internal
+  // heterogeneous-event representation; its sole value is the typed,
+  // no-input/no-I/O system-prompt replacement below.
+  const extension = {
+    path: "<sealed-assignment-envelope>",
+    resolvedPath: "<sealed-assignment-envelope>",
+    hidden: true,
+    sourceInfo: createSyntheticSourceInfo("<sealed-assignment-envelope>", {
+      source: "host",
+    }),
+    handlers: new Map([[
+      "before_agent_start",
+      [() => Promise.resolve({ systemPrompt })],
+    ]]),
+    tools: new Map(),
+    messageRenderers: new Map(),
+    entryRenderers: new Map(),
+    commands: new Map(),
+    flags: new Map(),
+    shortcuts: new Map(),
+  } as Extension;
+  return {
+    getExtensions: () => ({ extensions: [extension], errors: [], runtime }),
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),

@@ -9,7 +9,9 @@ use std::{fs, time::Duration};
 
 use factory_kernel::cas::{CasArtifact, CasStore};
 use factory_kernel::local_transport::{LocalDaemon, LocalTransportConfig};
-use factory_kernel::process::{CancelCampaign, CreateAssignment, StartCampaign, StartSession};
+use factory_kernel::process::{
+    CancelCampaign, CreateAssignment, FailCampaign, StartCampaign, StartSession,
+};
 use factory_kernel::restart_recovery::{RestartRecoveryPolicy, reconcile_daemon_restart};
 use factory_kernel::storage::{
     ActivateApplicationRevision, AdmitCompiledApplication, InstallKernelBuild, KernelStore,
@@ -24,6 +26,99 @@ use factory_protocol::{
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn failed_product_campaign_persists_one_bounded_reason_and_retries_idempotently() {
+    smol::block_on(async {
+        let fixture = Fixture::new().await;
+        let process = fixture.store.process_store();
+        let campaign = process
+            .start_campaign(&StartCampaign {
+                principal: "architect".to_owned(),
+                command_id: unique("product-fault-campaign"),
+                expected_application_revision: ExpectedRevision::new(
+                    AggregateRevision::from_persisted(1),
+                ),
+                application_revision_id: fixture.application,
+                aggregate_budget: MicroUsd::new(10),
+                deadline_unix_millis: 4_000_000_000_000,
+                delivery_target: 1,
+            })
+            .await
+            .expect("running Product campaign");
+        let command = FailCampaign {
+            principal: "factoryd-campaign-driver".to_owned(),
+            command_id: unique("product-materialization-fault"),
+            expected_revision: ExpectedRevision::new(campaign.resulting_revision),
+            campaign_id: campaign.campaign_id,
+            reason: "daemon product assignment fault: packet rejected".to_owned(),
+        };
+        let failed = process
+            .fail_campaign(&command)
+            .await
+            .expect("terminal Product fault");
+        let status = process
+            .campaign_status(campaign.campaign_id)
+            .await
+            .expect("failed campaign remains diagnosable");
+        assert_eq!(status.state, factory_protocol::CampaignState::Failed);
+        assert_eq!(
+            status.failure_reason.as_deref(),
+            Some("daemon product assignment fault: packet rejected")
+        );
+        let retry = process
+            .fail_campaign(&command)
+            .await
+            .expect("idempotent fault retry");
+        assert!(retry.was_idempotent_retry);
+        assert_eq!(retry.resulting_revision, failed.resulting_revision);
+        assert_eq!(
+            process
+                .campaign_status(campaign.campaign_id)
+                .await
+                .expect("failure reason after retry")
+                .failure_reason,
+            status.failure_reason
+        );
+
+        // A distinct operator cancellation is terminal but not a daemon
+        // fault, so the structural lifecycle invariant leaves it null.
+        let cancelled_campaign = process
+            .start_campaign(&StartCampaign {
+                principal: "architect".to_owned(),
+                command_id: unique("cancelled-campaign"),
+                expected_application_revision: ExpectedRevision::new(
+                    AggregateRevision::from_persisted(1),
+                ),
+                application_revision_id: fixture.application,
+                aggregate_budget: MicroUsd::new(10),
+                deadline_unix_millis: 4_000_000_000_000,
+                delivery_target: 1,
+            })
+            .await
+            .expect("second running campaign");
+        process
+            .cancel_campaign(&CancelCampaign {
+                principal: "architect".to_owned(),
+                command_id: unique("cancelled-campaign-transition"),
+                expected_revision: ExpectedRevision::new(cancelled_campaign.resulting_revision),
+                campaign_id: cancelled_campaign.campaign_id,
+            })
+            .await
+            .expect("cancel without failure reason");
+        assert_eq!(
+            process
+                .campaign_status(cancelled_campaign.campaign_id)
+                .await
+                .expect("cancelled campaign status")
+                .failure_reason,
+            None
+        );
+        fixture.daemon.shutdown().await.expect("daemon shutdown");
+        fixture.store.close().await;
+    });
+}
 
 #[test]
 #[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
@@ -881,6 +976,7 @@ impl Fixture {
             target: label,
             ticket_attempt_id: None,
             candidate_id: None,
+            assignment_evidence: Vec::new(),
             system_prompt_artifact_id: self.system_prompt.artifact_id,
             assignment_prompt_artifact_id: self.assignment_prompt.artifact_id,
             required_read_manifest_artifact_id: self.expected_manifest.artifact_id,
@@ -1080,6 +1176,7 @@ fn wire_packet(
         factory_base_identity: digest(901).to_hex(),
         ticket_attempt_id: packet.ticket_attempt_id.map(|id| id.get()),
         candidate_id: packet.candidate_id.map(|id| id.get()),
+        assignment_evidence: Vec::new(),
         system_prompt_artifact_id: packet.system_prompt_artifact_id.get(),
         assignment_prompt_artifact_id: packet.assignment_prompt_artifact_id.get(),
         required_read_manifest_artifact_id: packet.required_read_manifest_artifact_id.get(),

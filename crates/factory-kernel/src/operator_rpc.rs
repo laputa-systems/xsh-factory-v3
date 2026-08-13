@@ -23,7 +23,9 @@ use factory_protocol::{
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, CampaignId, CampaignReceiptResponse,
     CampaignSessionCostResponse, CampaignStatusResponse, CandidateDecisionRequestV1, CandidateId,
-    ConflictResponse, ContractError, ErrorResponse, ExpectedRevision, FrameError,
+    ConflictResponse, ContractError, DownstreamArchitectDecisionEvidenceResponse,
+    DownstreamEvidenceResponse, DownstreamReviewEvidenceResponse,
+    DownstreamValidationEvidenceResponse, ErrorResponse, ExpectedRevision, FrameError,
     OP_ARCHITECT_DECIDE_CANDIDATE, OP_ARCHITECT_RELEASE_TICKET_ATTEMPT,
     OP_ARCHITECT_SPONSOR_TICKET_REVISION, OP_OPERATOR_CAMPAIGN_STATUS, OP_OPERATOR_CANCEL_CAMPAIGN,
     OP_OPERATOR_START_CAMPAIGN, OperatorCampaignStatusRequest, OperatorCancelCampaignRequest,
@@ -774,6 +776,35 @@ fn campaign_status_response(
             )
         })
         .unwrap_or((None, None, None, None, None));
+    let downstream_evidence =
+        buffer
+            .downstream_evidence
+            .as_ref()
+            .map(|evidence| DownstreamEvidenceResponse {
+                candidate_commit: evidence.candidate_commit.clone(),
+                latest_validation: evidence.latest_validation.map(|validation| {
+                    DownstreamValidationEvidenceResponse {
+                        validation_id: validation.validation_id.get(),
+                        state: validation.state.name().to_owned(),
+                        log_artifact_id: validation.log_artifact_id.get(),
+                    }
+                }),
+                review: evidence
+                    .review
+                    .map(|review| DownstreamReviewEvidenceResponse {
+                        review_id: review.review_id.get(),
+                        review_revision: review.revision.get(),
+                        verdict: review.verdict.name().to_owned(),
+                        rationale_artifact_id: review.rationale_artifact_id.get(),
+                    }),
+                architect_decision: evidence.architect_decision.map(|decision| {
+                    DownstreamArchitectDecisionEvidenceResponse {
+                        architect_decision_id: decision.architect_decision_id.get(),
+                        decision_kind: decision.kind.name().to_owned(),
+                        rationale_artifact_id: decision.rationale_artifact_id.get(),
+                    }
+                }),
+            });
     json::to_string(&CampaignStatusResponse {
         protocol_version: PROTOCOL_VERSION_V1,
         request_id,
@@ -790,6 +821,7 @@ fn campaign_status_response(
         remaining_budget_micro_usd,
         deadline_unix_millis: campaign.deadline_unix_millis,
         delivery_target: campaign.delivery_target,
+        failure_reason: campaign.failure_reason,
         delivered_attempt_count: buffer.delivered_attempt_count,
         ready_ticket_count: buffer.ready_count,
         proposed_ticket_count: buffer.proposed_count,
@@ -800,6 +832,7 @@ fn campaign_status_response(
         downstream_ticket_attempt_revision,
         downstream_candidate_id,
         downstream_candidate_revision,
+        downstream_evidence,
         ready_low_water: buffer.low_water,
         ready_target: buffer.target,
         ready_maximum: buffer.maximum,

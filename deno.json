@@ -4,6 +4,7 @@
     "@factory/sdk": "./packages/factory-sdk/mod.ts",
     "@factory/pi-host": "./packages/factory-pi-host/mod.ts",
     "@pi/coding-agent": "npm:@earendil-works/pi-coding-agent@0.84.1",
+    "@pi/ai": "npm:@earendil-works/pi-ai@0.84.1",
     "@std/assert": "jsr:@std/assert@1.0.19",
     "@std/path": "jsr:@std/path@1.1.6"
   },
@@ -13,7 +14,7 @@
   },
   "nodeModulesDir": "none",
   "fmt": {
-    "include": ["applications", "packages", "tests"],
+    "include": ["applications", "packages", "tests", "tools"],
     "exclude": ["tests/protocol-fixtures/assignment-packet-v1.json"],
     "lineWidth": 100,
     "indentWidth": 2,
@@ -21,11 +22,11 @@
     "singleQuote": false
   },
   "lint": {
-    "include": ["applications", "packages", "tests"]
+    "include": ["applications", "packages", "tests", "tools"]
   },
   "tasks": {
-    "cache": "deno cache --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts",
-    "check": "deno check --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts",
+    "cache": "deno cache --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts tools/backup_restore_check.ts",
+    "check": "deno check --frozen packages/factory-sdk/mod.ts packages/factory-pi-host/mod.ts applications/xsh/mod.ts tests/dependency_direction_test.ts tools/backup_restore_check.ts",
     "test": "deno test -A --no-prompt --frozen --cached-only"
   }
 }

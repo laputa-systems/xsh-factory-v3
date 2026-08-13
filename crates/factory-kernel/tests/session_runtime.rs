@@ -285,11 +285,61 @@ fn real_deno_fake_actor_unknown_cost_fails_closed_without_a_resume() {
     });
 }
 
+#[test]
+#[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
+fn product_mutation_before_daemon_read_writes_no_ticket_authority() {
+    smol::block_on(async {
+        let fixture = RuntimeFixture::new(FakeTerminalMode::ProductMutationBeforeRead).await;
+        let before = fixture
+            .tickets
+            .ticket_buffer_status(fixture.campaign_id)
+            .await
+            .expect("buffer before rejected Product mutation");
+
+        let outcome = fixture
+            .launch()
+            .await
+            .expect("actor exits after rejected mutation");
+        assert_eq!(
+            outcome.terminal.session_state,
+            factory_protocol::SessionState::Failed,
+            "missing exact reads must not become a successful actor terminal"
+        );
+        let after = fixture
+            .tickets
+            .ticket_buffer_status(fixture.campaign_id)
+            .await
+            .expect("buffer after rejected Product mutation");
+        assert_eq!(
+            before.proposed_count, after.proposed_count,
+            "rejected pre-read mutation created ticket authority"
+        );
+
+        let campaign = fixture
+            .process
+            .campaign_status(fixture.campaign_id)
+            .await
+            .expect("campaign after rejected actor");
+        fixture
+            .process
+            .cancel_campaign(&CancelCampaign {
+                principal: "architect".to_owned(),
+                command_id: unique("pre-read-product-cleanup"),
+                expected_revision: ExpectedRevision::new(campaign.revision),
+                campaign_id: fixture.campaign_id,
+            })
+            .await
+            .expect("typed campaign cleanup");
+        fixture.close().await;
+    });
+}
+
 #[derive(Clone, Copy)]
 enum FakeTerminalMode {
     Completed,
     CompletedWithThousandEvents,
     UnknownCost,
+    ProductMutationBeforeRead,
 }
 
 impl FakeTerminalMode {
@@ -298,6 +348,7 @@ impl FakeTerminalMode {
             Self::Completed => "completed",
             Self::CompletedWithThousandEvents => "completed_thousand_events",
             Self::UnknownCost => "unknown_cost",
+            Self::ProductMutationBeforeRead => "product_mutation_before_read",
         }
     }
 }
@@ -451,6 +502,9 @@ impl RuntimeFixture {
                 digest: observed.digest,
                 reason: "authority contract".to_owned(),
             }],
+            // Product has no upstream assignment evidence; the empty closure
+            // is part of its exact office-specific packet contract.
+            assignment_evidence: Vec::new(),
             terminal_operations: vec![TerminalOperationV1::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(100),
             revision: AggregateRevision::initial(),
@@ -980,11 +1034,22 @@ fn wire_packet(
                 reason: read.reason.clone(),
             })
             .collect(),
+        assignment_evidence: packet
+            .assignment_evidence
+            .iter()
+            .map(|evidence| factory_protocol::AssignmentEvidenceWireV1 {
+                role: evidence.role.wire_name().to_owned(),
+                artifact_id: evidence.artifact_id.get(),
+                digest: evidence.digest.to_hex(),
+                byte_length: evidence.byte_length,
+            })
+            .collect(),
         tools: vec![
             "workspace_read".to_owned(),
             "forum_list_topics".to_owned(),
             "forum_create_topic".to_owned(),
             "artifact_seal".to_owned(),
+            "product_submit_ticket".to_owned(),
             "work_complete".to_owned(),
         ],
         terminal_operations: vec!["work_complete".to_owned()],
@@ -1079,7 +1144,14 @@ fn minimal_bundle_json(
         office: name.to_owned(),
         system_template: template(system),
         assignment_template: template(assignment),
-        tools: vec!["workspace_read".to_owned()],
+        tools: if name == "product_research" {
+            vec![
+                "workspace_read".to_owned(),
+                "product_submit_ticket".to_owned(),
+            ]
+        } else {
+            vec!["workspace_read".to_owned()]
+        },
         model: ModelWireV1 {
             provider: "test".to_owned(),
             model_id: "test".to_owned(),
@@ -1233,6 +1305,16 @@ const verified = await call("session.verify_packet", {
 });
 if (verified.verified !== true || verified.packet_digest !== admission.packet_digest) {
   throw new Error("packet verification was not accepted");
+}
+if (FAKE_TERMINAL_MODE === "product_mutation_before_read") {
+  let rejected = false;
+  try {
+    await call("product.submit_ticket", {});
+  } catch (error) {
+    rejected = String(error).includes("all assigned exact reads are required before mutation");
+  }
+  if (!rejected) throw new Error("Product mutation was not rejected before the daemon read ledger was complete");
+  Deno.exit(0);
 }
 const required = packet.required_reads[0];
 const read = await call("workspace.read", { repository_relative_path: required.path });

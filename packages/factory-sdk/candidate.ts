@@ -3,8 +3,8 @@
  *
  * An Engineering actor supplies only its report, proposed message, regression
  * identity, and risks. The kernel—not this SDK and not the actor—captures the
- * worktree tree/patch, runs hard validation, constructs the commit, and
- * returns the resulting candidate identity.
+ * worktree tree/patch and runs hard validation. It attaches the candidate
+ * commit only after the terminal transcript is sealed for provenance.
  */
 
 import type {

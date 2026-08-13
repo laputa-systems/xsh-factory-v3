@@ -44,11 +44,11 @@ export function createCommonToolAdapters(
     ["shell", "Run one assigned shell command in the workspace."],
     ["artifact_seal", "Seal one approved staging file through the daemon."],
     ["artifact_read", "Read one allowed sealed assignment evidence artifact."],
-    ["product_submit_ticket", "Submit a Product ticket proposal."],
-    ["candidate_checkpoint_regression", "Submit an Engineering regression checkpoint."],
-    ["candidate_submit", "Submit an Engineering candidate tree."],
-    ["quality_run_full_suite", "Run the application-owned full suite."],
-    ["quality_submit_review", "Submit a Quality review."],
+    ["product_submit_ticket", "Submit one assigned ticket proposal."],
+    ["candidate_checkpoint_regression", "Submit one assigned regression checkpoint."],
+    ["candidate_submit", "Submit one assigned candidate tree."],
+    ["quality_run_full_suite", "Run one assigned validation suite."],
+    ["quality_submit_review", "Submit one assigned review."],
     ["work_complete", "Submit the one assignment terminal result."],
   ];
   return declarations.flatMap(([name, description]) => {

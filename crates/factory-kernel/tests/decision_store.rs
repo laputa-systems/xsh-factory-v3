@@ -27,7 +27,8 @@ use factory_kernel::ticket_store::{
 use factory_protocol::{
     ASSIGNMENT_PACKET_V1_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationBundleWireV1,
     ApplicationRevisionId, ArchitectDecisionKindV1, ArchitectPrincipalV1,
-    AssignmentCredentialWireV1, AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1,
+    AssignmentCredentialWireV1, AssignmentEvidenceRoleV1, AssignmentEvidenceV1,
+    AssignmentEvidenceWireV1, AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1,
     AssignmentPacketWireV1, AssignmentReadWireV1, AssignmentRuntimeWireV1,
     CandidateDecisionRequestV1, CandidateDecisionV1, CandidateSubmissionV1, CommandWireV1,
     CommitMessageWireV1, ContentDigest, CredentialDescriptorV1, DurationMillis, ExecutableWireV1,
@@ -380,11 +381,17 @@ impl Fixture {
             )
             .await;
         self.attempt_revision = quality_first.resulting_attempt_revision;
+        // Simulate the daemon/actor dying after the full-suite transition but
+        // before the terminal review. A fresh Quality session must be able to
+        // submit prose against this exact durable receipt without rerunning
+        // the suite or inheriting a trusted actor result.
+        self.finish_session(first_quality).await;
+        let continuation_quality = self.open_session(Office::Quality).await;
         let accepted_review = self
             .submit_review(
                 first.candidate_id,
                 quality_first.resulting_candidate_revision,
-                first_quality.session_id,
+                continuation_quality.session_id,
                 quality_first.validation_id,
                 factory_protocol::ReviewVerdict::Accept,
                 self.probes.reference(),
@@ -407,7 +414,7 @@ impl Fixture {
             factory_protocol::CandidateState::Rejected
         );
         self.attempt_revision = reworked.resulting_attempt_revision;
-        self.finish_session(first_quality).await;
+        self.finish_session(continuation_quality).await;
 
         let second_engineering = self.open_session(Office::Engineering).await;
         let second = self
@@ -755,6 +762,16 @@ impl Fixture {
                 self.current_candidate
             } else {
                 None
+            },
+            assignment_evidence: if office == Office::ProductResearch {
+                Vec::new()
+            } else {
+                vec![AssignmentEvidenceV1 {
+                    role: AssignmentEvidenceRoleV1::TicketProposal,
+                    artifact_id: system.artifact_id,
+                    digest: system.sealed.digest(),
+                    byte_length: system.sealed.byte_length(),
+                }]
             },
             system_prompt_artifact_id: system.artifact_id,
             assignment_prompt_artifact_id: assignment_prompt.artifact_id,
@@ -1173,6 +1190,16 @@ fn packet_wire(
         factory_base_identity: digest(6).to_hex(),
         ticket_attempt_id: packet.ticket_attempt_id.map(|id| id.get()),
         candidate_id: packet.candidate_id.map(|id| id.get()),
+        assignment_evidence: packet
+            .assignment_evidence
+            .iter()
+            .map(|evidence| AssignmentEvidenceWireV1 {
+                role: evidence.role.wire_name().to_owned(),
+                artifact_id: evidence.artifact_id.get(),
+                digest: evidence.digest.to_hex(),
+                byte_length: evidence.byte_length,
+            })
+            .collect(),
         system_prompt_artifact_id: packet.system_prompt_artifact_id.get(),
         assignment_prompt_artifact_id: packet.assignment_prompt_artifact_id.get(),
         required_read_manifest_artifact_id: packet.required_read_manifest_artifact_id.get(),

@@ -53,10 +53,9 @@ const commonActorTools: readonly ActorToolV1[] = [
   "forum_create_thread",
   "forum_post",
   "artifact_seal",
-  "artifact_read",
 ];
 
-const lowCostDirectorModel = {
+const researchReviewModel = {
   provider: "openrouter",
   model_id: "deepseek/deepseek-v4-flash-0731",
   thinking_level: "high" as const,
@@ -149,7 +148,7 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
   },
   mission_template: template(
     "templates/mission.md",
-    "7b5c9210823709fb847c103a6baf8db6b66bfe14306186d27c3010ee8af342cb",
+    "238e6ad15801eba875197f4a96aed1345efab91df5728b35864d9ab7c2769bbb",
     [],
   ),
   office_profiles: [
@@ -157,12 +156,12 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "75d77a96addc078232ef5ad39dc190d4a925956acb5ba81c1efc91a005a1b0cf",
+        "7d87ad7f81c834e4e770a20efaaffb9e8289343dfe66308c00f7091f6d0d4b2d",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/product-assignment.md",
-        "e74502930453e24f83980099aa6ee3391a1df52156b0356f315dc00fbd9aca29",
+        "45af90aff658aaa330ee42e8fc54f7d2507eb2050d663facc1ffb13a1f7a5122",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
       tools: [
@@ -170,23 +169,24 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
         "product_submit_ticket",
         "work_complete",
       ],
-      model: lowCostDirectorModel,
+      model: researchReviewModel,
       limits: { turn_limit: 24, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
     },
     {
       office: "engineering",
       system_template: template(
         "templates/engineering-system.md",
-        "4fcfe0d78f9d25e1561b7865b6e697c82330be7d8ab20bbc2b34acbe5310f5fe",
+        "434e61364b69ed7c979275d9f6f30b15bb19f0d751cb7b5a3f108a02f9c5bbfc",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/engineering-assignment.md",
-        "eec6d6227e2b4ed59a4552c692fc1e8c15d27a17df172df964da60c91be4dc0d",
+        "3160178e4d7c5981d60522f174afa6b43cf275ff863a4b30bc497709a64122b5",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
       tools: [
         ...commonActorTools,
+        "artifact_read",
         "candidate_checkpoint_regression",
         "candidate_submit",
       ],
@@ -197,20 +197,21 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "quality",
       system_template: template(
         "templates/quality-system.md",
-        "60624060ef180efdc2e2063f9ce607f0cffbb0999369725ea8852546d7f8c936",
+        "3f907cb105580231ac04261b08e23b846d832d0ea6d92d4e340fa88299f36b68",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/quality-assignment.md",
-        "cf9c94272cdb97462d859a098f615c9a5217c83e7a09b51543df7ef2deba3012",
+        "be05a0a0d56c8dca558d51b955324a52b0f02f5fab0c419dce74cc73f467965e",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
       tools: [
         ...commonActorTools,
+        "artifact_read",
         "quality_run_full_suite",
         "quality_submit_review",
       ],
-      model: lowCostDirectorModel,
+      model: researchReviewModel,
       limits: { turn_limit: 24, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
     },
   ],

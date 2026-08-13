@@ -934,7 +934,9 @@ pub struct OperationReceiptResponse {
 }
 
 /// Receipt for a kernel-captured Engineering candidate. The actor never
-/// supplies any of these tree/commit identities in its terminal payload.
+/// supplies any tree/commit identity in its terminal payload.  A candidate
+/// commit is intentionally absent: the kernel attaches it later, after the
+/// successful Engineering terminal transcript exists for provenance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateReceiptResponse {
     pub protocol_version: u16,
@@ -945,7 +947,6 @@ pub struct CandidateReceiptResponse {
     pub candidate_id: i64,
     pub validation_id: i64,
     pub candidate_tree: String,
-    pub candidate_commit: String,
 }
 
 /// Receipt for the one opaque Engineering regression checkpoint retained by
@@ -1052,6 +1053,9 @@ pub struct CampaignStatusResponse {
     pub remaining_budget_micro_usd: Option<u64>,
     pub deadline_unix_millis: u64,
     pub delivery_target: u32,
+    /// Present only for a failed campaign; it is the bounded terminal daemon
+    /// fault, not a mutable operator note.
+    pub failure_reason: Option<String>,
     pub delivered_attempt_count: u32,
     pub ready_ticket_count: u32,
     pub proposed_ticket_count: u32,
@@ -1062,6 +1066,7 @@ pub struct CampaignStatusResponse {
     pub downstream_ticket_attempt_revision: Option<u64>,
     pub downstream_candidate_id: Option<i64>,
     pub downstream_candidate_revision: Option<u64>,
+    pub downstream_evidence: Option<DownstreamEvidenceResponse>,
     pub ready_low_water: u32,
     pub ready_target: u32,
     pub ready_maximum: u32,
@@ -1088,6 +1093,39 @@ pub struct CampaignSessionCostResponse {
     pub cost_state: String,
     pub cost_micro_usd: Option<u64>,
     pub elapsed_millis: Option<u64>,
+}
+
+/// Immutable evidence already attached to the exact downstream candidate.
+/// It contains only closed navigation identities; `operator.candidate.show`
+/// remains the detailed evidence route.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownstreamEvidenceResponse {
+    pub candidate_commit: Option<String>,
+    pub latest_validation: Option<DownstreamValidationEvidenceResponse>,
+    pub review: Option<DownstreamReviewEvidenceResponse>,
+    pub architect_decision: Option<DownstreamArchitectDecisionEvidenceResponse>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownstreamValidationEvidenceResponse {
+    pub validation_id: i64,
+    pub state: String,
+    pub log_artifact_id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownstreamReviewEvidenceResponse {
+    pub review_id: i64,
+    pub review_revision: u64,
+    pub verdict: String,
+    pub rationale_artifact_id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownstreamArchitectDecisionEvidenceResponse {
+    pub architect_decision_id: i64,
+    pub decision_kind: String,
+    pub rationale_artifact_id: i64,
 }
 
 /// Read-only application projection.  A registration stays visible while
@@ -1547,6 +1585,42 @@ fn validate_assignment_packet_wire_v1(
         validate_digest("required read digest", &read.digest)?;
         bounded_packet_text("required read reason", &read.reason, 240)?;
     }
+    if packet.assignment_evidence.len() > 24 {
+        return packet_error(
+            "assignment_evidence",
+            "exceeds the closed evidence reference limit",
+        );
+    }
+    if packet.office == "product_research" && !packet.assignment_evidence.is_empty() {
+        return packet_error(
+            "assignment_evidence",
+            "Product has no upstream assignment evidence",
+        );
+    }
+    if packet.office != "product_research" && packet.assignment_evidence.is_empty() {
+        return packet_error(
+            "assignment_evidence",
+            "Engineering and Quality require upstream evidence",
+        );
+    }
+    let mut evidence_roles = std::collections::BTreeSet::new();
+    for evidence in &packet.assignment_evidence {
+        if !is_known_assignment_evidence_role(&evidence.role) {
+            return packet_error("assignment_evidence.role", "is not a closed evidence role");
+        }
+        if !evidence_roles.insert(evidence.role.as_str()) {
+            return packet_error("assignment_evidence", "roles must be unique");
+        }
+        if evidence.artifact_id <= 0 || (evidence.artifact_id as u64) > JAVASCRIPT_SAFE_INTEGER_MAX
+        {
+            return packet_error(
+                "assignment_evidence.artifact_id",
+                "is not a safe positive identity",
+            );
+        }
+        validate_javascript_safe_integer("assignment_evidence.byte_length", evidence.byte_length)?;
+        validate_digest("assignment_evidence.digest", &evidence.digest)?;
+    }
     match packet.runtime.credential_source.kind.as_str() {
         "environment"
             if packet.runtime.credential_source.name.is_some()
@@ -1562,6 +1636,36 @@ fn validate_assignment_packet_wire_v1(
         }
     }
     Ok(())
+}
+
+fn is_known_assignment_evidence_role(role: &str) -> bool {
+    matches!(
+        role,
+        "ticket_proposal"
+            | "ticket_narrative"
+            | "ticket_evidence"
+            | "reproducer_command"
+            | "reproducer_stdin"
+            | "reproducer_expected_stdout"
+            | "reproducer_expected_stderr"
+            | "reproducer_first_actual_stdout"
+            | "reproducer_first_actual_stderr"
+            | "reproducer_second_actual_stdout"
+            | "reproducer_second_actual_stderr"
+            | "regression_patch"
+            | "regression_command_set"
+            | "regression_log"
+            | "changed_paths"
+            | "candidate_patch"
+            | "engineering_report"
+            | "engineering_risks"
+            | "hard_validation_command_set"
+            | "hard_validation_log"
+            | "quality_additional_probes"
+            | "quality_rationale"
+            | "quality_risks"
+            | "external_decision_rationale"
+    )
 }
 
 fn packet_error(field: &'static str, detail: &'static str) -> Result<(), FrameError> {
@@ -1645,6 +1749,7 @@ fn is_known_assignment_tool(value: &str) -> bool {
             | "forum_create_thread"
             | "forum_post"
             | "artifact_seal"
+            | "artifact_read"
             | "product_submit_ticket"
             | "candidate_checkpoint_regression"
             | "candidate_submit"

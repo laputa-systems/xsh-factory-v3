@@ -993,6 +993,42 @@ impl GitCustody {
         })
     }
 
+    /// Recovers the physical half of a delivery interrupted after the local
+    /// fast-forward but before its durable receipt was recorded. The current
+    /// checkout must already be the exact persisted candidate commit/tree;
+    /// any other ref movement remains a hard custody failure. No Git mutation
+    /// is performed on this path.
+    pub fn recover_completed_local_fast_forward(
+        &self,
+        repository: &QualifiedRepository,
+        expected_old_commit: GitCommitId,
+        candidate_ref: CandidateRefName,
+        candidate_commit: GitCommitId,
+        candidate_tree: GitTreeId,
+    ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
+        self.assert_only_primary_worktree(repository)?;
+        if repository.snapshot.base_commit != candidate_commit
+            || repository.snapshot.base_tree != candidate_tree
+        {
+            return Err(GitCustodyError::DeliveryPostconditionMismatch);
+        }
+        self.assert_candidate(
+            repository,
+            &CandidateCommit {
+                commit: candidate_commit.clone(),
+                candidate_ref,
+                base_commit: expected_old_commit.clone(),
+                candidate_tree: candidate_tree.clone(),
+                ref_was_present: true,
+            },
+        )?;
+        Ok(LocalDeliveryReceipt {
+            previous_commit: expected_old_commit,
+            delivered_commit: candidate_commit,
+            delivered_tree: candidate_tree,
+        })
+    }
+
     fn add_no_checkout(
         &self,
         repository: &QualifiedRepository,

@@ -177,10 +177,7 @@ function allowedPlaceholders(office: OfficeV1 | "mission"): ReadonlySet<string> 
   if (office === "mission") return new Set();
   const common = [
     "ASSIGNMENT_ID",
-    "APPLICATION_REVISION_ID",
-    "CAMPAIGN_ID",
     "MISSION",
-    "OFFICE",
     "TARGET",
   ];
   const officeSpecific: Record<OfficeV1, readonly string[]> = {

@@ -1,6 +1,6 @@
 DENO_VERSION := 2.9.4
 
-.PHONY: cache check rust-check deno-check deno-version postgres-test ticket-test decision-test sqlx-check
+.PHONY: cache check rust-check deno-check deno-version postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
 
 cache:
 	deno task cache
@@ -44,6 +44,72 @@ decision-test:
 	cargo test -p factory-kernel --test decision_store -- --ignored --test-threads=1
 	cargo test -p factory-kernel decision_store::tests --lib
 	cargo test -p factory-kernel decision_store::tests::postgres_final_authority_schema_has_exactly_twenty_named_tables --lib -- --ignored --test-threads=1
+
+# The real XSH bundle is independently compiled twice and admitted through the
+# typed Rust/CAS/activation boundary. It migrates and populates its own schema,
+# so it must never share an ordinary or generic-vertical fixture database.
+xsh-bundle-test:
+	test -n "$$FACTORY_TEST_DATABASE_URL"
+	factory_test_database="$${FACTORY_TEST_DATABASE_URL##*/}"; factory_test_database="$${factory_test_database%%\?*}"; printf '%s\n' "$$factory_test_database" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	cargo test -p factory-kernel --test xsh_bundle_admission -- --ignored --test-threads=1
+
+# The generic resident-composition judge needs a fresh disposable schema: it
+# starts the one unseeded Product proposal and proves exactly three sessions.
+# It is deliberately separate from `postgres-test`, whose other fixtures leave
+# state behind that would invalidate that acceptance fact.
+provider-free-vertical:
+	test -n "$$FACTORY_TEST_DATABASE_URL"
+	factory_test_database="$${FACTORY_TEST_DATABASE_URL##*/}"; factory_test_database="$${factory_test_database%%\?*}"; printf '%s\n' "$$factory_test_database" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	cargo test -p factory-kernel --test full_vertical -- --ignored --test-threads=1
+
+# This operator qualification never creates or drops a database. The restore
+# database must already be blank and named factory_restore_v3_<digits>; the
+# restore runtime root must already exist and be empty. See the dry-run record.
+backup-restore-test:
+	test -n "$$FACTORY_BACKUP_SOURCE_DATABASE_URL"
+	test -n "$$FACTORY_BACKUP_SOURCE_RUNTIME_ROOT"
+	test -n "$$FACTORY_BACKUP_RESTORE_DATABASE_URL"
+	test -n "$$FACTORY_BACKUP_RESTORE_RUNTIME_ROOT"
+	test -n "$$FACTORY_BACKUP_DUMP_FILE"
+	deno run --allow-read --allow-write --allow-run --no-prompt --frozen tools/backup_restore_check.ts \
+		--source-database-url "$$FACTORY_BACKUP_SOURCE_DATABASE_URL" \
+		--source-runtime-root "$$FACTORY_BACKUP_SOURCE_RUNTIME_ROOT" \
+		--restore-database-url "$$FACTORY_BACKUP_RESTORE_DATABASE_URL" \
+		--restore-runtime-root "$$FACTORY_BACKUP_RESTORE_RUNTIME_ROOT" \
+		--dump-file "$$FACTORY_BACKUP_DUMP_FILE" \
+		--pg-dump "$${FACTORY_BACKUP_PG_DUMP:?set FACTORY_BACKUP_PG_DUMP to an absolute pg_dump path}" \
+		--pg-restore "$${FACTORY_BACKUP_PG_RESTORE:?set FACTORY_BACKUP_PG_RESTORE to an absolute pg_restore path}" \
+		--psql "$${FACTORY_BACKUP_PSQL:?set FACTORY_BACKUP_PSQL to an absolute psql path}" \
+		--cargo "$${FACTORY_BACKUP_CARGO:?set FACTORY_BACKUP_CARGO to an absolute cargo path}"
+
+# Complete provider-free qualification. The caller, not Make, supplies an
+# already-created disposable database for each stateful judge, plus a distinct
+# fresh database for the generic Product-to-delivery vertical and the source/blank restore
+# clone pair consumed by backup-restore-test. No target here creates or drops
+# a PostgreSQL database.
+provider-free-acceptance:
+	test -n "$$FACTORY_ACCEPTANCE_POSTGRES_URL"
+	test -n "$$FACTORY_ACCEPTANCE_DECISION_URL"
+	test -n "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL"
+	test -n "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
+	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; printf '%s\n' "$$acceptance_postgres_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; printf '%s\n' "$$acceptance_decision_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; printf '%s\n' "$$acceptance_xsh_bundle_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; printf '%s\n' "$$acceptance_vertical_name" | grep -Eq '^factory_test_v3_[0-9]+$$'
+	test "$$FACTORY_ACCEPTANCE_POSTGRES_URL" != "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
+	test "$$FACTORY_ACCEPTANCE_POSTGRES_URL" != "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL"
+	test "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL" != "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
+	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
+	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"
+	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; acceptance_ticket_name="$${FACTORY_ACCEPTANCE_TICKET_URL##*/}"; acceptance_ticket_name="$${acceptance_ticket_name%%\?*}"; acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; test "$$acceptance_postgres_name" != "$$acceptance_ticket_name"; test "$$acceptance_postgres_name" != "$$acceptance_decision_name"; test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; test "$$acceptance_ticket_name" != "$$acceptance_decision_name"; test "$$acceptance_ticket_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_ticket_name" != "$$acceptance_vertical_name"; test "$$acceptance_decision_name" != "$$acceptance_xsh_bundle_name"; test "$$acceptance_decision_name" != "$$acceptance_vertical_name"; test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
+	$(MAKE) check
+	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) postgres-test
+	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_TICKET_URL" $(MAKE) ticket-test
+	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_DECISION_URL" $(MAKE) decision-test
+	DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) sqlx-check
+	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL" $(MAKE) xsh-bundle-test
+	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_VERTICAL_URL" $(MAKE) provider-free-vertical
+	$(MAKE) backup-restore-test
 
 # Requires a disposable PostgreSQL 18 database and an externally installed
 # sqlx-cli matching the pinned project crate. It verifies committed `.sqlx`

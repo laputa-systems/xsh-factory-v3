@@ -3,7 +3,7 @@
  *
  * The host only adapts a tool call to the typed SDK adapter.  It does not
  * expose SQL, author identity, lifecycle commands, or an unbounded arbitrary
- * operation.  The daemon-bound ForumAdapter remains the authority boundary.
+ * operation.  The bound SDK adapter remains the authority boundary.
  */
 
 import type {
@@ -33,12 +33,15 @@ export interface ForumToolDefinition {
   readonly invoke: (input: unknown) => Promise<unknown>;
 }
 
+/** Actor-visible search intentionally omits the durable author-office filter. */
+type ActorForumSearchInput = Omit<ForumSearchInput, "author_office">;
+
 /** Returns one bounded, typed custom-tool definition for each Forum method. */
 export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefinition[] {
   return [
     {
       name: "forum_search",
-      description: "Search permanent Forum history with bounded filters and continuation.",
+      description: "Search assigned discussion history with bounded filters and continuation.",
       input_schema: {
         type: "object",
         required: ["query", "limit"],
@@ -47,7 +50,6 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           query: { type: "string", maxLength: 4096 },
           topic_id: { type: ["integer", "null"], minimum: 1 },
           thread_id: { type: ["integer", "null"], minimum: 1 },
-          author_office: { enum: ["product_research", "engineering", "quality", null] },
           post_kind: {
             enum: [
               "Note",
@@ -66,17 +68,20 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           cursor: { type: ["object", "null"] },
         },
       },
-      invoke: (input) => adapter.search(input as ForumSearchInput),
+      invoke: async (input) => {
+        const { author_office: _discarded, ...actorInput } = input as ForumSearchInput;
+        return stripAuthorOffice(await adapter.search(actorInput as ActorForumSearchInput));
+      },
     },
     {
       name: "forum_list_topics",
-      description: "List Forum topics by derived recent activity.",
+      description: "List assigned discussion topics by recent activity.",
       input_schema: listSchema(),
-      invoke: (input) => adapter.listTopics(input as ForumListInput),
+      invoke: async (input) => stripAuthorOffice(await adapter.listTopics(input as ForumListInput)),
     },
     {
       name: "forum_list_threads",
-      description: "List threads in a Forum topic by derived recent activity.",
+      description: "List threads in an assigned topic by recent activity.",
       input_schema: {
         type: "object",
         required: ["topic_id", "limit"],
@@ -88,12 +93,12 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
       },
       invoke: async (input) => {
         const value = input as { topic_id: number } & ForumListInput;
-        return await adapter.listThreads(value.topic_id, value);
+        return stripAuthorOffice(await adapter.listThreads(value.topic_id, value));
       },
     },
     {
       name: "forum_read_thread",
-      description: "Read a bounded chronological page of immutable Forum posts.",
+      description: "Read a bounded chronological page of immutable discussion posts.",
       input_schema: {
         type: "object",
         required: ["thread_id", "limit"],
@@ -104,11 +109,12 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
           limit: { type: "integer", minimum: 1, maximum: 20 },
         },
       },
-      invoke: (input) => adapter.readThread(input as ForumThreadPageInput),
+      invoke: async (input) =>
+        stripAuthorOffice(await adapter.readThread(input as ForumThreadPageInput)),
     },
     {
       name: "forum_create_topic",
-      description: "Create one permanent Forum topic; this does not create authority.",
+      description: "Create one persistent discussion topic.",
       input_schema: {
         type: "object",
         required: ["client_command_id", "expected_revision", "name", "description"],
@@ -124,7 +130,7 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
     },
     {
       name: "forum_create_thread",
-      description: "Create one permanent Forum thread beneath an existing topic.",
+      description: "Create one persistent discussion thread beneath an existing topic.",
       input_schema: {
         type: "object",
         required: ["client_command_id", "expected_revision", "topic_id", "title"],
@@ -140,7 +146,7 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
     },
     {
       name: "forum_post",
-      description: "Append an immutable Forum post, reply, correction, or supersession.",
+      description: "Append an immutable discussion post, reply, correction, or supersession.",
       input_schema: {
         type: "object",
         required: ["client_command_id", "expected_revision", "thread_id", "kind", "body"],
@@ -169,6 +175,22 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
       invoke: (input) => adapter.post(input as ForumPostInput),
     },
   ];
+}
+
+/**
+ * Rust retains author-office attribution for durable audit and operator
+ * surfaces.  This actor adapter deliberately discards that institutional
+ * metadata from every Forum result before it can enter a model transcript.
+ */
+function stripAuthorOffice(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripAuthorOffice);
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => key !== "author_office")
+      .map(([key, item]) => [key, stripAuthorOffice(item)]),
+  );
 }
 
 function listSchema(): Readonly<Record<string, unknown>> {

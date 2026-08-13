@@ -14,14 +14,14 @@ use factory_protocol::{
     ExpectedRevision, KernelBuildId, RepositoryId,
 };
 use sqlx::{
-    PgPool, Postgres, Row,
+    PgPool, Postgres,
     migrate::{MigrateError, Migrator},
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use thiserror::Error;
 
 /// Comment installed on the factory-owned schema by the first migration.
-pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:initial-authority-v10";
+pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:initial-authority-v13";
 
 /// A fixed kernel-local key. PostgreSQL holds it per connection until explicit
 /// release or connection death, so a daemon restart cannot inherit a stale lock.
@@ -580,22 +580,20 @@ impl KernelStore {
     ) -> Result<KernelBuildAtRevision, StoreError> {
         let revision = i64::try_from(expected_revision.get().get())
             .map_err(|_| StoreError::RevisionOutOfRange)?;
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT build_digest, revision
              FROM factory.kernel_builds
              WHERE revision = $1",
+            revision,
         )
-        .bind(revision)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(StoreError::UnknownKernelBuildRevision { expected_revision })?;
-        let build_digest: Vec<u8> = row.try_get("build_digest")?;
-        let persisted_revision: i64 = row.try_get("revision")?;
         Ok(KernelBuildAtRevision {
             kernel_build_id: KernelBuildId::new(ContentDigest::from_bytes(bytes_to_digest(
-                &build_digest,
+                &row.build_digest,
             )?)),
-            aggregate_revision: aggregate_revision_from_sql(persisted_revision)?,
+            aggregate_revision: aggregate_revision_from_sql(row.revision)?,
         })
     }
 
@@ -732,8 +730,13 @@ impl KernelStore {
         })
     }
 
-    /// Checks that every first-line authority fact has exactly one matching
-    /// audit receipt. It is a read-only material-state/audit consistency probe.
+    /// Checks that every independently created durable authority row has
+    /// exactly one matching creation receipt. This is deliberately broader
+    /// than audit-to-subject validation: a receipt can point to a real row
+    /// while a copied database has lost the row's original creation proof.
+    /// Child rows born inside a parent transition (tickets and Forum
+    /// attachments) are excluded because they do not mint their own command.
+    /// It is a read-only material-state/audit consistency probe.
     pub async fn audit_is_consistent(&self) -> Result<bool, StoreError> {
         Ok(sqlx::query_scalar!(
             "SELECT NOT EXISTS (
@@ -765,6 +768,58 @@ impl KernelStore {
                            OR ar.quality_system_template_artifact_id = a.id
                            OR ar.quality_assignment_template_artifact_id = a.id
                     )
+                    UNION ALL
+                    SELECT 4::SMALLINT, id, 'campaign.start'::TEXT
+                    FROM factory.campaigns
+                    UNION ALL
+                    SELECT 5::SMALLINT, id, 'assignment.create'::TEXT
+                    FROM factory.assignments
+                    UNION ALL
+                    SELECT 6::SMALLINT, id, 'session.start'::TEXT
+                    FROM factory.sessions
+                    UNION ALL
+                    SELECT 10::SMALLINT, id,
+                           CASE WHEN supersedes_topic_id IS NULL
+                                THEN 'forum.topic.create'
+                                ELSE 'forum.topic.supersede'
+                           END
+                    FROM factory.forum_topics
+                    UNION ALL
+                    SELECT 11::SMALLINT, id,
+                           CASE WHEN supersedes_thread_id IS NULL
+                                THEN 'forum.thread.create'
+                                ELSE 'forum.thread.supersede'
+                           END
+                    FROM factory.forum_threads
+                    UNION ALL
+                    SELECT 12::SMALLINT, id, 'forum.post.append'::TEXT
+                    FROM factory.forum_posts
+                    UNION ALL
+                    SELECT 30::SMALLINT, id, 'ticket.propose'::TEXT
+                    FROM factory.ticket_revisions
+                    UNION ALL
+                    SELECT 32::SMALLINT, id, 'ticket.claim'::TEXT
+                    FROM factory.ticket_attempts
+                    UNION ALL
+                    SELECT 40::SMALLINT, id, 'candidate.submit'::TEXT
+                    FROM factory.candidates
+                    UNION ALL
+                    SELECT 41::SMALLINT, id, 'validation.record'::TEXT
+                    FROM factory.validations
+                    UNION ALL
+                    SELECT 42::SMALLINT, id, 'quality.review.submit'::TEXT
+                    FROM factory.reviews
+                    UNION ALL
+                    SELECT 43::SMALLINT, id,
+                           CASE decision_kind
+                                WHEN 0 THEN 'architect.ticket.sponsor'
+                                WHEN 1 THEN 'architect.ticket.release'
+                                ELSE 'architect.candidate.decide'
+                           END
+                    FROM factory.architect_decisions
+                    UNION ALL
+                    SELECT 44::SMALLINT, id, 'delivery.record'::TEXT
+                    FROM factory.deliveries
                  ) AS fact
                  LEFT JOIN factory.audit_log AS audit
                    ON audit.subject_kind = fact.subject_kind
@@ -785,6 +840,231 @@ impl KernelStore {
         .fetch_one(&self.pool)
         .await?)
     }
+
+    /// Read-only restore gate for a copied PostgreSQL/CAS pair. Before a
+    /// resident daemon exposes its socket, prove the expected schema, the
+    /// first-line audit/material relation, and every registered CAS identity.
+    /// This deliberately performs no migration, repair, adoption, or audit
+    /// write: an operator must restore a mutually consistent pair first.
+    pub async fn verify_restore_integrity(&self, cas: &CasStore) -> Result<(), StoreError> {
+        self.verify_schema_identity().await?;
+        if !self.audit_is_consistent().await? {
+            return Err(StoreError::RestoreAuditInconsistent);
+        }
+        if let Some(invalid) = self.first_invalid_audit_subject().await? {
+            return Err(StoreError::RestoreAuditSubjectInvalid {
+                audit_log_id: invalid.audit_log_id,
+                subject_kind: invalid.subject_kind,
+                subject_id: invalid.subject_id,
+            });
+        }
+        // Page rather than loading an unbounded artifact set into memory. The
+        // query has a fixed shape and identifier ordering; it observes no
+        // mutable daemon state and never creates restore bookkeeping.
+        let mut after_id = 0_i64;
+        loop {
+            let rows = sqlx::query!(
+                "SELECT id, digest, byte_length, cas_relative_path
+                   FROM factory.artifacts
+                  WHERE id > $1
+                  ORDER BY id ASC
+                  LIMIT 128",
+                after_id,
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            if rows.is_empty() {
+                break;
+            }
+            for row in &rows {
+                after_id = row.id;
+                let digest = row.digest.clone();
+                let digest = ContentDigest::from_bytes(bytes_to_digest(&digest)?);
+                let byte_length = row.byte_length;
+                let byte_length =
+                    u64::try_from(byte_length).map_err(|_| StoreError::ArtifactLengthOutOfRange)?;
+                let persisted_path = &row.cas_relative_path;
+                let expected_path = cas.object_relative_path(digest)?;
+                if persisted_path != expected_path.as_str() {
+                    return Err(StoreError::RestoreArtifactPathMismatch { digest });
+                }
+                let verified = cas.verify(digest)?;
+                if verified.byte_length() != byte_length {
+                    return Err(StoreError::RestoreArtifactLengthMismatch {
+                        digest,
+                        expected: byte_length,
+                        observed: verified.byte_length(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the first audit receipt whose subject is not part of the
+    /// closed durable subject registry or no longer names the row family that
+    /// minted it.  This is deliberately separate from [`Self::audit_is_consistent`]:
+    /// first-line facts need exactly one receipt, while every receipt needs a
+    /// non-ambiguous, extant subject.
+    async fn first_invalid_audit_subject(&self) -> Result<Option<InvalidAuditSubject>, StoreError> {
+        let row = sqlx::query!(
+            "SELECT audit.id, audit.subject_kind, audit.subject_id
+             FROM factory.audit_log AS audit
+             WHERE NOT (
+                 (audit.subject_kind = 0
+                  AND audit.operation = 'kernel_build.install'
+                  AND EXISTS (
+                     SELECT 1 FROM factory.kernel_builds AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 1
+                     AND audit.operation IN ('application_revision.admit', 'application_revision.activate')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.application_revisions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 2
+                     AND audit.operation = 'repository.register'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.repositories AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 3
+                     AND audit.operation = 'artifact.register'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.artifacts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 4
+                     AND audit.operation IN ('campaign.start', 'campaign.cancel', 'campaign.fail')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.campaigns AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 5
+                     AND audit.operation = 'assignment.create'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.assignments AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 6
+                     AND audit.operation IN ('session.start', 'session.terminal')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.sessions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 10
+                     AND audit.operation IN ('forum.topic.create', 'forum.topic.supersede')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.forum_topics AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 11
+                     AND audit.operation IN ('forum.thread.create', 'forum.thread.supersede')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.forum_threads AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 12
+                     AND audit.operation = 'forum.post.append'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.forum_posts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 30
+                     AND audit.operation = 'ticket.propose'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_revisions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 31
+                     AND audit.operation = 'ticket.sponsor'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_revisions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind IN (33, 34)
+                     AND audit.operation = 'ticket.claim'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_revisions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 32
+                     AND audit.operation = 'ticket.claim'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_attempts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 35
+                     AND audit.operation = 'ticket_attempt.fail'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_attempts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind IN (36, 37, 38)
+                     AND audit.operation = 'ticket_attempt.release'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.ticket_attempts AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 39
+                     AND audit.operation = 'campaign.complete_delivery_target'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.campaigns AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 40
+                     AND audit.operation IN ('candidate.submit', 'candidate.commit.attach')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.candidates AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 41
+                     AND audit.operation = 'validation.record'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.validations AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 42
+                     AND audit.operation = 'quality.review.submit'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.reviews AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 43
+                     AND audit.operation IN ('architect.ticket.sponsor', 'architect.ticket.release', 'architect.candidate.decide')
+                     AND EXISTS (
+                     SELECT 1 FROM factory.architect_decisions AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+                 OR (audit.subject_kind = 44
+                     AND audit.operation = 'delivery.record'
+                     AND EXISTS (
+                     SELECT 1 FROM factory.deliveries AS subject
+                     WHERE subject.id = audit.subject_id
+                 ))
+             )
+             ORDER BY audit.id ASC
+             LIMIT 1"
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(InvalidAuditSubject {
+                audit_log_id: row.id,
+                subject_kind: row.subject_kind,
+                subject_id: row.subject_id,
+            })
+        })
+        .transpose()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InvalidAuditSubject {
+    audit_log_id: i64,
+    subject_kind: i16,
+    subject_id: i64,
 }
 
 /// Held singleton connection. Call [`Self::release`] before orderly shutdown;
@@ -1055,6 +1335,30 @@ pub enum StoreError {
 
     #[error("schema identity mismatch: expected {SCHEMA_IDENTITY:?}, observed {observed:?}")]
     SchemaIdentityMismatch { observed: Option<String> },
+
+    #[error("restore audit/material facts are inconsistent")]
+    RestoreAuditInconsistent,
+
+    #[error(
+        "restore audit receipt {audit_log_id} has an unknown, ambiguous, or orphaned subject ({subject_kind}, {subject_id})"
+    )]
+    RestoreAuditSubjectInvalid {
+        audit_log_id: i64,
+        subject_kind: i16,
+        subject_id: i64,
+    },
+
+    #[error("restore artifact {digest} has a noncanonical persisted CAS path")]
+    RestoreArtifactPathMismatch { digest: ContentDigest },
+
+    #[error(
+        "restore artifact {digest} length differs: PostgreSQL expects {expected}, CAS contains {observed}"
+    )]
+    RestoreArtifactLengthMismatch {
+        digest: ContentDigest,
+        expected: u64,
+        observed: u64,
+    },
 
     #[error("PostgreSQL reported an unparseable server version {server_version_num:?}")]
     UnparseablePostgresVersion { server_version_num: String },

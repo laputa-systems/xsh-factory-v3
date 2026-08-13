@@ -15,7 +15,7 @@ use factory_protocol::{
     SealedArtifactReferenceV1, SessionId, SponsorshipDecisionV1, TicketAttemptId, TicketRevisionId,
     TicketState, ValidationId, ValidationState,
 };
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::{storage::KernelStore, ticket_store::CurrentHeadRequalification};
@@ -438,7 +438,7 @@ impl DecisionStore {
             .checked_add(1)
             .ok_or(DecisionStoreError::IntegerOutOfRange)?;
         let next_attempt = attempt.attempt_revision.next()?;
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO factory.candidates (
                  ticket_attempt_id, base_commit, base_tree, regression_tree, candidate_tree,
                  changed_paths_artifact_id, regression_patch_artifact_id,
@@ -451,27 +451,26 @@ impl DecisionStore {
                  $13, $14, $15, $16, 0, 0
              )
              RETURNING id",
+            command.ticket_attempt_id.get(),
+            command.base_commit.as_str(),
+            command.base_tree.as_str(),
+            command.regression_tree.as_str(),
+            command.candidate_tree.as_str(),
+            command.changed_paths.artifact_id.get(),
+            command.regression_patch.artifact_id.get(),
+            command.regression_command_set.artifact_id.get(),
+            command.regression_log.artifact_id.get(),
+            command.candidate_patch.artifact_id.get(),
+            command.engineering_session_id.get(),
+            command.submission.engineering_report.artifact_id.get(),
+            &command.submission.commit_subject,
+            &command.submission.commit_body,
+            &command.submission.regression_test_identity,
+            command.submission.risks.artifact_id.get(),
         )
-        .bind(command.ticket_attempt_id.get())
-        .bind(command.base_commit.as_str())
-        .bind(command.base_tree.as_str())
-        .bind(command.regression_tree.as_str())
-        .bind(command.candidate_tree.as_str())
-        .bind(command.changed_paths.artifact_id.get())
-        .bind(command.regression_patch.artifact_id.get())
-        .bind(command.regression_command_set.artifact_id.get())
-        .bind(command.regression_log.artifact_id.get())
-        .bind(command.candidate_patch.artifact_id.get())
-        .bind(command.engineering_session_id.get())
-        .bind(command.submission.engineering_report.artifact_id.get())
-        .bind(&command.submission.commit_subject)
-        .bind(&command.submission.commit_body)
-        .bind(&command.submission.regression_test_identity)
-        .bind(command.submission.risks.artifact_id.get())
-        .bind(CANDIDATE_SUBMITTED)
         .fetch_one(&mut *tx)
         .await?;
-        let candidate_id = CandidateId::new(row.try_get::<i64, _>("id")?)?;
+        let candidate_id = CandidateId::new(row.id)?;
         // Candidate submission is deliberately its own durable boundary.  A
         // daemon crash before hard validation must be visible to the
         // scheduler as a kernel-owned recovery action, not as Engineering
@@ -481,14 +480,14 @@ impl DecisionStore {
         } else {
             ATTEMPT_REWORK_VALIDATION
         };
-        sqlx::query(
+        sqlx::query!(
             "UPDATE factory.ticket_attempts
              SET candidate_ordinal = $1, stage = $2, revision = $3 WHERE id = $4",
+            candidate_ordinal,
+            validation_stage,
+            revision_sql(next_attempt)?,
+            command.ticket_attempt_id.get(),
         )
-        .bind(candidate_ordinal)
-        .bind(validation_stage)
-        .bind(revision_sql(next_attempt)?)
-        .bind(command.ticket_attempt_id.get())
         .execute(&mut *tx)
         .await?;
         let audit_log_id = insert_audit(
@@ -609,29 +608,27 @@ impl DecisionStore {
                 scope: command.scope,
             });
         }
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO factory.validations (
                 candidate_id, kernel_build_id, performed_by_session_id, validation_scope,
                 validation_profile, pristine_tree, command_set_artifact_id, lifecycle,
                 duration_millis, log_artifact_id
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
-        )
-        .bind(command.candidate_id.get())
-        .bind(build_database_id)
-        .bind(command.performed_by_session_id.get())
-        .bind(command.scope.code())
-        .bind(&command.validation_profile)
-        .bind(command.pristine_tree.as_str())
-        .bind(command.command_set.artifact_id.get())
-        .bind(command.result.code())
-        .bind(
+            command.candidate_id.get(),
+            build_database_id,
+            command.performed_by_session_id.get(),
+            command.scope.code(),
+            &command.validation_profile,
+            command.pristine_tree.as_str(),
+            command.command_set.artifact_id.get(),
+            command.result.code(),
             i64::try_from(command.duration_millis)
                 .map_err(|_| DecisionStoreError::IntegerOutOfRange)?,
+            command.log.artifact_id.get(),
         )
-        .bind(command.log.artifact_id.get())
         .fetch_one(&mut *tx)
         .await?;
-        let validation_id = ValidationId::new(row.try_get::<i64, _>("id")?)?;
+        let validation_id = ValidationId::new(row.id)?;
         let (next_candidate_state, next_attempt_stage) =
             if command.result == ValidationResult::Passed {
                 match command.scope {
@@ -652,17 +649,21 @@ impl DecisionStore {
             };
         let next_candidate = candidate.revision.next()?;
         let next_attempt = attempt.attempt_revision.next()?;
-        sqlx::query("UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3")
-            .bind(next_candidate_state)
-            .bind(revision_sql(next_candidate)?)
-            .bind(command.candidate_id.get())
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE factory.ticket_attempts SET stage = $1, revision = $2, failed_at = CASE WHEN $1 = $3 THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1 = $3 THEN 'hard validation did not pass' ELSE failure_reason END WHERE id = $4")
-            .bind(next_attempt_stage)
-            .bind(revision_sql(next_attempt)?)
-            .bind(ATTEMPT_FAILED)
-            .bind(attempt.id.get())
+        sqlx::query!(
+            "UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3",
+            next_candidate_state,
+            revision_sql(next_candidate)?,
+            command.candidate_id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "UPDATE factory.ticket_attempts SET stage = $1::SMALLINT, revision = $2, failed_at = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN 'hard validation did not pass' ELSE failure_reason END WHERE id = $4",
+            next_attempt_stage,
+            revision_sql(next_attempt)?,
+            ATTEMPT_FAILED,
+            attempt.id.get(),
+        )
             .execute(&mut *tx)
             .await?;
         let audit_log_id = insert_audit(
@@ -750,14 +751,14 @@ impl DecisionStore {
             return Err(DecisionStoreError::InvalidCandidateRef);
         }
         let next = candidate.revision.next()?;
-        sqlx::query(
+        sqlx::query!(
             "UPDATE factory.candidates SET candidate_commit = $1, candidate_ref = $2, revision = $3
              WHERE id = $4",
+            command.candidate_commit.as_str(),
+            &command.candidate_ref,
+            revision_sql(next)?,
+            command.candidate_id.get(),
         )
-        .bind(command.candidate_commit.as_str())
-        .bind(&command.candidate_ref)
-        .bind(revision_sql(next)?)
-        .bind(command.candidate_id.get())
         .execute(&mut *tx)
         .await?;
         let audit_log_id = insert_audit(
@@ -850,6 +851,16 @@ impl DecisionStore {
         if quality_validation.kernel_build_database_id != attempt.kernel_build_database_id {
             return Err(DecisionStoreError::ValidationBuildMismatch);
         }
+        // A continuation review may be submitted by a new Quality session,
+        // but the persisted full-suite receipt must still prove that its
+        // original performer was a viable Quality session in this campaign.
+        require_session_jurisdiction(
+            &mut tx,
+            SessionId::new(quality_validation.performed_by_session_id)?,
+            attempt.campaign_id,
+            OFFICE_QUALITY,
+        )
+        .await?;
         require_session(
             &mut tx,
             command.quality_session_id,
@@ -881,35 +892,39 @@ impl DecisionStore {
             });
         }
         let verdict = review_verdict_code(command.submission.verdict);
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO factory.reviews (
                  candidate_id, quality_session_id, full_suite_validation_id, verdict,
                  rationale_artifact_id, risks_artifact_id, additional_probes_artifact_id
              ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            command.candidate_id.get(),
+            command.quality_session_id.get(),
+            command.submission.full_suite_validation_id.get(),
+            verdict,
+            command.submission.rationale.artifact_id.get(),
+            command.submission.risks.artifact_id.get(),
+            command.submission.additional_probes.artifact_id.get(),
         )
-        .bind(command.candidate_id.get())
-        .bind(command.quality_session_id.get())
-        .bind(command.submission.full_suite_validation_id.get())
-        .bind(verdict)
-        .bind(command.submission.rationale.artifact_id.get())
-        .bind(command.submission.risks.artifact_id.get())
-        .bind(command.submission.additional_probes.artifact_id.get())
         .fetch_one(&mut *tx)
         .await?;
-        let review_id = ReviewId::new(row.try_get::<i64, _>("id")?)?;
+        let review_id = ReviewId::new(row.id)?;
         let next_candidate = candidate.revision.next()?;
         let next_attempt = attempt.attempt_revision.next()?;
-        sqlx::query("UPDATE factory.candidates SET revision = $1 WHERE id = $2")
-            .bind(revision_sql(next_candidate)?)
-            .bind(command.candidate_id.get())
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE factory.ticket_attempts SET stage = $1, revision = $2 WHERE id = $3")
-            .bind(ATTEMPT_AWAITING_ARCHITECT)
-            .bind(revision_sql(next_attempt)?)
-            .bind(attempt.id.get())
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query!(
+            "UPDATE factory.candidates SET revision = $1 WHERE id = $2",
+            revision_sql(next_candidate)?,
+            command.candidate_id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "UPDATE factory.ticket_attempts SET stage = $1, revision = $2 WHERE id = $3",
+            ATTEMPT_AWAITING_ARCHITECT,
+            revision_sql(next_attempt)?,
+            attempt.id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
         let audit_log_id = insert_audit(
             &mut tx,
             &command.principal,
@@ -1102,10 +1117,12 @@ impl DecisionStore {
         .await?;
         let next_attempt = attempt.attempt_revision.next()?;
         let next_ticket = attempt.ticket_revision.next()?;
-        sqlx::query("UPDATE factory.ticket_attempts SET released_at = CURRENT_TIMESTAMP, release_reason = $1, revision = $2 WHERE id = $3")
-            .bind(format!("architect decision {decision_id}"))
-            .bind(revision_sql(next_attempt)?)
-            .bind(attempt.id.get())
+        sqlx::query!(
+            "UPDATE factory.ticket_attempts SET released_at = CURRENT_TIMESTAMP, release_reason = $1, revision = $2 WHERE id = $3",
+            format!("architect decision {decision_id}"),
+            revision_sql(next_attempt)?,
+            attempt.id.get(),
+        )
             .execute(&mut *tx)
             .await?;
         update_ticket_requalification(
@@ -1247,18 +1264,22 @@ impl DecisionStore {
             CandidateDecisionV1::Rework => (CANDIDATE_REJECTED, ATTEMPT_REWORK_ENGINEERING),
             CandidateDecisionV1::Reject => (CANDIDATE_REJECTED, ATTEMPT_FAILED),
         };
-        sqlx::query("UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3")
-            .bind(candidate_lifecycle)
-            .bind(revision_sql(next_candidate)?)
-            .bind(command.request.candidate_id.get())
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE factory.ticket_attempts SET stage = $1, rework_ordinal = rework_ordinal + $2, failed_at = CASE WHEN $1 = $3 THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1 = $3 THEN 'architect rejected reviewed candidate' ELSE failure_reason END, revision = $4 WHERE id = $5")
-            .bind(attempt_stage)
-            .bind(if command.request.decision == CandidateDecisionV1::Rework { 1 } else { 0 })
-            .bind(ATTEMPT_FAILED)
-            .bind(revision_sql(next_attempt)?)
-            .bind(attempt.id.get())
+        sqlx::query!(
+            "UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3",
+            candidate_lifecycle,
+            revision_sql(next_candidate)?,
+            command.request.candidate_id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "UPDATE factory.ticket_attempts SET stage = $1::SMALLINT, rework_ordinal = rework_ordinal + $2, failed_at = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN 'architect rejected reviewed candidate' ELSE failure_reason END, revision = $4 WHERE id = $5",
+            attempt_stage,
+            if command.request.decision == CandidateDecisionV1::Rework { 1 } else { 0 },
+            ATTEMPT_FAILED,
+            revision_sql(next_attempt)?,
+            attempt.id.get(),
+        )
             .execute(&mut *tx)
             .await?;
         if command.request.decision == CandidateDecisionV1::Reject {
@@ -1378,41 +1399,47 @@ impl DecisionStore {
         } else {
             campaign.revision
         };
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "INSERT INTO factory.deliveries (
                  candidate_id, candidate_commit, expected_old_commit, resulting_commit,
                  resulting_tree, method, lifecycle, recovery_status, receipt_artifact_id
              ) VALUES ($1, $2, $3, $4, $5, 0, 1, 0, $6) RETURNING id",
+            command.candidate_id.get(),
+            candidate_commit,
+            command.expected_old_commit.as_str(),
+            command.resulting_commit.as_str(),
+            command.resulting_tree.as_str(),
+            command.receipt.artifact_id.get(),
         )
-        .bind(command.candidate_id.get())
-        .bind(candidate_commit)
-        .bind(command.expected_old_commit.as_str())
-        .bind(command.resulting_commit.as_str())
-        .bind(command.resulting_tree.as_str())
-        .bind(command.receipt.artifact_id.get())
         .fetch_one(&mut *tx)
         .await?;
-        let delivery_id = factory_protocol::DeliveryId::new(row.try_get::<i64, _>("id")?)?;
-        sqlx::query("UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3")
-            .bind(CANDIDATE_DELIVERED)
-            .bind(revision_sql(next_candidate)?)
-            .bind(command.candidate_id.get())
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE factory.ticket_attempts SET stage = $1, revision = $2 WHERE id = $3")
-            .bind(ATTEMPT_DELIVERED)
-            .bind(revision_sql(next_attempt)?)
-            .bind(attempt.id.get())
-            .execute(&mut *tx)
-            .await?;
+        let delivery_id = factory_protocol::DeliveryId::new(row.id)?;
+        sqlx::query!(
+            "UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3",
+            CANDIDATE_DELIVERED,
+            revision_sql(next_candidate)?,
+            command.candidate_id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "UPDATE factory.ticket_attempts SET stage = $1, revision = $2 WHERE id = $3",
+            ATTEMPT_DELIVERED,
+            revision_sql(next_attempt)?,
+            attempt.id.get(),
+        )
+        .execute(&mut *tx)
+        .await?;
         update_ticket_state(&mut tx, &attempt, TICKET_DELIVERED, next_ticket, None, None).await?;
         if completed {
-            sqlx::query("UPDATE factory.campaigns SET lifecycle = $1, revision = $2 WHERE id = $3")
-                .bind(CAMPAIGN_COMPLETED)
-                .bind(revision_sql(next_campaign)?)
-                .bind(attempt.campaign_id.get())
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query!(
+                "UPDATE factory.campaigns SET lifecycle = $1, revision = $2 WHERE id = $3",
+                CAMPAIGN_COMPLETED,
+                revision_sql(next_campaign)?,
+                attempt.campaign_id.get(),
+            )
+            .execute(&mut *tx)
+            .await?;
         }
         let audit_log_id = insert_audit(
             &mut tx,
@@ -1631,14 +1658,16 @@ async fn lock_candidate(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: i64,
 ) -> Result<(), DecisionStoreError> {
-    sqlx::query("SELECT id FROM factory.candidates WHERE id = $1 FOR UPDATE")
-        .bind(candidate_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| DecisionStoreError::UnknownCandidate {
-            candidate_id: CandidateId::new(candidate_id)
-                .expect("database candidate IDs are positive by invariant"),
-        })?;
+    sqlx::query!(
+        "SELECT id FROM factory.candidates WHERE id = $1 FOR UPDATE",
+        candidate_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| DecisionStoreError::UnknownCandidate {
+        candidate_id: CandidateId::new(candidate_id)
+            .expect("database candidate IDs are positive by invariant"),
+    })?;
     Ok(())
 }
 
@@ -1646,14 +1675,16 @@ async fn lock_attempt(
     tx: &mut Transaction<'_, Postgres>,
     attempt_id: i64,
 ) -> Result<(), DecisionStoreError> {
-    sqlx::query("SELECT id FROM factory.ticket_attempts WHERE id = $1 FOR UPDATE")
-        .bind(attempt_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| DecisionStoreError::UnknownTicketAttempt {
-            ticket_attempt_id: TicketAttemptId::new(attempt_id)
-                .expect("database attempt IDs are positive by invariant"),
-        })?;
+    sqlx::query!(
+        "SELECT id FROM factory.ticket_attempts WHERE id = $1 FOR UPDATE",
+        attempt_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| DecisionStoreError::UnknownTicketAttempt {
+        ticket_attempt_id: TicketAttemptId::new(attempt_id)
+            .expect("database attempt IDs are positive by invariant"),
+    })?;
     Ok(())
 }
 
@@ -1661,10 +1692,12 @@ async fn lock_ticket_revision(
     tx: &mut Transaction<'_, Postgres>,
     ticket_revision_id: i64,
 ) -> Result<(), DecisionStoreError> {
-    let row = sqlx::query("SELECT id FROM factory.ticket_revisions WHERE id = $1 FOR UPDATE")
-        .bind(ticket_revision_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+    let row = sqlx::query!(
+        "SELECT id FROM factory.ticket_revisions WHERE id = $1 FOR UPDATE",
+        ticket_revision_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     if row.is_none() {
         return Err(DecisionStoreError::CorruptState);
     }
@@ -1675,16 +1708,23 @@ async fn load_candidate(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: CandidateId,
 ) -> Result<CandidateRow, DecisionStoreError> {
-    candidate_from_row(
-        sqlx::query(
-            "SELECT id, ticket_attempt_id, base_commit, candidate_tree, lifecycle, revision,
-                    candidate_commit
-             FROM factory.candidates WHERE id = $1",
-        )
-        .bind(candidate_id.get())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::UnknownCandidate { candidate_id })?,
+    let row = sqlx::query!(
+        "SELECT id, ticket_attempt_id, base_commit, candidate_tree, lifecycle, revision,
+                candidate_commit
+         FROM factory.candidates WHERE id = $1",
+        candidate_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::UnknownCandidate { candidate_id })?;
+    candidate_from_fields(
+        row.id,
+        row.ticket_attempt_id,
+        row.base_commit,
+        row.candidate_tree,
+        row.lifecycle,
+        row.revision,
+        row.candidate_commit,
     )
 }
 
@@ -1692,28 +1732,43 @@ async fn load_candidate_for_update(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: CandidateId,
 ) -> Result<CandidateRow, DecisionStoreError> {
-    candidate_from_row(
-        sqlx::query(
-            "SELECT id, ticket_attempt_id, base_commit, candidate_tree, lifecycle, revision,
-                    candidate_commit
-             FROM factory.candidates WHERE id = $1 FOR UPDATE",
-        )
-        .bind(candidate_id.get())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::UnknownCandidate { candidate_id })?,
+    let row = sqlx::query!(
+        "SELECT id, ticket_attempt_id, base_commit, candidate_tree, lifecycle, revision,
+                candidate_commit
+         FROM factory.candidates WHERE id = $1 FOR UPDATE",
+        candidate_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::UnknownCandidate { candidate_id })?;
+    candidate_from_fields(
+        row.id,
+        row.ticket_attempt_id,
+        row.base_commit,
+        row.candidate_tree,
+        row.lifecycle,
+        row.revision,
+        row.candidate_commit,
     )
 }
 
-fn candidate_from_row(row: sqlx::postgres::PgRow) -> Result<CandidateRow, DecisionStoreError> {
+fn candidate_from_fields(
+    id: i64,
+    ticket_attempt_id: i64,
+    base_commit: String,
+    candidate_tree: String,
+    lifecycle: i16,
+    revision: i64,
+    candidate_commit: Option<String>,
+) -> Result<CandidateRow, DecisionStoreError> {
     Ok(CandidateRow {
-        id: CandidateId::new(row.try_get("id")?)?,
-        ticket_attempt_id: TicketAttemptId::new(row.try_get("ticket_attempt_id")?)?,
-        base_commit: row.try_get("base_commit")?,
-        candidate_tree: row.try_get("candidate_tree")?,
-        lifecycle: row.try_get("lifecycle")?,
-        revision: revision_from_sql(row.try_get("revision")?)?,
-        candidate_commit: row.try_get("candidate_commit")?,
+        id: CandidateId::new(id)?,
+        ticket_attempt_id: TicketAttemptId::new(ticket_attempt_id)?,
+        base_commit,
+        candidate_tree,
+        lifecycle,
+        revision: revision_from_sql(revision)?,
+        candidate_commit,
     })
 }
 
@@ -1721,10 +1776,10 @@ async fn lock_candidate_attempt(
     tx: &mut Transaction<'_, Postgres>,
     attempt_id: TicketAttemptId,
 ) -> Result<AttemptRow, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT ta.id, ta.campaign_id, c.kernel_build_id AS kernel_build_database_id,
                 ta.ticket_revision_id, ta.stage, ta.candidate_ordinal, ta.rework_ordinal,
-                ta.released_at IS NOT NULL AS released, ta.revision AS attempt_revision,
+                ta.released_at IS NOT NULL AS \"released!\", ta.revision AS attempt_revision,
                 ta.claimed_commit, ta.claimed_tree,
                 tr.ticket_id, tr.lifecycle AS ticket_revision_lifecycle,
                 tr.revision AS ticket_revision_aggregate_revision,
@@ -1737,40 +1792,39 @@ async fn lock_candidate_attempt(
          JOIN factory.tickets t ON t.id = tr.ticket_id
          WHERE ta.id = $1
          FOR UPDATE OF ta, tr, t, c",
+        attempt_id.get(),
     )
-    .bind(attempt_id.get())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::UnknownTicketAttempt {
         ticket_attempt_id: attempt_id,
     })?;
-    let ticket_revision_id = TicketRevisionId::new(row.try_get("ticket_revision_id")?)?;
-    let current_ticket_revision_id: i64 = row.try_get("current_ticket_revision_id")?;
-    let observed_ticket_state = ticket_state(row.try_get("ticket_revision_lifecycle")?)?;
+    let ticket_revision_id = TicketRevisionId::new(row.ticket_revision_id)?;
+    let current_ticket_revision_id = row.current_ticket_revision_id;
+    let observed_ticket_state = ticket_state(row.ticket_revision_lifecycle)?;
     if current_ticket_revision_id != ticket_revision_id.get()
-        || observed_ticket_state != ticket_state(row.try_get("ticket_lifecycle")?)?
-        || row.try_get::<i64, _>("ticket_revision_aggregate_revision")?
-            != row.try_get::<i64, _>("ticket_aggregate_revision")?
+        || observed_ticket_state != ticket_state(row.ticket_lifecycle)?
+        || row.ticket_revision_aggregate_revision != row.ticket_aggregate_revision
     {
         return Err(DecisionStoreError::CorruptState);
     }
     Ok(AttemptRow {
-        id: TicketAttemptId::new(row.try_get("id")?)?,
-        campaign_id: factory_protocol::CampaignId::new(row.try_get("campaign_id")?)?,
-        kernel_build_database_id: row.try_get("kernel_build_database_id")?,
-        ticket_id: row.try_get("ticket_id")?,
+        id: TicketAttemptId::new(row.id)?,
+        campaign_id: factory_protocol::CampaignId::new(row.campaign_id)?,
+        kernel_build_database_id: row.kernel_build_database_id,
+        ticket_id: row.ticket_id,
         ticket_revision_id,
         ticket_state: observed_ticket_state,
-        ticket_revision: revision_from_sql(row.try_get("ticket_revision_aggregate_revision")?)?,
-        attempt_revision: revision_from_sql(row.try_get("attempt_revision")?)?,
-        stage: row.try_get("stage")?,
-        candidate_ordinal: row.try_get("candidate_ordinal")?,
-        rework_ordinal: row.try_get("rework_ordinal")?,
-        released: row.try_get("released")?,
-        claimed_commit: row.try_get("claimed_commit")?,
-        claimed_tree: row.try_get("claimed_tree")?,
-        expected_observation_artifact_id: row.try_get("expected_observation_artifact_id")?,
-        discovery_observation_artifact_id: row.try_get("discovery_observation_artifact_id")?,
+        ticket_revision: revision_from_sql(row.ticket_revision_aggregate_revision)?,
+        attempt_revision: revision_from_sql(row.attempt_revision)?,
+        stage: row.stage,
+        candidate_ordinal: row.candidate_ordinal,
+        rework_ordinal: row.rework_ordinal,
+        released: row.released,
+        claimed_commit: row.claimed_commit,
+        claimed_tree: row.claimed_tree,
+        expected_observation_artifact_id: row.expected_observation_artifact_id,
+        discovery_observation_artifact_id: row.discovery_observation_artifact_id,
     })
 }
 
@@ -1778,7 +1832,7 @@ async fn lock_ticket_revision_state(
     tx: &mut Transaction<'_, Postgres>,
     ticket_revision_id: TicketRevisionId,
 ) -> Result<TicketRevisionRow, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT tr.ticket_id, tr.lifecycle AS ticket_revision_lifecycle,
                 tr.revision AS ticket_revision_aggregate_revision,
                 t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,
@@ -1786,24 +1840,23 @@ async fn lock_ticket_revision_state(
          FROM factory.ticket_revisions tr
          JOIN factory.tickets t ON t.id = tr.ticket_id
          WHERE tr.id = $1 FOR UPDATE OF tr, t",
+        ticket_revision_id.get(),
     )
-    .bind(ticket_revision_id.get())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::CorruptState)?;
-    let state = ticket_state(row.try_get("ticket_revision_lifecycle")?)?;
-    if row.try_get::<i64, _>("current_ticket_revision_id")? != ticket_revision_id.get()
-        || state != ticket_state(row.try_get("ticket_lifecycle")?)?
-        || row.try_get::<i64, _>("ticket_revision_aggregate_revision")?
-            != row.try_get::<i64, _>("ticket_aggregate_revision")?
+    let state = ticket_state(row.ticket_revision_lifecycle)?;
+    if row.current_ticket_revision_id != ticket_revision_id.get()
+        || state != ticket_state(row.ticket_lifecycle)?
+        || row.ticket_revision_aggregate_revision != row.ticket_aggregate_revision
     {
         return Err(DecisionStoreError::CorruptState);
     }
     Ok(TicketRevisionRow {
-        ticket_id: row.try_get("ticket_id")?,
+        ticket_id: row.ticket_id,
         ticket_revision_id,
         ticket_state: state,
-        ticket_revision: revision_from_sql(row.try_get("ticket_revision_aggregate_revision")?)?,
+        ticket_revision: revision_from_sql(row.ticket_revision_aggregate_revision)?,
     })
 }
 
@@ -1811,20 +1864,20 @@ async fn load_validation(
     tx: &mut Transaction<'_, Postgres>,
     validation_id: ValidationId,
 ) -> Result<ValidationRow, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT candidate_id, performed_by_session_id, lifecycle, kernel_build_id, pristine_tree
          FROM factory.validations WHERE id = $1",
+        validation_id.get(),
     )
-    .bind(validation_id.get())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::UnknownValidation { validation_id })?;
     Ok(ValidationRow {
-        candidate_id: CandidateId::new(row.try_get("candidate_id")?)?,
-        performed_by_session_id: row.try_get("performed_by_session_id")?,
-        lifecycle: row.try_get("lifecycle")?,
-        kernel_build_database_id: row.try_get("kernel_build_id")?,
-        pristine_tree: row.try_get("pristine_tree")?,
+        candidate_id: CandidateId::new(row.candidate_id)?,
+        performed_by_session_id: row.performed_by_session_id,
+        lifecycle: row.lifecycle,
+        kernel_build_database_id: row.kernel_build_id,
+        pristine_tree: row.pristine_tree,
     })
 }
 
@@ -1833,23 +1886,23 @@ async fn load_quality_validation(
     validation_id: ValidationId,
     candidate_id: CandidateId,
 ) -> Result<ValidationRow, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT candidate_id, performed_by_session_id, lifecycle, kernel_build_id, pristine_tree
          FROM factory.validations
          WHERE id = $1 AND candidate_id = $2 AND validation_scope = $3",
+        validation_id.get(),
+        candidate_id.get(),
+        ValidationScope::QualityFullSuite.code(),
     )
-    .bind(validation_id.get())
-    .bind(candidate_id.get())
-    .bind(ValidationScope::QualityFullSuite.code())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::UnknownValidation { validation_id })?;
     Ok(ValidationRow {
-        candidate_id: CandidateId::new(row.try_get("candidate_id")?)?,
-        performed_by_session_id: row.try_get("performed_by_session_id")?,
-        lifecycle: row.try_get("lifecycle")?,
-        kernel_build_database_id: row.try_get("kernel_build_id")?,
-        pristine_tree: row.try_get("pristine_tree")?,
+        candidate_id: CandidateId::new(row.candidate_id)?,
+        performed_by_session_id: row.performed_by_session_id,
+        lifecycle: row.lifecycle,
+        kernel_build_database_id: row.kernel_build_id,
+        pristine_tree: row.pristine_tree,
     })
 }
 
@@ -1857,15 +1910,17 @@ async fn load_review(
     tx: &mut Transaction<'_, Postgres>,
     review_id: ReviewId,
 ) -> Result<ReviewRow, DecisionStoreError> {
-    let row = sqlx::query("SELECT id, candidate_id, verdict FROM factory.reviews WHERE id = $1")
-        .bind(review_id.get())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::UnknownReview { review_id })?;
+    let row = sqlx::query!(
+        "SELECT id, candidate_id, verdict FROM factory.reviews WHERE id = $1",
+        review_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::UnknownReview { review_id })?;
     Ok(ReviewRow {
-        id: ReviewId::new(row.try_get("id")?)?,
-        candidate_id: CandidateId::new(row.try_get("candidate_id")?)?,
-        verdict: row.try_get("verdict")?,
+        id: ReviewId::new(row.id)?,
+        candidate_id: CandidateId::new(row.candidate_id)?,
+        verdict: row.verdict,
     })
 }
 
@@ -1873,18 +1928,18 @@ async fn load_decision(
     tx: &mut Transaction<'_, Postgres>,
     decision_id: i64,
 ) -> Result<DecisionRow, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT ticket_revision_id, ticket_attempt_id, candidate_id
          FROM factory.architect_decisions WHERE id = $1",
+        decision_id,
     )
-    .bind(decision_id)
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::CorruptDecision)?;
     Ok(DecisionRow {
-        ticket_revision_id: row.try_get("ticket_revision_id")?,
-        ticket_attempt_id: row.try_get("ticket_attempt_id")?,
-        candidate_id: row.try_get("candidate_id")?,
+        ticket_revision_id: row.ticket_revision_id,
+        ticket_attempt_id: row.ticket_attempt_id,
+        candidate_id: row.candidate_id,
     })
 }
 
@@ -1892,13 +1947,15 @@ async fn load_delivery(
     tx: &mut Transaction<'_, Postgres>,
     delivery_id: i64,
 ) -> Result<DeliveryRow, DecisionStoreError> {
-    let row = sqlx::query("SELECT candidate_id FROM factory.deliveries WHERE id = $1")
-        .bind(delivery_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::CorruptState)?;
+    let row = sqlx::query!(
+        "SELECT candidate_id FROM factory.deliveries WHERE id = $1",
+        delivery_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::CorruptState)?;
     Ok(DeliveryRow {
-        candidate_id: CandidateId::new(row.try_get("candidate_id")?)?,
+        candidate_id: CandidateId::new(row.candidate_id)?,
     })
 }
 
@@ -1906,35 +1963,39 @@ async fn lock_campaign(
     tx: &mut Transaction<'_, Postgres>,
     campaign_id: factory_protocol::CampaignId,
 ) -> Result<CampaignRow, DecisionStoreError> {
-    campaign_from_row(
-        sqlx::query("SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1 FOR UPDATE")
-            .bind(campaign_id.get())
-            .fetch_optional(&mut **tx)
-            .await?
-            .ok_or(DecisionStoreError::CampaignNotRunning)?,
+    let row = sqlx::query!(
+        "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+        campaign_id.get(),
     )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::CampaignNotRunning)?;
+    campaign_from_fields(row.lifecycle, row.revision, row.delivery_target)
 }
 
 async fn load_campaign(
     tx: &mut Transaction<'_, Postgres>,
     campaign_id: factory_protocol::CampaignId,
 ) -> Result<CampaignRow, DecisionStoreError> {
-    campaign_from_row(
-        sqlx::query(
-            "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1",
-        )
-        .bind(campaign_id.get())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::CampaignNotRunning)?,
+    let row = sqlx::query!(
+        "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1",
+        campaign_id.get(),
     )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::CampaignNotRunning)?;
+    campaign_from_fields(row.lifecycle, row.revision, row.delivery_target)
 }
 
-fn campaign_from_row(row: sqlx::postgres::PgRow) -> Result<CampaignRow, DecisionStoreError> {
+fn campaign_from_fields(
+    lifecycle: i16,
+    revision: i64,
+    delivery_target: i32,
+) -> Result<CampaignRow, DecisionStoreError> {
     Ok(CampaignRow {
-        lifecycle: row.try_get("lifecycle")?,
-        revision: revision_from_sql(row.try_get("revision")?)?,
-        delivery_target: row.try_get("delivery_target")?,
+        lifecycle,
+        revision: revision_from_sql(revision)?,
+        delivery_target,
     })
 }
 
@@ -1943,11 +2004,11 @@ async fn validation_exists(
     candidate_id: CandidateId,
     scope: ValidationScope,
 ) -> Result<bool, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM factory.validations WHERE candidate_id = $1 AND validation_scope = $2)",
+    Ok(sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM factory.validations WHERE candidate_id = $1 AND validation_scope = $2) AS \"exists!\"",
+        candidate_id.get(),
+        scope.code(),
     )
-    .bind(candidate_id.get())
-    .bind(scope.code())
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -1957,15 +2018,15 @@ async fn validation_passed(
     candidate_id: CandidateId,
     scope: ValidationScope,
 ) -> Result<bool, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, bool>(
+    Ok(sqlx::query_scalar!(
         "SELECT EXISTS (
              SELECT 1 FROM factory.validations
              WHERE candidate_id = $1 AND validation_scope = $2 AND lifecycle = $3
-         )",
+         ) AS \"exists!\"",
+        candidate_id.get(),
+        scope.code(),
+        VALIDATION_PASSED,
     )
-    .bind(candidate_id.get())
-    .bind(scope.code())
-    .bind(VALIDATION_PASSED)
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -1974,10 +2035,10 @@ async fn review_exists(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: CandidateId,
 ) -> Result<bool, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM factory.reviews WHERE candidate_id = $1)",
+    Ok(sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM factory.reviews WHERE candidate_id = $1) AS \"exists!\"",
+        candidate_id.get(),
     )
-    .bind(candidate_id.get())
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -1986,14 +2047,14 @@ async fn deliver_decision_exists(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: CandidateId,
 ) -> Result<bool, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, bool>(
+    Ok(sqlx::query_scalar!(
         "SELECT EXISTS (
              SELECT 1 FROM factory.architect_decisions
              WHERE candidate_id = $1 AND decision_kind = $2
-         )",
+         ) AS \"exists!\"",
+        candidate_id.get(),
+        DECISION_DELIVER,
     )
-    .bind(candidate_id.get())
-    .bind(DECISION_DELIVER)
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -2001,10 +2062,10 @@ async fn deliver_decision_exists(
 async fn paid_session_active(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<bool, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM factory.sessions WHERE lifecycle = $1)",
+    Ok(sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM factory.sessions WHERE lifecycle = $1) AS \"exists!\"",
+        SESSION_RUNNING,
     )
-    .bind(SESSION_RUNNING)
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -2013,11 +2074,11 @@ async fn delivered_attempt_count(
     tx: &mut Transaction<'_, Postgres>,
     campaign_id: factory_protocol::CampaignId,
 ) -> Result<i64, DecisionStoreError> {
-    Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT count(*)::BIGINT FROM factory.ticket_attempts WHERE campaign_id = $1 AND stage = $2",
+    Ok(sqlx::query_scalar!(
+        "SELECT count(*)::BIGINT AS \"count!\" FROM factory.ticket_attempts WHERE campaign_id = $1 AND stage = $2",
+        campaign_id.get(),
+        ATTEMPT_DELIVERED,
     )
-    .bind(campaign_id.get())
-    .bind(ATTEMPT_DELIVERED)
     .fetch_one(&mut **tx)
     .await?)
 }
@@ -2027,17 +2088,17 @@ async fn require_artifact(
     reference: &SealedArtifactReferenceV1,
     expected_build_database_id: i64,
 ) -> Result<(), DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT digest, byte_length, creating_kernel_build_id
          FROM factory.artifacts WHERE id = $1",
+        reference.artifact_id.get(),
     )
-    .bind(reference.artifact_id.get())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
-    let digest: Vec<u8> = row.try_get("digest")?;
-    let byte_length: i64 = row.try_get("byte_length")?;
-    let build_id: i64 = row.try_get("creating_kernel_build_id")?;
+    let digest = row.digest;
+    let byte_length = row.byte_length;
+    let build_id = row.creating_kernel_build_id;
     if digest.as_slice() != reference.digest.as_bytes()
         || u64::try_from(byte_length).map_err(|_| DecisionStoreError::CorruptState)?
             != reference.byte_length
@@ -2054,13 +2115,15 @@ async fn require_artifact_unbound(
     tx: &mut Transaction<'_, Postgres>,
     reference: &SealedArtifactReferenceV1,
 ) -> Result<(), DecisionStoreError> {
-    let row = sqlx::query("SELECT digest, byte_length FROM factory.artifacts WHERE id = $1")
-        .bind(reference.artifact_id.get())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
-    let digest: Vec<u8> = row.try_get("digest")?;
-    let byte_length: i64 = row.try_get("byte_length")?;
+    let row = sqlx::query!(
+        "SELECT digest, byte_length FROM factory.artifacts WHERE id = $1",
+        reference.artifact_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
+    let digest = row.digest;
+    let byte_length = row.byte_length;
     if digest.as_slice() != reference.digest.as_bytes()
         || u64::try_from(byte_length).map_err(|_| DecisionStoreError::CorruptState)?
             != reference.byte_length
@@ -2075,16 +2138,17 @@ async fn artifact_digest_for_build(
     artifact_id: i64,
     expected_build_database_id: i64,
 ) -> Result<ContentDigest, DecisionStoreError> {
-    let row =
-        sqlx::query("SELECT digest, creating_kernel_build_id FROM factory.artifacts WHERE id = $1")
-            .bind(artifact_id)
-            .fetch_optional(&mut **tx)
-            .await?
-            .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
-    if row.try_get::<i64, _>("creating_kernel_build_id")? != expected_build_database_id {
+    let row = sqlx::query!(
+        "SELECT digest, creating_kernel_build_id FROM factory.artifacts WHERE id = $1",
+        artifact_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::ArtifactReferenceMismatch)?;
+    if row.creating_kernel_build_id != expected_build_database_id {
         return Err(DecisionStoreError::ArtifactBuildMismatch);
     }
-    let bytes: Vec<u8> = row.try_get("digest")?;
+    let bytes = row.digest;
     let bytes: [u8; 32] = bytes
         .as_slice()
         .try_into()
@@ -2097,12 +2161,16 @@ async fn require_kernel_build(
     kernel_build_id: KernelBuildId,
     expected_build_database_id: i64,
 ) -> Result<i64, DecisionStoreError> {
-    let row = sqlx::query("SELECT id FROM factory.kernel_builds WHERE build_digest = $1")
-        .bind(kernel_build_id.digest().as_bytes().as_slice())
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(DecisionStoreError::ValidationBuildMismatch)?;
-    let id: i64 = row.try_get("id")?;
+    let build_digest = kernel_build_id.digest();
+    let build_digest_bytes = build_digest.as_bytes();
+    let row = sqlx::query!(
+        "SELECT id FROM factory.kernel_builds WHERE build_digest = $1",
+        build_digest_bytes.as_slice(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::ValidationBuildMismatch)?;
+    let id = row.id;
     if id != expected_build_database_id {
         return Err(DecisionStoreError::ValidationBuildMismatch);
     }
@@ -2115,17 +2183,41 @@ async fn require_session(
     expected_campaign_id: factory_protocol::CampaignId,
     expected_office: i16,
 ) -> Result<(), DecisionStoreError> {
-    let row =
-        sqlx::query("SELECT campaign_id, office, lifecycle FROM factory.sessions WHERE id = $1")
-            .bind(session_id.get())
-            .fetch_optional(&mut **tx)
-            .await?
-            .ok_or(DecisionStoreError::SessionJurisdictionMismatch)?;
-    let lifecycle: i16 = row.try_get("lifecycle")?;
-    if row.try_get::<i64, _>("campaign_id")? != expected_campaign_id.get()
-        || row.try_get::<i16, _>("office")? != expected_office
+    let row = sqlx::query!(
+        "SELECT campaign_id, office, lifecycle FROM factory.sessions WHERE id = $1",
+        session_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::SessionJurisdictionMismatch)?;
+    let lifecycle = row.lifecycle;
+    if row.campaign_id != expected_campaign_id.get()
+        || row.office != expected_office
         || !matches!(lifecycle, SESSION_RUNNING | SESSION_SUCCEEDED)
     {
+        return Err(DecisionStoreError::SessionJurisdictionMismatch);
+    }
+    Ok(())
+}
+
+/// Validation already durably proved its performer while that session was
+/// viable. A later Quality-review continuation must retain that originating
+/// Quality session identity even if the host died after validation; only the
+/// *new* review session must still be viable for its write.
+async fn require_session_jurisdiction(
+    tx: &mut Transaction<'_, Postgres>,
+    session_id: SessionId,
+    expected_campaign_id: factory_protocol::CampaignId,
+    expected_office: i16,
+) -> Result<(), DecisionStoreError> {
+    let row = sqlx::query!(
+        "SELECT campaign_id, office FROM factory.sessions WHERE id = $1",
+        session_id.get(),
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DecisionStoreError::SessionJurisdictionMismatch)?;
+    if row.campaign_id != expected_campaign_id.get() || row.office != expected_office {
         return Err(DecisionStoreError::SessionJurisdictionMismatch);
     }
     Ok(())
@@ -2155,23 +2247,23 @@ async fn insert_decision(
     principal: &str,
     overrides_quality_rejection: bool,
 ) -> Result<i64, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "INSERT INTO factory.architect_decisions (
              decision_kind, ticket_revision_id, ticket_attempt_id, candidate_id, review_id,
              rationale_artifact_id, principal, overrides_quality_rejection
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        decision_kind,
+        ticket_revision_id,
+        ticket_attempt_id,
+        candidate_id,
+        review_id,
+        rationale_artifact_id,
+        principal,
+        overrides_quality_rejection,
     )
-    .bind(decision_kind)
-    .bind(ticket_revision_id)
-    .bind(ticket_attempt_id)
-    .bind(candidate_id)
-    .bind(review_id)
-    .bind(rationale_artifact_id)
-    .bind(principal)
-    .bind(overrides_quality_rejection)
     .fetch_one(&mut **tx)
     .await?;
-    Ok(row.try_get("id")?)
+    Ok(row.id)
 }
 
 async fn update_ticket_state(
@@ -2203,27 +2295,29 @@ async fn update_ticket_state_parts(
     sponsorship_reason: Option<&str>,
     blocked_reason: Option<&str>,
 ) -> Result<(), DecisionStoreError> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE factory.ticket_revisions
          SET lifecycle = $1, revision = $2,
              sponsored_at = CASE WHEN $3::TEXT IS NULL THEN sponsored_at ELSE CURRENT_TIMESTAMP END,
              sponsorship_reason = COALESCE($3, sponsorship_reason),
              blocked_reason = COALESCE($4, blocked_reason)
          WHERE id = $5",
+        state,
+        revision_sql(next)?,
+        sponsorship_reason,
+        blocked_reason,
+        ticket_revision_id.get(),
     )
-    .bind(state)
-    .bind(revision_sql(next)?)
-    .bind(sponsorship_reason)
-    .bind(blocked_reason)
-    .bind(ticket_revision_id.get())
     .execute(&mut **tx)
     .await?;
-    sqlx::query("UPDATE factory.tickets SET lifecycle = $1, revision = $2 WHERE id = $3")
-        .bind(state)
-        .bind(revision_sql(next)?)
-        .bind(ticket_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query!(
+        "UPDATE factory.tickets SET lifecycle = $1, revision = $2 WHERE id = $3",
+        state,
+        revision_sql(next)?,
+        ticket_id,
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -2236,7 +2330,7 @@ async fn update_ticket_requalification(
     requalification: &CurrentHeadRequalification,
     blocked_reason: Option<&str>,
 ) -> Result<(), DecisionStoreError> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE factory.ticket_revisions
          SET lifecycle = $1, revision = $2,
              last_requalification_outcome = $3,
@@ -2247,24 +2341,26 @@ async fn update_ticket_requalification(
              last_requalified_at = CURRENT_TIMESTAMP,
              blocked_reason = $8
          WHERE id = $9",
+        state,
+        revision_sql(next)?,
+        outcome,
+        &requalification.current_head_commit,
+        &requalification.current_head_tree,
+        requalification.first_actual_observation_artifact_id.get(),
+        requalification.second_actual_observation_artifact_id.get(),
+        blocked_reason,
+        attempt.ticket_revision_id.get(),
     )
-    .bind(state)
-    .bind(revision_sql(next)?)
-    .bind(outcome)
-    .bind(&requalification.current_head_commit)
-    .bind(&requalification.current_head_tree)
-    .bind(requalification.first_actual_observation_artifact_id.get())
-    .bind(requalification.second_actual_observation_artifact_id.get())
-    .bind(blocked_reason)
-    .bind(attempt.ticket_revision_id.get())
     .execute(&mut **tx)
     .await?;
-    sqlx::query("UPDATE factory.tickets SET lifecycle = $1, revision = $2 WHERE id = $3")
-        .bind(state)
-        .bind(revision_sql(next)?)
-        .bind(attempt.ticket_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query!(
+        "UPDATE factory.tickets SET lifecycle = $1, revision = $2 WHERE id = $3",
+        state,
+        revision_sql(next)?,
+        attempt.ticket_id,
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -2316,31 +2412,29 @@ async fn find_audit(
     operation: &'static str,
     fingerprint: ContentDigest,
 ) -> Result<Option<AuditReceipt>, DecisionStoreError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT id, operation, command_fingerprint, subject_kind, subject_id, resulting_revision
          FROM factory.audit_log WHERE principal = $1 AND command_id = $2",
+        principal,
+        command_id,
     )
-    .bind(principal)
-    .bind(command_id)
     .fetch_optional(&mut **tx)
     .await?;
     let Some(row) = row else {
         return Ok(None);
     };
-    let stored: Vec<u8> = row.try_get("command_fingerprint")?;
-    if row.try_get::<String, _>("operation")? != operation
-        || stored.as_slice() != fingerprint.as_bytes()
-    {
+    let stored = row.command_fingerprint;
+    if row.operation != operation || stored.as_slice() != fingerprint.as_bytes() {
         return Err(DecisionStoreError::IdempotencyConflict {
             principal: principal.to_owned(),
             command_id: command_id.to_owned(),
         });
     }
     Ok(Some(AuditReceipt {
-        audit_log_id: row.try_get("id")?,
-        subject_kind: row.try_get("subject_kind")?,
-        subject_id: row.try_get("subject_id")?,
-        resulting_revision: revision_from_sql(row.try_get("resulting_revision")?)?,
+        audit_log_id: row.id,
+        subject_kind: row.subject_kind,
+        subject_id: row.subject_id,
+        resulting_revision: revision_from_sql(row.resulting_revision)?,
     }))
 }
 
@@ -2354,22 +2448,23 @@ async fn insert_audit(
     subject_id: i64,
     resulting_revision: AggregateRevision,
 ) -> Result<i64, DecisionStoreError> {
-    let row = sqlx::query(
+    let fingerprint_bytes = fingerprint.as_bytes();
+    let row = sqlx::query!(
         "INSERT INTO factory.audit_log (
              principal, command_id, operation, command_fingerprint,
              subject_kind, subject_id, resulting_revision
          ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+        principal,
+        command_id,
+        operation,
+        fingerprint_bytes.as_slice(),
+        subject_kind,
+        subject_id,
+        revision_sql(resulting_revision)?,
     )
-    .bind(principal)
-    .bind(command_id)
-    .bind(operation)
-    .bind(fingerprint.as_bytes().as_slice())
-    .bind(subject_kind)
-    .bind(subject_id)
-    .bind(revision_sql(resulting_revision)?)
     .fetch_one(&mut **tx)
     .await?;
-    Ok(row.try_get("id")?)
+    Ok(row.id)
 }
 
 fn validate_command(principal: &str, command_id: &str) -> Result<(), DecisionStoreError> {

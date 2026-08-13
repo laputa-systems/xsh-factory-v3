@@ -1,14 +1,20 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
+import { type Context, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@pi/ai";
+import { ModelRuntime } from "@pi/coding-agent";
 import {
   type ArtifactSealer,
   type ArtifactSealReceipt,
   builtinPiToolNames,
   createCommonToolAdapters,
   createEphemeralCredentialStore,
+  createForumTools,
+  createFramedToolAdapters,
   createSdkSession,
+  createSdkSessionWithRuntimeForTest,
   decodeAssignmentPacketV1,
   emptyResourceLoader,
+  FramedActorClient,
   gzipFile,
   type PiAssignmentPacket,
   type PiHostDependencies,
@@ -23,6 +29,7 @@ import {
   verifyModelDescriptor,
 } from "./mod.ts";
 import { canonicalJson } from "../factory-sdk/protocol.ts";
+import { ForumAdapter } from "../factory-sdk/forum.ts";
 
 class FakeSession implements PiSessionLike {
   #listeners = new Set<(event: unknown) => void>();
@@ -91,6 +98,44 @@ class FakeSealer implements ArtifactSealer {
   }
 }
 
+function noTransportClient(): FramedActorClient {
+  return new FramedActorClient({
+    exchange: () => Promise.reject(new Error("tool descriptor inspection must not send a frame")),
+  });
+}
+
+Deno.test("model-visible tool descriptors hide control-plane vocabulary", () => {
+  const noTransport = {
+    exchange: () => Promise.reject(new Error("tool descriptor inspection must not send a frame")),
+  };
+  const framed = createFramedToolAdapters(noTransportClient(), [
+    "workspace_read",
+    "artifact_seal",
+    "artifact_read",
+    "product_submit_ticket",
+    "candidate_checkpoint_regression",
+    "candidate_submit",
+    "quality_run_full_suite",
+    "quality_submit_review",
+    "work_complete",
+  ]);
+  const forum = createForumTools(new ForumAdapter(noTransport));
+  const forbidden =
+    /\b(?:architect|campaign|company|cto|daemon|department|director|employee|factory|kernel|manager|office|organization|sponsor)\b/iu;
+  for (const tool of [...framed, ...forum]) {
+    const descriptor = "sdk_definition" in tool ? tool.sdk_definition : tool;
+    const visible = JSON.stringify({
+      name: tool.name,
+      description: descriptor.description,
+      input_schema: descriptor.input_schema,
+    });
+    const match = forbidden.exec(visible);
+    if (match !== null) {
+      throw new Error(`${tool.name} exposes control-plane vocabulary ${JSON.stringify(match[0])}`);
+    }
+  }
+});
+
 function packet(
   staging_root: string,
   required_reads = true,
@@ -138,6 +183,14 @@ function packet(
     required_reads: required_reads
       ? [{ canonical_path: "AGENTS.md", blake3: "d".repeat(64), reason: "contract" }]
       : [],
+    assignment_evidence: [
+      {
+        role: "ticket_proposal",
+        artifact_id: 4,
+        digest: "6".repeat(64),
+        byte_length: 1,
+      },
+    ],
     runtime: {
       deno_executable: "/opt/deno",
       deno_version: "2.9.4",
@@ -503,6 +556,7 @@ Deno.test("host entrypoint consumes one attested packet before Pi construction",
       digest: read.blake3,
       reason: read.reason,
     })),
+    assignment_evidence: source.assignment_evidence,
     runtime: {
       ...source.runtime,
       credential_source: {
@@ -626,6 +680,255 @@ Deno.test("full-control SDK session constructs offline with the pinned catalog",
     session.dispose();
   } finally {
     Deno.env.delete("FAKE_PROVIDER_KEY");
+  }
+});
+
+Deno.test("real Pi SDK faux provider prompts, invokes a bound tool, and emits terminal usage", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-faux-sdk-" });
+  try {
+    const faux = fauxProvider();
+    faux.setResponses([
+      fauxAssistantMessage(
+        [fauxToolCall("workspace_read", { repository_relative_path: "AGENTS.md" })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("complete")]),
+    ]);
+    const runtime = await ModelRuntime.create({
+      credentials: createEphemeralCredentialStore(),
+      authPath: undefined,
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    runtime.registerNativeProvider(faux.provider);
+    const model = faux.models[0];
+    const value = packet(root, false, false);
+    const invoked: unknown[] = [];
+    const session = await createSdkSessionWithRuntimeForTest(
+      {
+        ...value,
+        model: {
+          ...value.model,
+          provider: model.provider,
+          model_id: model.id,
+          thinking_level: "none",
+          context_token_limit: model.contextWindow,
+          output_token_limit: model.maxTokens,
+          price_input_micro_usd_per_million_tokens: 0,
+          price_output_micro_usd_per_million_tokens: 0,
+          price_cache_read_micro_usd_per_million_tokens: 0,
+          price_cache_write_micro_usd_per_million_tokens: 0,
+        },
+      },
+      {
+        custom_tools: [{
+          name: "workspace_read",
+          sdk_definition: {
+            description: "bound workspace read",
+            input_schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["repository_relative_path"],
+              properties: { repository_relative_path: { type: "string" } },
+            },
+            invoke: (input) => {
+              invoked.push(input);
+              return Promise.resolve({ blake3: "d".repeat(64) });
+            },
+          },
+        }],
+      },
+      runtime,
+    );
+    const events: unknown[] = [];
+    const unsubscribe = session.subscribe((event) => events.push(event));
+    await session.prompt("perform the assigned exact read");
+    unsubscribe();
+    session.dispose();
+    assertEquals(invoked, [{ repository_relative_path: "AGENTS.md" }]);
+    assert(events.some((event) => JSON.stringify(event).includes("usage")));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("real Pi SDK faux provider completes a sealed host assignment through workspace read and terminal submission", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-faux-assignment-" });
+  try {
+    const faux = fauxProvider();
+    const providerContexts: Array<{
+      systemPrompt: string | undefined;
+      messages: readonly { role: string; content: unknown }[];
+      toolNames: readonly string[];
+    }> = [];
+    const providerModels: Array<{ provider: string; id: string }> = [];
+    const capture = (response: ReturnType<typeof fauxAssistantMessage>) =>
+    (
+      context: Context,
+      _options: unknown,
+      _state: unknown,
+      selectedModel: { provider: string; id: string },
+    ) => {
+      providerContexts.push({
+        systemPrompt: context.systemPrompt,
+        messages: context.messages.map((message) => ({
+          role: message.role,
+          content: structuredClone(message.content),
+        })),
+        toolNames: context.tools?.map((tool) => tool.name) ?? [],
+      });
+      providerModels.push({ provider: selectedModel.provider, id: selectedModel.id });
+      return response;
+    };
+    faux.setResponses([
+      capture(fauxAssistantMessage(
+        [fauxToolCall("workspace_read", { repository_relative_path: "AGENTS.md" })],
+        { stopReason: "toolUse" },
+      )),
+      capture(fauxAssistantMessage([fauxToolCall("work_complete", {})], { stopReason: "toolUse" })),
+      capture(fauxAssistantMessage([fauxText("assignment complete")])),
+    ]);
+    const runtime = await ModelRuntime.create({
+      credentials: createEphemeralCredentialStore(),
+      authPath: undefined,
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    runtime.registerNativeProvider(faux.provider);
+    const model = faux.models[0];
+    const source = packet(root, true, true);
+    const assignment = {
+      ...source,
+      model: {
+        ...source.model,
+        provider: model.provider,
+        model_id: model.id,
+        thinking_level: "none" as const,
+        context_token_limit: model.contextWindow,
+        output_token_limit: model.maxTokens,
+        price_input_micro_usd_per_million_tokens: 0,
+        price_output_micro_usd_per_million_tokens: 0,
+        price_cache_read_micro_usd_per_million_tokens: 0,
+        price_cache_write_micro_usd_per_million_tokens: 0,
+      },
+      tools: ["workspace_read", "work_complete"] as const,
+      legal_terminal_operations: ["work_complete"] as const,
+    };
+    let createdPacket: PiAssignmentPacket | undefined;
+    let sdkSession: Awaited<ReturnType<typeof createSdkSessionWithRuntimeForTest>> | undefined;
+    let disposed = false;
+    const factory: PiSessionFactory = {
+      create: async (admitted, context) => {
+        createdPacket = admitted;
+        const session = await createSdkSessionWithRuntimeForTest(admitted, context, runtime);
+        sdkSession = session;
+        return {
+          subscribe: (listener) => session.subscribe(listener),
+          prompt: (prompt) => session.prompt(prompt),
+          dispose: () => {
+            disposed = true;
+            session.dispose();
+          },
+          abort: () => session.abort(),
+        };
+      },
+    };
+    const sealer = new FakeSealer();
+    const workspaceReads: unknown[] = [];
+    const verifiedReadResults: unknown[] = [];
+    const terminals: Array<{ operation: string | null; payload: unknown }> = [];
+    const result = await runAssignment(assignment, {
+      ...deps(factory, sealer),
+      custom_tools: [
+        {
+          name: "workspace_read",
+          sdk_definition: {
+            description: "daemon-bound exact workspace read",
+            input_schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["repository_relative_path"],
+              properties: { repository_relative_path: { type: "string", minLength: 1 } },
+            },
+            invoke: (input) => {
+              workspaceReads.push(input);
+              return Promise.resolve({ bytes: "contract bytes", blake3: "d".repeat(64) });
+            },
+          },
+        },
+        {
+          name: "work_complete",
+          sdk_definition: {
+            description: "host terminal capture",
+            input_schema: { type: "object", additionalProperties: false },
+            invoke: (input) => Promise.resolve(input),
+          },
+        },
+      ],
+      required_read_verifier: {
+        verify: (result) => {
+          verifiedReadResults.push(result);
+          return Promise.resolve({
+            canonical_path: "AGENTS.md",
+            blake3: "d".repeat(64),
+            success: true,
+          });
+        },
+      },
+      terminal_submission: {
+        submit: (operation, payload, manifest, summary) => {
+          terminals.push({ operation, payload });
+          assertEquals(manifest.required.length, 1);
+          assertEquals(summary.cost_status, "known");
+          return Promise.resolve();
+        },
+      },
+      runtime: { deno_version: "2.9.4", pi_sdk_version: "0.84.1" },
+    });
+
+    assertEquals(result.status, "succeeded");
+    assertEquals(createdPacket?.assignment_prompt_bytes, assignment.assignment_prompt_bytes);
+    assertEquals(createdPacket?.model.provider, model.provider);
+    assertEquals(createdPacket?.runtime.pi_version, "0.84.1");
+    assertEquals(faux.state.callCount, 3);
+    assertEquals(faux.getPendingResponseCount(), 0);
+    assertEquals(
+      providerModels,
+      Array.from({ length: 3 }, () => ({ provider: model.provider, id: model.id })),
+    );
+    assertEquals(sdkSession?.systemPrompt, "sealed system");
+    assertEquals(providerContexts[0]?.systemPrompt, "sealed system");
+    assertEquals(providerContexts[0]?.messages.length, 1);
+    assertEquals(providerContexts[0]?.messages[0]?.role, "user");
+    assertEquals(providerContexts[0]?.messages[0]?.content, [{
+      type: "text",
+      text: "sealed assignment",
+    }]);
+    assertEquals(providerContexts[0]?.toolNames, ["workspace_read", "work_complete"]);
+    assertEquals(workspaceReads, [{ repository_relative_path: "AGENTS.md" }]);
+    assertEquals(verifiedReadResults.length, 1);
+    assertEquals(result.required_read_manifest.satisfied, [{
+      canonical_path: "AGENTS.md",
+      blake3: "d".repeat(64),
+      reason: "contract",
+    }]);
+    assertEquals(terminals, [{ operation: "work_complete", payload: {} }]);
+    assertEquals(sealer.roles, ["pi_transcript_gzip"]);
+    assertEquals(result.summary.transcript_artifact?.digest, "digest-1");
+    assertEquals(result.summary.cost_status, "known");
+    assertEquals(result.summary.cost_micro_usd, 0);
+    const transcript = await new Response(
+      new Blob([await Deno.readFile(result.summary.transcript_gzip_path)]).stream().pipeThrough(
+        new DecompressionStream("gzip"),
+      ),
+    ).text();
+    assert(transcript.includes("workspace_read"));
+    assert(transcript.includes("work_complete"));
+    assertEquals(disposed, true);
+  } finally {
+    await Deno.remove(root, { recursive: true });
   }
 });
 
@@ -770,15 +1073,16 @@ Deno.test("Candidate and Quality terminal tools call their daemon adapter before
         sdk_definition: {
           description: "daemon terminal",
           input_schema: { type: "object", additionalProperties: false },
-          invoke: async (input: unknown) => {
+          invoke: (input: unknown) => {
             calls.push(JSON.stringify(input));
-            return { durable: true };
+            return Promise.resolve({ durable: true });
           },
         },
       }],
       terminal_submission: {
-        submit: async (submittedOperation) => {
+        submit: (submittedOperation) => {
           terminalOperation = submittedOperation;
+          return Promise.resolve();
         },
       },
     });
@@ -813,8 +1117,9 @@ Deno.test("failed Candidate daemon terminal is not captured for session terminal
         },
       }],
       terminal_submission: {
-        submit: async (operation) => {
+        submit: (operation) => {
           terminalOperation = operation;
+          return Promise.resolve();
         },
       },
     },

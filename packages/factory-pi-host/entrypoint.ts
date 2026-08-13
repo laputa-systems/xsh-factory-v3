@@ -59,6 +59,7 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
     "runtime",
     "tools",
     "required_reads",
+    "assignment_evidence",
     "terminal_operations",
     "remaining_campaign_allowance_micro_usd",
     "aggregate_revision",
@@ -190,6 +191,10 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
     },
     tools: strings(root.tools, "tools") as PiAssignmentPacket["tools"],
     required_reads: requiredReads(root.required_reads),
+    assignment_evidence: assignmentEvidence(
+      root.assignment_evidence,
+      string(root.office, "office"),
+    ),
     runtime: {
       deno_executable: string(runtime.deno_executable, "runtime.deno_executable"),
       deno_version: string(runtime.deno_version, "runtime.deno_version"),
@@ -421,4 +426,70 @@ function requiredReads(value: unknown): PiAssignmentPacket["required_reads"] {
       reason: string(read.reason, `required_reads[${index}].reason`),
     };
   });
+}
+
+function assignmentEvidence(
+  value: unknown,
+  office: string,
+): PiAssignmentPacket["assignment_evidence"] {
+  if (!Array.isArray(value) || value.length > 24) {
+    throw new Error("assignment_evidence must contain at most 24 references");
+  }
+  if (office === "product_research" && value.length !== 0) {
+    throw new Error("Product assignment_evidence must be empty");
+  }
+  if (office !== "product_research" && value.length === 0) {
+    throw new Error("Engineering and Quality assignment_evidence is required");
+  }
+  const known = new Set<string>();
+  return value.map((item, index) => {
+    const evidence = record(item, `assignment_evidence[${index}]`, [
+      "role",
+      "artifact_id",
+      "digest",
+      "byte_length",
+    ]);
+    const role = assignmentEvidenceRole(evidence.role, `assignment_evidence[${index}].role`);
+    const byteLength = integer(evidence.byte_length, `assignment_evidence[${index}].byte_length`);
+    if (known.has(role)) throw new Error("assignment_evidence roles must be unique");
+    known.add(role);
+    return {
+      role,
+      artifact_id: identifier(evidence.artifact_id, `assignment_evidence[${index}].artifact_id`),
+      digest: digest(evidence.digest, `assignment_evidence[${index}].digest`),
+      byte_length: byteLength,
+    };
+  });
+}
+
+function assignmentEvidenceRole(
+  value: unknown,
+  field: string,
+): PiAssignmentPacket["assignment_evidence"][number]["role"] {
+  return oneOf(value, [
+    "ticket_proposal",
+    "ticket_narrative",
+    "ticket_evidence",
+    "reproducer_command",
+    "reproducer_stdin",
+    "reproducer_expected_stdout",
+    "reproducer_expected_stderr",
+    "reproducer_first_actual_stdout",
+    "reproducer_first_actual_stderr",
+    "reproducer_second_actual_stdout",
+    "reproducer_second_actual_stderr",
+    "regression_patch",
+    "regression_command_set",
+    "regression_log",
+    "changed_paths",
+    "candidate_patch",
+    "engineering_report",
+    "engineering_risks",
+    "hard_validation_command_set",
+    "hard_validation_log",
+    "quality_additional_probes",
+    "quality_rationale",
+    "quality_risks",
+    "external_decision_rationale",
+  ], field) as PiAssignmentPacket["assignment_evidence"][number]["role"];
 }

@@ -203,6 +203,18 @@ director delegate to bounded subordinate workers without changing the office's
 authority contract, but no subordinate-worker scheduler is implemented for the
 MVP.
 
+The company diagram is control-plane and operator vocabulary, not a worker
+persona. The application mission and every model-visible system/assignment
+template describe only the product, exact task, evidence, and allowed tools;
+they must not mention a factory, company, office, department, director,
+Architect, campaign, sponsorship, management title, or internal kernel
+metaphor. Office identity and jurisdiction remain sealed packet/Rust facts and
+are not explained to the model. Only the external Grand Architect—and a later
+explicit director-level orchestration surface, if one is ever added—may be
+briefed on the organizational structure. A rendered-template test enforces
+this separation for all seven XSH templates and rejects unresolved
+placeholders.
+
 ### 3.2 Grand Architect
 
 The Grand Architect is normally an external agent/operator such as Codex using
@@ -636,6 +648,10 @@ Pin initially:
 - Deno `2.9.4`, including its bundled TypeScript compiler;
 - `npm:@earendil-works/pi-coding-agent@0.84.1`, matching the already exercised
   V2 SDK line;
+- exact `npm:@earendil-works/pi-ai@0.84.1` as test-only support for Pi's own
+  faux provider and event stream. It is already the coding-agent SDK's pinned
+  transitive version; production host source must not import it or expose a
+  provider-injection option;
 - exact `jsr:@std/path@1.1.6` for platform-correct path operations; and
 - exact `jsr:@std/assert@1.0.19` as a development-only test dependency.
 

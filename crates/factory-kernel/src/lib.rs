@@ -10,6 +10,7 @@ use factory_protocol::{ApplicationBundleV1, ContractError};
 /// activation. This module is never linked from an actor route.
 pub mod application_rpc;
 pub mod assignment_runtime;
+pub mod campaign_driver;
 pub mod candidate_runtime;
 pub mod cas;
 pub mod command_supervision;

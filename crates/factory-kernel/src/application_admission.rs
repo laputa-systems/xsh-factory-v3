@@ -375,16 +375,8 @@ fn validate_template_bytes(
 }
 
 fn allowed_placeholders(office: Option<Office>) -> std::collections::BTreeSet<&'static str> {
-    let mut allowed: std::collections::BTreeSet<&'static str> = [
-        "ASSIGNMENT_ID",
-        "APPLICATION_REVISION_ID",
-        "CAMPAIGN_ID",
-        "MISSION",
-        "OFFICE",
-        "TARGET",
-    ]
-    .into_iter()
-    .collect();
+    let mut allowed: std::collections::BTreeSet<&'static str> =
+        ["ASSIGNMENT_ID", "MISSION", "TARGET"].into_iter().collect();
     match office {
         Some(Office::ProductResearch) => {}
         Some(Office::Engineering) => allowed.extend(["TICKET_ID", "TICKET_REVISION_ID"]),
@@ -549,6 +541,17 @@ mod tests {
                 b"${SESSION_ID}".as_slice(),
                 "SESSION_ID",
             ),
+            (
+                Office::ProductResearch,
+                b"${CAMPAIGN_ID}".as_slice(),
+                "CAMPAIGN_ID",
+            ),
+            (
+                Office::Engineering,
+                b"${APPLICATION_REVISION_ID}".as_slice(),
+                "APPLICATION_REVISION_ID",
+            ),
+            (Office::Quality, b"${OFFICE}".as_slice(), "OFFICE"),
             (
                 Office::ProductResearch,
                 b"${TICKET_ID}".as_slice(),

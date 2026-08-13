@@ -7,13 +7,13 @@
 use std::str::FromStr;
 
 use factory_protocol::{
-    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentId,
-    AssignmentPacketV1, CampaignId, CandidateId, ContentDigest, CredentialDescriptorV1,
-    DurationMillis, ExpectedRevision, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1,
-    Office, ProcessCustodyV1, ReadExactFileV1, RepositoryId, RepositoryRelativePath,
-    RuntimeIdentityV1, RuntimeRelativePath, SessionId, SessionLimitsV1, SessionState, StopReasonV1,
-    TerminalCostV1, TerminalOperationV1, TerminalReportV1, ThinkingLevelV1, TicketAttemptId,
-    UsageTotalsV1,
+    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
+    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentPacketV1, CampaignId,
+    CandidateId, ContentDigest, CredentialDescriptorV1, DurationMillis, ExpectedRevision,
+    KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1, Office, ProcessCustodyV1,
+    ReadExactFileV1, RepositoryId, RepositoryRelativePath, RuntimeIdentityV1, RuntimeRelativePath,
+    SessionId, SessionLimitsV1, SessionState, StopReasonV1, TerminalCostV1, TerminalOperationV1,
+    TerminalReportV1, ThinkingLevelV1, TicketAttemptId, UsageTotalsV1,
 };
 use sqlx::{PgPool, Postgres};
 
@@ -26,6 +26,7 @@ const ASSIGNMENT_SUBJECT: i16 = 5;
 const SESSION_SUBJECT: i16 = 6;
 const CAMPAIGN_START: &str = "campaign.start";
 const CAMPAIGN_CANCEL: &str = "campaign.cancel";
+const CAMPAIGN_FAIL: &str = "campaign.fail";
 const ASSIGNMENT_CREATE: &str = "assignment.create";
 const SESSION_START: &str = "session.start";
 const SESSION_TERMINAL: &str = "session.terminal";
@@ -73,6 +74,18 @@ pub struct CancelCampaign {
     pub command_id: String,
     pub expected_revision: ExpectedRevision,
     pub campaign_id: CampaignId,
+}
+
+/// Kernel-owned infrastructure/process failure transition. This is not an
+/// Architect cancellation: a failed Product assignment or a materialization
+/// failure cannot remain running and quietly consume another paid launch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailCampaign {
+    pub principal: String,
+    pub command_id: String,
+    pub expected_revision: ExpectedRevision,
+    pub campaign_id: CampaignId,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +190,10 @@ pub struct CampaignStatus {
     pub revision: AggregateRevision,
     pub deadline_unix_millis: u64,
     pub delivery_target: u32,
+    /// Present exactly for a failed campaign. This is the bounded daemon or
+    /// operator fault that made a terminal campaign explainable without
+    /// reconstructing a command fingerprint.
+    pub failure_reason: Option<String>,
 }
 
 /// One bounded, read-only row in a campaign's provider-cost breakdown.
@@ -206,7 +223,11 @@ pub struct VerifiedTerminalEvidence {
     stdout_artifact_id: ArtifactId,
     stderr_artifact_id: ArtifactId,
     partial_transcript_artifact_id: Option<ArtifactId>,
-    required_read_manifest_artifact_id: ArtifactId,
+    /// The sealed terminal assertion, distinct from the assignment's expected
+    /// required-read manifest. The assertion proves daemon-observed reads;
+    /// storing it under the old manifest-shaped name obscured the intentional
+    /// inequality enforced at terminal transition.
+    required_read_assertion_artifact_id: ArtifactId,
     required_read_expected_count: u32,
     required_read_satisfied_count: u32,
     usage: Option<UsageTotalsV1>,
@@ -876,6 +897,104 @@ impl ProcessStore {
         })
     }
 
+    /// Closes a running campaign after a daemon-owned failed Product path.
+    /// It refuses to race a paid session and persists one bounded explanation
+    /// atomically with the failed lifecycle; terminal session evidence remains
+    /// the source for process-level detail where a session exists.
+    pub async fn fail_campaign(
+        &self,
+        command: &FailCampaign,
+    ) -> Result<CampaignReceipt, StoreError> {
+        validate_command(&command.principal, &command.command_id)?;
+        validate_failure_reason(&command.reason)?;
+        let fingerprint = fingerprint_fail_campaign(command);
+        let mut tx = self.pool.begin().await?;
+        lock_process_transaction(&mut tx).await?;
+        if let Some(receipt) = find_audit(&mut tx, command, CAMPAIGN_FAIL, fingerprint).await? {
+            require_subject(&receipt, CAMPAIGN_SUBJECT)?;
+            let campaign_id = CampaignId::new(receipt.subject_id)?;
+            let pins = campaign_pinning(&mut tx, campaign_id).await?;
+            tx.commit().await?;
+            return Ok(CampaignReceipt {
+                campaign_id,
+                resulting_revision: receipt.resulting_revision,
+                kernel_build_id: pins.kernel_build_id,
+                application_revision_id: pins.application_revision_id,
+                repository_id: pins.repository_id,
+                audit_log_id: receipt.audit_log_id,
+                was_idempotent_retry: true,
+            });
+        }
+        let campaign = sqlx::query!(
+            "SELECT lifecycle, revision FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+            command.campaign_id.get()
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::UnknownCampaign {
+            campaign_id: command.campaign_id,
+        })?;
+        let current_revision = storage::aggregate_revision_from_sql_for_process(campaign.revision)?;
+        if command.expected_revision.get() != current_revision {
+            return Err(StoreError::RevisionConflict {
+                expected: command.expected_revision,
+                current: current_revision,
+            });
+        }
+        if campaign.lifecycle != RUNNING {
+            return Err(StoreError::CampaignClosed {
+                campaign_id: command.campaign_id,
+            });
+        }
+        if sqlx::query_scalar!(
+            "SELECT id FROM factory.sessions WHERE campaign_id = $1 AND lifecycle = $2 LIMIT 1",
+            command.campaign_id.get(),
+            SESSION_RUNNING
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some()
+        {
+            return Err(StoreError::CampaignHasRunningSession {
+                campaign_id: command.campaign_id,
+            });
+        }
+        let resulting_revision = current_revision.next()?;
+        sqlx::query!(
+            "UPDATE factory.campaigns
+                 SET lifecycle = $1, failure_reason = $2, revision = $3
+               WHERE id = $4",
+            FAILED,
+            &command.reason,
+            i64::try_from(resulting_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?,
+            command.campaign_id.get()
+        )
+        .execute(&mut *tx)
+        .await?;
+        let audit_log_id = insert_audit(
+            &mut tx,
+            &command.principal,
+            &command.command_id,
+            CAMPAIGN_FAIL,
+            fingerprint,
+            CAMPAIGN_SUBJECT,
+            command.campaign_id.get(),
+            resulting_revision,
+        )
+        .await?;
+        let pins = campaign_pinning(&mut tx, command.campaign_id).await?;
+        tx.commit().await?;
+        Ok(CampaignReceipt {
+            campaign_id: command.campaign_id,
+            resulting_revision,
+            kernel_build_id: pins.kernel_build_id,
+            application_revision_id: pins.application_revision_id,
+            repository_id: pins.repository_id,
+            audit_log_id,
+            was_idempotent_retry: false,
+        })
+    }
+
     pub async fn create_assignment(
         &self,
         cas: &CasStore,
@@ -1345,7 +1464,7 @@ impl ProcessStore {
             partial_transcript_artifact_id: partial_transcript_id
                 .map(ArtifactId::new)
                 .transpose()?,
-            required_read_manifest_artifact_id: manifest_id,
+            required_read_assertion_artifact_id: manifest_id,
             required_read_expected_count: u32::try_from(packet.required_reads.len()).map_err(
                 |_| StoreError::InvalidProcessCommand {
                     field: "required read count",
@@ -1451,7 +1570,7 @@ impl ProcessStore {
             }
             _ => {}
         }
-        if evidence.required_read_manifest_artifact_id.get()
+        if evidence.required_read_assertion_artifact_id.get()
             == session.required_read_manifest_artifact_id
         {
             return Err(StoreError::RequiredReadManifestMismatch);
@@ -1528,7 +1647,7 @@ impl ProcessStore {
         sqlx::query!(
             "UPDATE factory.sessions SET lifecycle = $1, transcript_artifact_id = $2,
                  stdout_artifact_id = $3, stderr_artifact_id = $4,
-                 partial_transcript_artifact_id = $5, required_read_manifest_artifact_id = $6,
+                 partial_transcript_artifact_id = $5, required_read_assertion_artifact_id = $6,
                  required_read_expected_count = $7, required_read_satisfied_count = $8,
                  input_tokens = $9, output_tokens = $10, cache_read_tokens = $11,
                  cache_write_tokens = $12, reasoning_tokens = $13,
@@ -1541,7 +1660,7 @@ impl ProcessStore {
             evidence.stdout_artifact_id.get(),
             evidence.stderr_artifact_id.get(),
             evidence.partial_transcript_artifact_id.map(ArtifactId::get),
-            evidence.required_read_manifest_artifact_id.get(),
+            evidence.required_read_assertion_artifact_id.get(),
             i32::try_from(evidence.required_read_expected_count).map_err(|_| {
                 StoreError::InvalidProcessCommand {
                     field: "required read count",
@@ -1613,7 +1732,7 @@ impl ProcessStore {
         campaign_id: CampaignId,
     ) -> Result<CampaignStatus, StoreError> {
         let row = sqlx::query!(
-            "SELECT c.lifecycle, c.aggregate_budget_micro_usd, c.measured_cost_micro_usd,
+            "SELECT c.lifecycle, c.failure_reason, c.aggregate_budget_micro_usd, c.measured_cost_micro_usd,
                     c.cost_state, c.revision, c.application_revision_id, c.repository_id,
                     c.delivery_target,
                     FLOOR(EXTRACT(EPOCH FROM c.deadline) * 1000)::BIGINT AS \"deadline_unix_millis!\",
@@ -1660,6 +1779,7 @@ impl ProcessStore {
                     field: "delivery target",
                 }
             })?,
+            failure_reason: row.failure_reason,
         })
     }
 
@@ -1703,7 +1823,7 @@ impl ProcessStore {
              LIMIT $3",
             campaign_id.get(),
             after,
-            i64::from(limit)
+            i64::from(limit),
             SESSION_RUNNING,
         )
         .fetch_all(&self.pool)
@@ -1820,7 +1940,7 @@ async fn validate_assignment_target_in_transaction(
 ) -> Result<(), StoreError> {
     let target_exists = match (packet.office, packet.ticket_attempt_id, packet.candidate_id) {
         (Office::ProductResearch, None, None) => true,
-        (Office::Engineering, Some(ticket_attempt_id), None) => sqlx::query_scalar::<_, i64>(
+        (Office::Engineering, Some(ticket_attempt_id), None) => sqlx::query_scalar!(
             "SELECT ta.id
                    FROM factory.ticket_attempts ta
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
@@ -1829,16 +1949,15 @@ async fn validate_assignment_target_in_transaction(
                     AND tr.application_revision_id = $3
                     AND ta.stage IN (0, 4)
                   FOR KEY SHARE",
+            ticket_attempt_id.get(),
+            packet.campaign_id.get(),
+            packet.application_revision_id.get(),
         )
-        .bind(ticket_attempt_id.get())
-        .bind(packet.campaign_id.get())
-        .bind(packet.application_revision_id.get())
         .fetch_optional(&mut **tx)
         .await?
         .is_some(),
-        (Office::Quality, Some(ticket_attempt_id), Some(candidate_id)) => {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT c.id
+        (Office::Quality, Some(ticket_attempt_id), Some(candidate_id)) => sqlx::query_scalar!(
+            "SELECT c.id
                    FROM factory.candidates c
                    JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
@@ -1848,15 +1967,14 @@ async fn validate_assignment_target_in_transaction(
                     AND tr.application_revision_id = $4
                     AND ta.stage IN (2, 6)
                   FOR KEY SHARE",
-            )
-            .bind(candidate_id.get())
-            .bind(ticket_attempt_id.get())
-            .bind(packet.campaign_id.get())
-            .bind(packet.application_revision_id.get())
-            .fetch_optional(&mut **tx)
-            .await?
-            .is_some()
-        }
+            candidate_id.get(),
+            ticket_attempt_id.get(),
+            packet.campaign_id.get(),
+            packet.application_revision_id.get(),
+        )
+        .fetch_optional(&mut **tx)
+        .await?
+        .is_some(),
         _ => false,
     };
     if target_exists {
@@ -2057,6 +2175,20 @@ fn verify_wire_domain_mapping(
     {
         return Err(StoreError::PacketIdentityMismatch);
     }
+    if wire.assignment_evidence.len() != packet.assignment_evidence.len()
+        || wire
+            .assignment_evidence
+            .iter()
+            .zip(&packet.assignment_evidence)
+            .any(|(wire, domain)| {
+                wire.role != domain.role.wire_name()
+                    || wire.artifact_id != domain.artifact_id.get()
+                    || wire.digest != domain.digest.to_hex()
+                    || wire.byte_length != domain.byte_length
+            })
+    {
+        return Err(StoreError::PacketIdentityMismatch);
+    }
     Ok(())
 }
 
@@ -2216,6 +2348,18 @@ fn assignment_packet_from_wire(
             credential,
         },
         required_reads,
+        assignment_evidence: wire
+            .assignment_evidence
+            .iter()
+            .map(|evidence| {
+                Ok(AssignmentEvidenceV1 {
+                    role: AssignmentEvidenceRoleV1::parse_wire_name(&evidence.role)?,
+                    artifact_id: ArtifactId::new(evidence.artifact_id)?,
+                    digest: ContentDigest::from_str(&evidence.digest)?,
+                    byte_length: evidence.byte_length,
+                })
+            })
+            .collect::<Result<Vec<_>, factory_protocol::ContractError>>()?,
         terminal_operations,
         remaining_campaign_allowance: MicroUsd::new(wire.remaining_campaign_allowance_micro_usd),
         revision: AggregateRevision::from_persisted(wire.aggregate_revision),
@@ -2380,6 +2524,15 @@ impl CommandKey for CancelCampaign {
         &self.command_id
     }
 }
+impl CommandKey for FailCampaign {
+    fn principal(&self) -> &str {
+        &self.principal
+    }
+
+    fn command_id(&self) -> &str {
+        &self.command_id
+    }
+}
 impl CommandKey for CreateAssignment {
     fn principal(&self) -> &str {
         &self.principal
@@ -2424,6 +2577,18 @@ fn validate_command(principal: &str, command_id: &str) -> Result<(), StoreError>
     }
     Ok(())
 }
+
+/// A daemon fault is explainable through the deterministic command identity,
+/// but it is not a free-form report channel. Keep it bounded and printable so
+/// the same fact cannot become an unbounded audit payload.
+fn validate_failure_reason(reason: &str) -> Result<(), StoreError> {
+    if reason.is_empty() || reason.len() > 240 || reason.contains('\0') {
+        return Err(StoreError::InvalidProcessCommand {
+            field: "campaign failure reason",
+        });
+    }
+    Ok(())
+}
 fn hash_str(h: &mut blake3::Hasher, value: &str) {
     h.update(&(value.len() as u64).to_be_bytes());
     h.update(value.as_bytes());
@@ -2459,6 +2624,16 @@ fn fingerprint_cancel_campaign(c: &CancelCampaign) -> ContentDigest {
     hash_str(&mut h, &c.command_id);
     hash_u64(&mut h, c.expected_revision.get().get());
     hash_i64(&mut h, c.campaign_id.get());
+    ContentDigest::from_bytes(*h.finalize().as_bytes())
+}
+fn fingerprint_fail_campaign(c: &FailCampaign) -> ContentDigest {
+    let mut h = blake3::Hasher::new();
+    hash_str(&mut h, CAMPAIGN_FAIL);
+    hash_str(&mut h, &c.principal);
+    hash_str(&mut h, &c.command_id);
+    hash_u64(&mut h, c.expected_revision.get().get());
+    hash_i64(&mut h, c.campaign_id.get());
+    hash_str(&mut h, &c.reason);
     ContentDigest::from_bytes(*h.finalize().as_bytes())
 }
 fn fingerprint_assignment(c: &CreateAssignment) -> ContentDigest {
@@ -2500,7 +2675,7 @@ fn fingerprint_terminal(
     hash_digest(&mut h, r.packet_digest);
     hash_u64(&mut h, r.expected_session_revision.get().get());
     hash_i64(&mut h, evidence.transcript_artifact_id.get());
-    hash_i64(&mut h, evidence.required_read_manifest_artifact_id.get());
+    hash_i64(&mut h, evidence.required_read_assertion_artifact_id.get());
     hash_u32(&mut h, evidence.required_read_expected_count);
     hash_u32(&mut h, evidence.required_read_satisfied_count);
     hash_u32(&mut h, r.stop_reason as u32);

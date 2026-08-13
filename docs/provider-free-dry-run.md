@@ -1,8 +1,9 @@
 # Provider-free dry-run and MVP operator record
 
 This document is the Tranche 9 dry-run record. It is intentionally separate from `PLAN.md`: it turns
-the plan's acceptance facts into repeatable local checks and an operator record without creating
-factory state or making a provider request.
+the plan's acceptance facts into repeatable local checks and an operator record without changing
+live factory state or making a provider request. The backup/restore check intentionally restores an
+isolated clone as evidence; it never changes its source database or runtime root.
 
 Nothing in this document authorizes a paid campaign. A provider-free result proves only
 deterministic kernel, SDK, PostgreSQL, Git, and host behavior. It does not prove a model can
@@ -38,9 +39,105 @@ DATABASE_URL=postgresql://USER@localhost/factory_test_v3_<digits> \
   make sqlx-check
 ```
 
-`make postgres-test` runs serially because the assertions inspect durable row counts. It is the only
-routine dry-run target that needs PostgreSQL. Its name guard is deliberately strict so the make
-target cannot use a database with an operator-selected name.
+`make postgres-test` runs serially because the assertions inspect durable row counts. Its name
+guard is deliberately strict so the make target cannot use a database with an operator-selected
+name. It is one ordinary PostgreSQL subset, not the final provider-free acceptance gate.
+
+## Complete provider-free acceptance
+
+`make provider-free-acceptance` is the complete local qualification contract. It never creates or
+drops a database. Before invoking it, the operator must provide all of the following through normal
+PostgreSQL/filesystem administration:
+
+- `FACTORY_ACCEPTANCE_POSTGRES_URL`: one exact `factory_test_v3_<digits>` database for the ordinary
+  serial PostgreSQL, ticket, decision, and SQLx checks;
+- `FACTORY_ACCEPTANCE_XSH_BUNDLE_URL`: a distinct, fresh exact
+  `factory_test_v3_<digits>` database for the real XSH compile-twice and typed Rust/CAS/activation
+  boundary judge;
+- `FACTORY_ACCEPTANCE_VERTICAL_URL`: a distinct, fresh exact
+  `factory_test_v3_<digits>` database for the unseeded generic Product-to-delivery composition
+  judge; and
+- the source database/runtime root and blank restore database/runtime root required by the backup
+  variables in the next section.
+
+The target runs `make check`, then the ordinary PostgreSQL subset, ticket/decision judges, SQLx
+metadata check, real XSH bundle admission, generic vertical, and backup/restore qualification in
+that order. The XSH bundle and generic vertical deliberately receive their own fresh databases: the
+first migrates and activates the actual compiled application, while the second asserts one unseeded
+Product proposal and exactly three sessions. Ordinary fixtures would invalidate both facts. The
+backup target separately requires an exact blank `factory_restore_v3_<digits>` clone. These
+boundaries prove isolation rather than hiding shared state behind a broad cleanup command.
+
+```sh
+FACTORY_ACCEPTANCE_POSTGRES_URL='postgresql://USER@localhost/factory_test_v3_<digits>' \
+FACTORY_ACCEPTANCE_XSH_BUNDLE_URL='postgresql://USER@localhost/factory_test_v3_<other-digits>' \
+FACTORY_ACCEPTANCE_VERTICAL_URL='postgresql://USER@localhost/factory_test_v3_<other-digits>' \
+FACTORY_BACKUP_SOURCE_DATABASE_URL='postgresql://USER@localhost/factory_v3_live' \
+FACTORY_BACKUP_SOURCE_RUNTIME_ROOT='/absolute/path/to/live-runtime' \
+FACTORY_BACKUP_RESTORE_DATABASE_URL='postgresql://USER@localhost/factory_restore_v3_<digits>' \
+FACTORY_BACKUP_RESTORE_RUNTIME_ROOT='/absolute/path/to/empty-restore-runtime' \
+FACTORY_BACKUP_DUMP_FILE='/absolute/path/to/retained/factory-v3.backup' \
+FACTORY_BACKUP_PG_DUMP="$(command -v pg_dump)" \
+FACTORY_BACKUP_PG_RESTORE="$(command -v pg_restore)" \
+FACTORY_BACKUP_PSQL="$(command -v psql)" \
+FACTORY_BACKUP_CARGO="$(command -v cargo)" \
+make provider-free-acceptance
+```
+
+The generic vertical is not an XSH execution claim: it uses a synthetic repository and a small
+scripted Deno actor to exercise installed-receipt, materializer, resident-driver, and authority
+composition. `make xsh-bundle-test` separately compiles the exact XSH application twice and admits
+the canonical emitted bundle plus the closed seven-template source set through typed Rust/CAS and
+activation authority. Exact XSH worker-prompt coverage is the SDK-based two-compile/render judge in
+`applications/xsh/mod_test.ts`; it verifies the declared digests, office-to-template selection,
+resolved placeholders, and neutral worker wording. Actual Pi SDK behavior is covered independently
+by the faux-provider host assignment judge in `packages/factory-pi-host/host_test.ts`. All four must
+pass before a paid campaign, but none proves that a model will discover or fix an XSH defect.
+
+## Backup and restore qualification
+
+This is an explicit offline operator check, not a daemon command. Before it starts, create the
+blank restore database and the empty restore runtime directory through the normal local PostgreSQL
+and filesystem administration path. The check itself will refuse to run unless the restore database
+is named exactly `factory_restore_v3_<digits>`, contains no user relations, types, functions, or
+schemas (the empty `public` schema is allowed), and the restore runtime directory is already empty.
+It never creates or drops either database.
+
+The source runtime root must be quiescent and contain its append-only CAS object tree. The custom
+dump file must be a new path outside both runtime roots; it is retained on success or failure as the
+operator's backup evidence. The command copies only `objects/`, the append-only CAS tree—not daemon
+locks, sockets, worktrees, or staging directories—into the isolated restore root.
+
+Prepare that source separately with the documented `factoryctl init`/preflight flow in `README.md`,
+then stop its daemon before this check. A successful generic vertical intentionally removes its
+ephemeral synthetic runtime root, so it is never a backup source fixture; the source here is a
+separately initialized, quiescent runtime/database pair retained for the operator check.
+
+```sh
+FACTORY_BACKUP_SOURCE_DATABASE_URL='postgresql://USER@localhost/factory_v3_live' \
+FACTORY_BACKUP_SOURCE_RUNTIME_ROOT='/absolute/path/to/live-runtime' \
+FACTORY_BACKUP_RESTORE_DATABASE_URL='postgresql://USER@localhost/factory_restore_v3_<digits>' \
+FACTORY_BACKUP_RESTORE_RUNTIME_ROOT='/absolute/path/to/empty-restore-runtime' \
+FACTORY_BACKUP_DUMP_FILE='/absolute/path/to/retained/factory-v3.backup' \
+FACTORY_BACKUP_PG_DUMP="$(command -v pg_dump)" \
+FACTORY_BACKUP_PG_RESTORE="$(command -v pg_restore)" \
+FACTORY_BACKUP_PSQL="$(command -v psql)" \
+FACTORY_BACKUP_CARGO="$(command -v cargo)" \
+make backup-restore-test
+```
+
+The check invokes `pg_dump --format=custom`, `pg_restore --exit-on-error` into the blank clone,
+and the ignored Rust restore-integrity judge. That judge rechecks schema identity, audit/material
+consistency, every artifact's canonical CAS object/digest/length, and reloads the restored current
+installed-build receipt to requalify its local host source, tools, and frozen Deno cache. The Deno
+wrapper fingerprints bounded logical schema, audit, artifact, installed-material, and sequence
+summaries for the source and clone databases, plus the source/clone CAS trees, with SHA-256 before
+and after. It deliberately excludes physical relation/database sizes: PostgreSQL MVCC and indexes
+may grow during the clone-only corruption probes even after their logical values are repaired. The
+source must not change and the clone must return to the restored logical state after those probes. It refuses
+shared PostgreSQL host/port/database targets, shared runtime roots, symlinks/non-regular CAS
+entries, a nonempty target root, a database containing user relations/types/functions, or an
+existing dump file.
 
 ## Real XSH prerequisite qualification
 
@@ -64,9 +161,9 @@ on stdin:
 
 ```text
 cargo run --quiet --locked --bin xsh -- /dev/stdin
-stdin: proc main() -> Result[Unit] { print "factory-reproducer-ok" }
+stdin: proc main() -> Result[Unit] { print "xsh-reproducer-ok" }
 exit: 0
-stdout: factory-reproducer-ok\n
+stdout: xsh-reproducer-ok\n
 stderr: empty
 ```
 
@@ -151,10 +248,12 @@ operate only on synthetic state.
 The PostgreSQL-focused rows require `FACTORY_TEST_DATABASE_URL` to be set to the disposable database
 described above. The Git judge does not require PostgreSQL.
 
-## Fake full-workflow acceptance outline
+## Generic full-workflow acceptance judge
 
-The final provider-free vertical judge must use fake actors and a synthetic local Git repository. It
-should assemble the already-defined transitions in this order:
+`make provider-free-vertical` runs the executable generic resident-composition judge against its
+own fresh database. It uses a scripted local Deno actor and a synthetic local Git repository; it
+does not execute the XSH application or the Pi SDK host. The judge assembles the real typed
+transitions in this order:
 
 1. Start a clean application revision and one campaign with a `$0.50` aggregate _test_ cap; create
    no Product seed ticket.
@@ -171,17 +270,17 @@ should assemble the already-defined transitions in this order:
    receipts, review, decision, delivery, known aggregate cost, and office/session cost breakdown
    explain the delivered commit.
 
-This is an acceptance outline, not a substitute implementation or a mock workflow engine. At the
-time of this record, the repository does **not** yet provide a single executable Product-to-delivery
-fake-workflow harness: Tranche 6 Product ticket submission/requalification and Tranche 8
-candidate/review/Architect/delivery transports must first expose their typed transitions. The final
-judge must call those real transitions directly; it must not fabricate SQL rows or add a parallel
-test-only lifecycle.
+This is an executable generic composition judge, not a substitute implementation or a mock
+workflow engine. It calls the installed receipt, real assignment materializer, `CampaignDriver`,
+typed Architect transitions, and guarded local Git delivery; it does not fabricate lifecycle SQL or
+add a parallel lifecycle. It passes only after the command above is green on a fresh database. Its
+generic scope is intentional: the XSH template and real Pi-host judges named above are separate,
+more precise evidence.
 
 ## Paid MVP preflight checklist
 
-Complete this checklist only after the entire provider-free suite above is green and the vertical
-fake-workflow judge exists and passes.
+Complete this checklist only after `make provider-free-acceptance` is green, including its generic
+vertical and backup/restore judges.
 
 - [ ] The V3 checkout is clean and contains no V1/V2 code or imported state.
 - [ ] `../xsh` is clean on the intended local default branch; its commit and tree identity are

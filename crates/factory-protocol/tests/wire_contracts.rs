@@ -356,6 +356,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
                 round_trip::<OperatorApplicationActivateRequest>(request)
             }
             OP_OPERATOR_SEAL_ARTIFACT => round_trip::<OperatorArtifactSealRequest>(request),
+            OP_OPERATOR_LIST_TICKETS => round_trip::<OperatorTicketListRequest>(request),
+            OP_OPERATOR_SHOW_TICKET => round_trip::<OperatorTicketShowRequest>(request),
+            OP_OPERATOR_SHOW_CANDIDATE => round_trip::<OperatorCandidateShowRequest>(request),
+            OP_OPERATOR_SHOW_AUDIT => round_trip::<OperatorAuditShowRequest>(request),
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionVerifyPacketRequest>(request),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<SessionSealArtifactRequest>(request),
             OP_SESSION_SUBMIT_TERMINAL => round_trip::<SessionSubmitTerminalRequest>(request),

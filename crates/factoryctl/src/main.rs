@@ -489,7 +489,7 @@ fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
 fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
     if json {
         println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{}}}",
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"failure_reason\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"downstream_evidence\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{}}}",
             status.protocol_version,
             status.request_id,
             status.operation,
@@ -505,6 +505,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             optional_u64(status.remaining_budget_micro_usd),
             status.deadline_unix_millis,
             status.delivery_target,
+            optional_json_string(status.failure_reason.as_deref()),
             status.delivered_attempt_count,
             status.ready_ticket_count,
             status.proposed_ticket_count,
@@ -515,6 +516,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             optional_u64(status.downstream_ticket_attempt_revision),
             optional_i64(status.downstream_candidate_id),
             optional_u64(status.downstream_candidate_revision),
+            downstream_evidence_json(status.downstream_evidence.as_ref()),
             status.ready_low_water,
             status.ready_target,
             status.ready_maximum,
@@ -527,7 +529,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
         );
     } else {
         println!(
-            "campaign #{}: {} (revision {})\n  build: {}\n  application revision: {}; repository: {}\n  budget: {} μUSD; cost: {}{}\n  tickets: ready {}, proposed {}, in flight {}, downstream {}; delivered {}/{}{}\n  scheduler: {}{}{}",
+            "campaign #{}: {} (revision {})\n  build: {}\n  application revision: {}; repository: {}\n  budget: {} μUSD; cost: {}{}{}\n  tickets: ready {}, proposed {}, in flight {}, downstream {}; delivered {}/{}{}{}\n  scheduler: {}{}{}",
             status.campaign_id,
             status.state,
             status.aggregate_revision,
@@ -539,6 +541,11 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             status
                 .remaining_budget_micro_usd
                 .map(|value| format!("; remaining {value} μUSD"))
+                .unwrap_or_default(),
+            status
+                .failure_reason
+                .as_deref()
+                .map(|reason| format!("\n  failure: {reason}"))
                 .unwrap_or_default(),
             status.ready_ticket_count,
             status.proposed_ticket_count,
@@ -567,6 +574,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
                     )
                 })
                 .unwrap_or_default(),
+            downstream_evidence_text(status.downstream_evidence.as_ref()),
             status.scheduler_next_action,
             status
                 .scheduler_constraint
@@ -576,6 +584,78 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             session_costs_text(&status.session_costs),
         );
     }
+}
+
+fn downstream_evidence_json(
+    evidence: Option<&factory_protocol::DownstreamEvidenceResponse>,
+) -> String {
+    let Some(evidence) = evidence else {
+        return "null".to_owned();
+    };
+    let validation = evidence.latest_validation.as_ref().map_or_else(
+        || "null".to_owned(),
+        |validation| {
+            format!(
+                "{{\"validation_id\":{},\"state\":\"{}\",\"log_artifact_id\":{}}}",
+                validation.validation_id, validation.state, validation.log_artifact_id
+            )
+        },
+    );
+    let review = evidence.review.as_ref().map_or_else(
+        || "null".to_owned(),
+        |review| {
+            format!(
+                "{{\"review_id\":{},\"review_revision\":{},\"verdict\":\"{}\",\"rationale_artifact_id\":{}}}",
+                review.review_id, review.review_revision, review.verdict, review.rationale_artifact_id
+            )
+        },
+    );
+    let decision = evidence.architect_decision.as_ref().map_or_else(
+        || "null".to_owned(),
+        |decision| {
+            format!(
+                "{{\"architect_decision_id\":{},\"decision_kind\":\"{}\",\"rationale_artifact_id\":{}}}",
+                decision.architect_decision_id,
+                decision.decision_kind,
+                decision.rationale_artifact_id
+            )
+        },
+    );
+    format!(
+        "{{\"candidate_commit\":{},\"latest_validation\":{validation},\"review\":{review},\"architect_decision\":{decision}}}",
+        optional_json_string(evidence.candidate_commit.as_deref()),
+    )
+}
+
+fn downstream_evidence_text(
+    evidence: Option<&factory_protocol::DownstreamEvidenceResponse>,
+) -> String {
+    let Some(evidence) = evidence else {
+        return String::new();
+    };
+    let mut output = evidence
+        .candidate_commit
+        .as_deref()
+        .map_or_else(String::new, |commit| format!("; commit {commit}"));
+    if let Some(validation) = &evidence.latest_validation {
+        output.push_str(&format!(
+            "; validation #{} {} (log artifact #{})",
+            validation.validation_id, validation.state, validation.log_artifact_id
+        ));
+    }
+    if let Some(review) = &evidence.review {
+        output.push_str(&format!(
+            "; review #{} rev {} {} (rationale artifact #{})",
+            review.review_id, review.review_revision, review.verdict, review.rationale_artifact_id
+        ));
+    }
+    if let Some(decision) = &evidence.architect_decision {
+        output.push_str(&format!(
+            "; Architect decision #{} {} (rationale artifact #{})",
+            decision.architect_decision_id, decision.decision_kind, decision.rationale_artifact_id
+        ));
+    }
+    output
 }
 
 fn session_costs_json(rows: &[factory_protocol::CampaignSessionCostResponse]) -> String {
@@ -618,8 +698,10 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             row.cost_state,
             row.cost_micro_usd
                 .map_or_else(|| "unknown".to_owned(), |cost| format!("{cost} μUSD")),
-            row.elapsed_millis
-                .map_or_else(|| String::new(), |elapsed| format!("; elapsed {elapsed} ms")),
+            row.elapsed_millis.map_or_else(
+                || String::new(),
+                |elapsed| format!("; elapsed {elapsed} ms")
+            ),
         ));
     }
     output
@@ -1246,7 +1328,7 @@ struct InitCommand {
     deno_config: PathBuf,
     deno_lock: PathBuf,
     deno_dir: PathBuf,
-    dependency_graph_receipt: PathBuf,
+    pi_host_cache_probe: String,
     pi_version: String,
     openrouter_credential_environment: String,
 }
@@ -1431,7 +1513,7 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
     let mut deno_config = None;
     let mut deno_lock = None;
     let mut deno_dir = None;
-    let mut dependency_graph_receipt = None;
+    let mut pi_host_cache_probe = None;
     let mut pi_version = None;
     let mut openrouter_credential_environment = None;
     while let Some(flag) = values.next() {
@@ -1472,10 +1554,10 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
             "--deno-config" => set_absolute_path(&mut deno_config, value, "--deno-config")?,
             "--deno-lock" => set_absolute_path(&mut deno_lock, value, "--deno-lock")?,
             "--deno-dir" => set_absolute_path(&mut deno_dir, value, "--deno-dir")?,
-            "--dependency-graph-receipt" => set_absolute_path(
-                &mut dependency_graph_receipt,
-                value,
-                "--dependency-graph-receipt",
+            "--pi-host-cache-probe" => set_once(
+                &mut pi_host_cache_probe,
+                safe_relative(value, &flag)?,
+                "--pi-host-cache-probe",
             )?,
             "--pi-version" => set_once(&mut pi_version, value, "--pi-version")?,
             "--provider-credential-environment" => set_once(
@@ -1507,7 +1589,7 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         deno_config: required(deno_config, "--deno-config")?,
         deno_lock: required(deno_lock, "--deno-lock")?,
         deno_dir: required(deno_dir, "--deno-dir")?,
-        dependency_graph_receipt: required(dependency_graph_receipt, "--dependency-graph-receipt")?,
+        pi_host_cache_probe: required(pi_host_cache_probe, "--pi-host-cache-probe")?,
         pi_version: required(pi_version, "--pi-version")?,
         openrouter_credential_environment: required(
             openrouter_credential_environment,
@@ -1581,10 +1663,10 @@ fn factoryd_init_arguments(command: &InitCommand, factoryd: &Path) -> Vec<OsStri
     push_path_argument(&mut arguments, "--deno-config", &command.deno_config);
     push_path_argument(&mut arguments, "--deno-lock", &command.deno_lock);
     push_path_argument(&mut arguments, "--deno-dir", &command.deno_dir);
-    push_path_argument(
+    push_argument(
         &mut arguments,
-        "--dependency-graph-receipt",
-        &command.dependency_graph_receipt,
+        "--pi-host-cache-probe",
+        &command.pi_host_cache_probe,
     );
     push_argument(&mut arguments, "--pi-version", &command.pi_version);
     push_argument(
@@ -2569,7 +2651,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl init --factoryd <absolute-path> --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --dependency-graph-receipt <absolute-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>\n  factoryctl daemon status --socket <path> [--format json]\n  factoryctl application show <key> [--application-revision-id <id>] --socket <path> [--format json]\n  factoryctl application register --socket <path> --client-command-id <id> --expected-revision <application-revision> --expected-kernel-build-revision <build-revision> --kernel-build-id <blake3> --source-root <absolute-path> --bundle-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl application activate <key> <revision-id> --socket <path> --client-command-id <id> --expected-revision <application-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl artifact seal --socket <path> --client-command-id <id> --expected-kernel-build-revision <revision> --source-root <absolute-path> --source-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl campaign start --application-revision-id <id> --expected-application-revision <revision> --aggregate-budget-micro-usd <amount> --deadline-unix-millis <millis> --delivery-target <count> --socket <path> --client-command-id <id> --principal <name> [--format json]\n  factoryctl campaign status <id> --socket <path> [--format json]\n  factoryctl campaign cancel <id> --socket <path> --client-command-id <id> --expected-revision <revision> --principal <name> [--format json]\n  factoryctl ticket list [--state proposed|sponsored|in_flight|delivered|blocked|resolved|superseded|rejected] --socket <path> [--format json]\n  factoryctl ticket show <id> --socket <path> [--format json]\n  factoryctl ticket sponsor <revision> --socket <path> --client-command-id <id> --expected-revision <revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl ticket release <attempt> --socket <path> --client-command-id <id> --expected-revision <attempt-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl candidate show <id> --socket <path> [--format json]\n  factoryctl candidate decide <candidate> --review-id <review> --deliver|--rework|--reject --socket <path> --client-command-id <id> --expected-revision <candidate-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--quality-rejection-override-review-id <review>] [--format json]\n  factoryctl audit show ticket:<id>|candidate:<id>|campaign:<id>|application-revision:<id>|audit:<id> --socket <path> [--format json]\n  factoryctl forum topics [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum threads <topic-id> [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum read <thread-id> [--after-post <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum search <query> [--cursor <opaque>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum create-topic --name <name> --description <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum create-thread --topic-id <id> --title <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum post --thread-id <id> --kind note|question|finding|proposal|challenge|correction|decision_link --body <text> [--reply-to <post-id>] [--supersedes <post-id>] [--attachment <artifact-id>:<label>]... --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]"
+    "usage:\n  factoryctl init --factoryd <absolute-path> --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --pi-host-cache-probe <safe-relative-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>\n  factoryctl daemon status --socket <path> [--format json]\n  factoryctl application show <key> [--application-revision-id <id>] --socket <path> [--format json]\n  factoryctl application register --socket <path> --client-command-id <id> --expected-revision <application-revision> --expected-kernel-build-revision <build-revision> --kernel-build-id <blake3> --source-root <absolute-path> --bundle-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl application activate <key> <revision-id> --socket <path> --client-command-id <id> --expected-revision <application-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl artifact seal --socket <path> --client-command-id <id> --expected-kernel-build-revision <revision> --source-root <absolute-path> --source-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl campaign start --application-revision-id <id> --expected-application-revision <revision> --aggregate-budget-micro-usd <amount> --deadline-unix-millis <millis> --delivery-target <count> --socket <path> --client-command-id <id> --principal <name> [--format json]\n  factoryctl campaign status <id> --socket <path> [--format json]\n  factoryctl campaign cancel <id> --socket <path> --client-command-id <id> --expected-revision <revision> --principal <name> [--format json]\n  factoryctl ticket list [--state proposed|sponsored|in_flight|delivered|blocked|resolved|superseded|rejected] --socket <path> [--format json]\n  factoryctl ticket show <id> --socket <path> [--format json]\n  factoryctl ticket sponsor <revision> --socket <path> --client-command-id <id> --expected-revision <revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl ticket release <attempt> --socket <path> --client-command-id <id> --expected-revision <attempt-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl candidate show <id> --socket <path> [--format json]\n  factoryctl candidate decide <candidate> --review-id <review> --deliver|--rework|--reject --socket <path> --client-command-id <id> --expected-revision <candidate-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--quality-rejection-override-review-id <review>] [--format json]\n  factoryctl audit show ticket:<id>|candidate:<id>|campaign:<id>|application-revision:<id>|audit:<id> --socket <path> [--format json]\n  factoryctl forum topics [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum threads <topic-id> [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum read <thread-id> [--after-post <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum search <query> [--cursor <opaque>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum create-topic --name <name> --description <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum create-thread --topic-id <id> --title <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum post --thread-id <id> --kind note|question|finding|proposal|challenge|correction|decision_link --body <text> [--reply-to <post-id>] [--supersedes <post-id>] [--attachment <artifact-id>:<label>]... --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]"
 }
 
 #[cfg(test)]
@@ -2596,19 +2678,19 @@ mod tests {
             "--deno-executable".to_owned(),
             "/opt/deno/bin/deno".to_owned(),
             "--pi-host-source-root".to_owned(),
-            "/opt/factory-source".to_owned(),
+            "/opt/factory-source/packages".to_owned(),
             "--pi-host-source-file".to_owned(),
-            "typescript/pi-host/main.ts".to_owned(),
+            "factory-pi-host/main.ts".to_owned(),
             "--pi-host-entrypoint".to_owned(),
-            "/opt/factory-source/typescript/pi-host/main.ts".to_owned(),
+            "/opt/factory-source/packages/factory-pi-host/main.ts".to_owned(),
+            "--pi-host-cache-probe".to_owned(),
+            "factory-pi-host/mod.ts".to_owned(),
             "--deno-config".to_owned(),
             "/opt/factory-source/deno.json".to_owned(),
             "--deno-lock".to_owned(),
             "/opt/factory-source/deno.lock".to_owned(),
             "--deno-dir".to_owned(),
             "/opt/factory-runtime/deno-cache".to_owned(),
-            "--dependency-graph-receipt".to_owned(),
-            "/opt/factory-source/runtime/dependency-graph.json".to_owned(),
             "--pi-version".to_owned(),
             "0.84.1".to_owned(),
             "--provider-credential-environment".to_owned(),
@@ -2668,7 +2750,7 @@ mod tests {
                 ..
             }) if factoryd == PathBuf::from("/opt/factory/bin/factoryd")
                 && kernel_source_files == vec!["crates/factoryd/src/main.rs".to_owned()]
-                && pi_host_source_files == vec!["typescript/pi-host/main.ts".to_owned()]
+                && pi_host_source_files == vec!["factory-pi-host/main.ts".to_owned()]
                 && cargo_executable == PathBuf::from("/opt/rust/bin/cargo")
                 && git_executable == PathBuf::from("/opt/git/bin/git")
         ));

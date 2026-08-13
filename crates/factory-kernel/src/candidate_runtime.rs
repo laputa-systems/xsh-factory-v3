@@ -77,6 +77,11 @@ pub struct CandidateTicketBinding {
 }
 
 /// Kernel-selected identity and timestamp for a constructed candidate commit.
+///
+/// This policy is deliberately used only after the Engineering session has
+/// reached a successful terminal state.  Its transcript digest is unavailable
+/// at `candidate.submit`, so constructing a commit on the actor request would
+/// falsely claim packet bytes were session evidence.
 #[derive(Clone, Debug)]
 pub struct CandidateCommitPolicy {
     pub author: GitIdentity,
@@ -102,7 +107,6 @@ pub struct ResolvedEngineeringCandidateAuthority {
     pub full_suite_identity: String,
     pub full_suite: Vec<DeterministicCommand>,
     pub validation_worktree_name: WorktreeName,
-    pub commit: CandidateCommitPolicy,
 }
 
 impl ResolvedEngineeringCandidateAuthority {
@@ -128,7 +132,6 @@ impl ResolvedEngineeringCandidateAuthority {
                 full_suite: &self.full_suite,
                 worktree_name: self.validation_worktree_name.clone(),
             },
-            commit: self.commit.clone(),
         }
     }
 }
@@ -226,7 +229,6 @@ pub struct EngineeringCandidateAuthority<'a> {
     pub ticket: CandidateTicketBinding,
     pub regression: RegressionCheckpointProgram<'a>,
     pub validation: CandidateValidationProgram<'a>,
-    pub commit: CandidateCommitPolicy,
 }
 
 /// Trusted inputs for an independent Quality full-suite invocation.  Quality
@@ -302,7 +304,7 @@ pub enum CandidateSubmissionOutcome {
     Validated {
         candidate: CandidateReceipt,
         hard_validation: ValidationReceipt,
-        packet: CandidatePacketV1,
+        candidate_tree: RepositoryObjectIdV1,
     },
 }
 
@@ -342,15 +344,14 @@ pub struct ResumedHardValidationAuthority {
     pub full_suite_identity: String,
     pub full_suite: Vec<DeterministicCommand>,
     pub validation_worktree_name: WorktreeName,
-    pub commit: CandidateCommitPolicy,
 }
 
-/// Result of a resumed hard-validation pass. A non-passing result advances
-/// the candidate to its ordinary rejected state and leaves `attached` absent.
+/// Result of a resumed hard-validation pass. A passing result deliberately
+/// leaves the candidate without a Git commit until the Engineering session's
+/// terminal transcript has been sealed and verified.
 #[derive(Clone, Debug)]
 pub struct ResumedHardValidationOutcome {
     pub validation: ValidationReceipt,
-    pub attached: Option<CandidateReceipt>,
 }
 
 /// Durable-only authority for the second half of a passed hard validation.
@@ -684,69 +685,20 @@ pub async fn submit_candidate(
         });
     }
 
-    let message = CommitMessage::normalize(&submission.commit_subject, &submission.commit_body)?;
-    let candidate_commit = git.construct_candidate_commit(
-        authority.repository,
-        &ConstructCandidateCommit {
-            candidate_tree: capture.tree().clone(),
-            candidate_ref: CandidateRefName::new(
-                authority.ticket.ticket_id,
-                candidate.candidate_id,
-            ),
-            message,
-            author: authority.commit.author.clone(),
-            committer: authority.commit.committer.clone(),
-            timestamp_unix_seconds: authority.commit.timestamp_unix_seconds,
-            provenance: CommitProvenance {
-                campaign_id: authority.actor.packet.campaign_id,
-                ticket_id: authority.ticket.ticket_id,
-                ticket_revision_digest: authority.ticket.ticket_revision_digest,
-                kernel_build_id: authority.actor.packet.kernel_build_id,
-                application_revision_id: authority.actor.packet.application_revision_id,
-                regression_tree: checkpoint.regression.tree().clone(),
-                patch_digest: capture.patch_digest(),
-                engineering_session_digest: authority.commit.engineering_session_digest,
-                validation_id: hard_validation.validation_id,
-            },
-        },
-    )?;
-    let attached = decisions
-        .attach_candidate_commit(&AttachCandidateCommit {
-            principal: authority.actor.principal.to_owned(),
-            command_id: derived_command_id(&request.client_command_id, "candidate-commit")?,
-            candidate_id: candidate.candidate_id,
-            expected_candidate_revision: ExpectedRevision::new(
-                hard_validation.resulting_candidate_revision,
-            ),
-            candidate_commit: repository_object(candidate_commit.commit().as_str())?,
-            candidate_ref: candidate_commit.candidate_ref().as_str().to_owned(),
-        })
-        .await?;
-    let packet = CandidatePacketV1 {
-        candidate_id: candidate.candidate_id,
-        ticket_attempt_id: authority.ticket.ticket_attempt_id,
-        ticket_revision_id: authority.ticket.ticket_revision_id,
-        base_commit: repository_object(authority.repository.snapshot().base_commit().as_str())?,
-        base_tree: repository_object(authority.repository.snapshot().base_tree().as_str())?,
-        regression_tree: repository_object(checkpoint.regression.tree().as_str())?,
-        candidate_tree,
-        regression_patch: checkpoint.regression_patch.clone(),
-        regression_command_set: checkpoint.command_set.clone(),
-        regression_log: checkpoint.log.clone(),
-        candidate_patch,
-        engineering_session_id: authority.actor.session_id,
-        engineering_report: submission.engineering_report,
-        hard_validation_id: hard_validation.validation_id,
-        candidate_commit: repository_object(candidate_commit.commit().as_str())?,
-        candidate_revision: attached.resulting_revision,
-    };
-    packet
-        .validate()
-        .map_err(|error| CandidateRuntimeError::RequestContract(error.to_string()))?;
+    // `candidate.submit` is an actor terminal operation, but its transcript
+    // does not exist yet.  Persist the exact validated candidate now; the
+    // scheduler's `CandidateCommitAttachRequired` action constructs the ref
+    // only after it can bind the commit trailer to that sealed transcript.
     Ok(CandidateSubmissionOutcome::Validated {
-        candidate: attached,
+        candidate: CandidateReceipt {
+            candidate_id: candidate.candidate_id,
+            state: hard_validation.candidate_state,
+            resulting_revision: hard_validation.resulting_candidate_revision,
+            audit_log_id: candidate.audit_log_id,
+            was_idempotent_retry: candidate.was_idempotent_retry,
+        },
         hard_validation,
-        packet,
+        candidate_tree,
     })
 }
 
@@ -857,56 +809,9 @@ pub async fn resume_candidate_hard_validation(
         })
         .await?;
     if result != ValidationResult::Passed {
-        return Ok(ResumedHardValidationOutcome {
-            validation,
-            attached: None,
-        });
+        return Ok(ResumedHardValidationOutcome { validation });
     }
-    let message = CommitMessage::normalize(
-        &authority.submission.commit_subject,
-        &authority.submission.commit_body,
-    )?;
-    let candidate_commit = git.construct_or_recover_candidate_commit(
-        &authority.repository,
-        &ConstructCandidateCommit {
-            candidate_tree: authority.candidate_tree.clone(),
-            candidate_ref: CandidateRefName::new(
-                authority.ticket.ticket_id,
-                authority.candidate_id,
-            ),
-            message,
-            author: authority.commit.author.clone(),
-            committer: authority.commit.committer.clone(),
-            timestamp_unix_seconds: authority.commit.timestamp_unix_seconds,
-            provenance: CommitProvenance {
-                campaign_id: authority.campaign_id,
-                ticket_id: authority.ticket.ticket_id,
-                ticket_revision_digest: authority.ticket.ticket_revision_digest,
-                kernel_build_id: authority.kernel_build_id,
-                application_revision_id: authority.application_revision_id,
-                regression_tree: authority.regression_tree.clone(),
-                patch_digest: authority.candidate_patch_digest,
-                engineering_session_digest: authority.commit.engineering_session_digest,
-                validation_id: validation.validation_id,
-            },
-        },
-    )?;
-    let attached = decisions
-        .attach_candidate_commit(&AttachCandidateCommit {
-            principal: authority.principal.clone(),
-            command_id: derived_command_id(&authority.command_id, "candidate-commit")?,
-            candidate_id: authority.candidate_id,
-            expected_candidate_revision: ExpectedRevision::new(
-                validation.resulting_candidate_revision,
-            ),
-            candidate_commit: repository_object(candidate_commit.commit().as_str())?,
-            candidate_ref: candidate_commit.candidate_ref().as_str().to_owned(),
-        })
-        .await?;
-    Ok(ResumedHardValidationOutcome {
-        validation,
-        attached: Some(attached),
-    })
+    Ok(ResumedHardValidationOutcome { validation })
 }
 
 /// Completes a crash-stranded hard-validation pass by reconstructing the

@@ -277,6 +277,7 @@ mod tests {
             in_flight_count: 0,
             downstream_attempt_count: 0,
             downstream_action: None,
+            downstream_evidence: None,
             paid_session_active: false,
             low_water: 2,
             target: 3,
@@ -304,6 +305,7 @@ mod tests {
             stage,
             ticket_attempt_id: TicketAttemptId::new(attempt_id).expect("positive attempt"),
             ticket_attempt_revision: AggregateRevision::from_persisted(attempt_revision),
+            ticket_revision: AggregateRevision::from_persisted(1),
             candidate_id: CandidateId::new(candidate_id).expect("positive candidate"),
             candidate_revision: AggregateRevision::from_persisted(candidate_revision),
         }

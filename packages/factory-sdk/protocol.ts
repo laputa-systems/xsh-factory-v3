@@ -389,7 +389,6 @@ export function validateProtocolResponse(
           "candidate_id",
           "validation_id",
           "candidate_tree",
-          "candidate_commit",
         ],
         expectedOperation,
       );
@@ -398,7 +397,6 @@ export function validateProtocolResponse(
       responseInteger(response, "candidate_id", expectedOperation);
       responseInteger(response, "validation_id", expectedOperation);
       responseString(response, "candidate_tree", expectedOperation);
-      responseString(response, "candidate_commit", expectedOperation);
       break;
     case "quality_validation":
       requiredResponseFields(
@@ -576,6 +574,7 @@ export function validateProtocolResponse(
           "proposed_ticket_count",
           "in_flight_ticket_count",
           "downstream_ticket_attempt_count",
+          "downstream_evidence",
           "ready_low_water",
           "ready_target",
           "ready_maximum",
@@ -620,6 +619,57 @@ export function validateProtocolResponse(
           `response for ${expectedOperation} requires bounded session_costs`,
         );
       }
+      if (response.session_costs.length > 20) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} exceeds the session cost bound`,
+        );
+      }
+      if (
+        response.downstream_evidence !== null &&
+        (typeof response.downstream_evidence !== "object" ||
+          Array.isArray(response.downstream_evidence))
+      ) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} has invalid downstream evidence`,
+        );
+      }
+      if (response.downstream_evidence !== null) {
+        const evidence = response.downstream_evidence as Record<string, unknown>;
+        requiredResponseFields(
+          evidence,
+          ["candidate_commit", "latest_validation", "review", "architect_decision"],
+          expectedOperation,
+        );
+        if (evidence.candidate_commit !== null && typeof evidence.candidate_commit !== "string") {
+          throw new FrameProtocolError(
+            "invalid_json",
+            `response for ${expectedOperation} has invalid candidate commit`,
+          );
+        }
+        validateNullableDownstreamEvidence(
+          evidence.latest_validation,
+          ["validation_id", "state", "log_artifact_id"],
+          ["validation_id", "log_artifact_id"],
+          ["state"],
+          expectedOperation,
+        );
+        validateNullableDownstreamEvidence(
+          evidence.review,
+          ["review_id", "review_revision", "verdict", "rationale_artifact_id"],
+          ["review_id", "review_revision", "rationale_artifact_id"],
+          ["verdict"],
+          expectedOperation,
+        );
+        validateNullableDownstreamEvidence(
+          evidence.architect_decision,
+          ["architect_decision_id", "decision_kind", "rationale_artifact_id"],
+          ["architect_decision_id", "rationale_artifact_id"],
+          ["decision_kind"],
+          expectedOperation,
+        );
+      }
       for (const session of response.session_costs) {
         if (typeof session !== "object" || session === null || Array.isArray(session)) {
           throw new FrameProtocolError(
@@ -633,6 +683,18 @@ export function validateProtocolResponse(
         }
         for (const field of ["office", "model_provider", "model_id", "outcome", "cost_state"]) {
           responseString(row, field, expectedOperation);
+        }
+        if (
+          !["product_research", "engineering", "quality"].includes(row.office as string) ||
+          !["prepared", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(
+            row.outcome as string,
+          ) ||
+          !["pending", "known", "unknown", "exceeded"].includes(row.cost_state as string)
+        ) {
+          throw new FrameProtocolError(
+            "invalid_json",
+            `response for ${expectedOperation} has an unknown session cost state`,
+          );
         }
         for (const field of ["cost_micro_usd", "elapsed_millis"]) {
           if (row[field] !== null && !Number.isSafeInteger(row[field])) {
@@ -686,6 +748,23 @@ export function validateProtocolResponse(
       }
       break;
   }
+}
+
+function validateNullableDownstreamEvidence(
+  value: unknown,
+  required: readonly string[],
+  integerFields: readonly string[],
+  stringFields: readonly string[],
+  operation: string,
+): void {
+  if (value === null) return;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new FrameProtocolError("invalid_json", `response for ${operation} has invalid evidence`);
+  }
+  const row = value as Record<string, unknown>;
+  requiredResponseFields(row, required, operation);
+  for (const field of integerFields) responseInteger(row, field, operation);
+  for (const field of stringFields) responseString(row, field, operation);
 }
 
 function validateRequestId(value: string): void {
@@ -868,7 +947,8 @@ export interface OperatorArtifactSealCall {
   readonly principal: string;
 }
 /** Transport-owned liveness probe; it has no durable side effect. */
-export interface FactorydStatusCall {}
+/** The status probe intentionally accepts no caller-selected fields. */
+export type FactorydStatusCall = Record<string, never>;
 /** Start pins the selected active application revision, its repository, and
  * the current installed build inside PostgreSQL. Callers never choose those
  * derived identities. */
@@ -949,13 +1029,13 @@ export interface OperationReceiptResponse {
   readonly aggregate_revision: number;
 }
 
-/** Kernel-owned candidate identity returned after an Engineering submission. */
+/** Kernel-owned candidate capture returned after Engineering submission.
+ * The candidate commit is attached only after terminal transcript custody. */
 export interface CandidateReceiptResponse extends OperationReceiptResponse {
   readonly operation: typeof OPERATION.candidateSubmit;
   readonly candidate_id: number;
   readonly validation_id: number;
   readonly candidate_tree: string;
-  readonly candidate_commit: string;
 }
 
 /** Evidence navigation returned after the daemon accepts the one retained
@@ -1085,6 +1165,7 @@ export interface CampaignStatusResponse {
   readonly downstream_ticket_attempt_revision: number | null;
   readonly downstream_candidate_id: number | null;
   readonly downstream_candidate_revision: number | null;
+  readonly downstream_evidence: DownstreamEvidenceResponse | null;
   readonly ready_low_water: number;
   readonly ready_target: number;
   readonly ready_maximum: number;
@@ -1114,6 +1195,33 @@ export interface CampaignSessionCostResponse {
   readonly cost_micro_usd: number | null;
   /** Present only for the current running session. */
   readonly elapsed_millis: number | null;
+}
+
+/** Immutable evidence already attached to the exact downstream candidate. */
+export interface DownstreamEvidenceResponse {
+  readonly candidate_commit: string | null;
+  readonly latest_validation: DownstreamValidationEvidenceResponse | null;
+  readonly review: DownstreamReviewEvidenceResponse | null;
+  readonly architect_decision: DownstreamArchitectDecisionEvidenceResponse | null;
+}
+
+export interface DownstreamValidationEvidenceResponse {
+  readonly validation_id: number;
+  readonly state: "passed" | "failed" | "interrupted";
+  readonly log_artifact_id: number;
+}
+
+export interface DownstreamReviewEvidenceResponse {
+  readonly review_id: number;
+  readonly review_revision: number;
+  readonly verdict: "accept" | "reject";
+  readonly rationale_artifact_id: number;
+}
+
+export interface DownstreamArchitectDecisionEvidenceResponse {
+  readonly architect_decision_id: number;
+  readonly decision_kind: "deliver" | "rework" | "reject";
+  readonly rationale_artifact_id: number;
 }
 
 export interface EvidenceArtifactResponse {

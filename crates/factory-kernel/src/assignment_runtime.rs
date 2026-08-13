@@ -18,13 +18,13 @@ use std::{
 
 use factory_protocol::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, AssignmentCredentialWireV1,
-    AssignmentId, AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1,
-    AssignmentPacketWireV1, AssignmentReadWireV1, AssignmentRuntimeWireV1, CampaignId,
-    ContentDigest, ExpectedRevision, MicroUsd, Office, ReadExactFileV1, TerminalOperationV1,
+    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentEvidenceWireV1, AssignmentId,
+    AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1, AssignmentPacketWireV1,
+    AssignmentReadWireV1, AssignmentRuntimeWireV1, CampaignId, ContentDigest, ExpectedRevision,
+    MicroUsd, Office, ReadExactFileV1, SealedArtifactReferenceV1, TerminalOperationV1,
     canonical_assignment_packet_json_v1, parse_application_bundle_v1, render_template_v1,
     unsigned_assignment_packet_digest_v1,
 };
-use sqlx::Row;
 use thiserror::Error;
 
 use crate::{
@@ -191,12 +191,12 @@ pub async fn materialize_and_launch_assignment(
     )
     .await?;
 
+    let assignment_evidence = exact_assignment_evidence(request.target, &context)?;
     let values = prompt_values(
         assignment_id,
-        request.campaign_id,
-        request.application_revision_id,
         request.target,
         &context,
+        &assignment_evidence,
         &application.mission,
     )?;
     let system_prompt = render_declared_template(
@@ -238,7 +238,7 @@ pub async fn materialize_and_launch_assignment(
     let runtime = installed.runtime_identity_for_provider(&application.profile.model.provider)?;
     let workspace_root = absolute_path(workspace.path(), "workspace root")?;
     let staging_absolute = absolute_path(&staging_root, "staging root")?;
-    let target = target_text(request.target, &context)?;
+    let target = target_text(request.target, &context, &assignment_evidence)?;
     let mut wire = assignment_wire(
         assignment_id,
         request.campaign_id,
@@ -257,6 +257,7 @@ pub async fn materialize_and_launch_assignment(
         &application.profile,
         &runtime,
         &required_reads,
+        &assignment_evidence,
         campaign.remaining,
         campaign.revision,
     )?;
@@ -279,6 +280,7 @@ pub async fn materialize_and_launch_assignment(
         application.profile.limits.clone(),
         runtime,
         required_reads.clone(),
+        assignment_evidence,
         campaign.remaining,
         campaign.revision,
         packet_digest,
@@ -467,7 +469,7 @@ async fn load_application_material(
     application_revision_id: ApplicationRevisionId,
     office: Office,
 ) -> Result<ApplicationMaterial, AssignmentRuntimeError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT bundle_artifact_id, mission_artifact_id,
                 product_research_system_template_artifact_id,
                 product_research_assignment_template_artifact_id,
@@ -476,20 +478,17 @@ async fn load_application_material(
                 quality_system_template_artifact_id,
                 quality_assignment_template_artifact_id
            FROM factory.application_revisions WHERE id = $1",
+        application_revision_id.get(),
     )
-    .bind(application_revision_id.get())
     .fetch_optional(&store.pool_for_authority())
     .await?
     .ok_or(StoreError::UnknownApplicationRevision {
         application_revision_id,
     })?;
-    let artifact = |name: &str| -> Result<factory_protocol::ArtifactId, AssignmentRuntimeError> {
-        let value: i64 = row.try_get(name).map_err(|error| {
-            AssignmentRuntimeError::Application(format!("durable {name} is corrupt: {error}"))
-        })?;
+    let artifact = |value: i64| -> Result<factory_protocol::ArtifactId, AssignmentRuntimeError> {
         factory_protocol::ArtifactId::new(value).map_err(Into::into)
     };
-    let bundle = registered_bytes(process, cas, artifact("bundle_artifact_id")?).await?;
+    let bundle = registered_bytes(process, cas, artifact(row.bundle_artifact_id)?).await?;
     let bundle = parse_application_bundle_v1(&bundle).map_err(|error| {
         AssignmentRuntimeError::Application(format!("admitted bundle is invalid: {error}"))
     })?;
@@ -503,20 +502,20 @@ async fn load_application_material(
         })?;
     let (system_id, assignment_id) = match office {
         Office::ProductResearch => (
-            artifact("product_research_system_template_artifact_id")?,
-            artifact("product_research_assignment_template_artifact_id")?,
+            artifact(row.product_research_system_template_artifact_id)?,
+            artifact(row.product_research_assignment_template_artifact_id)?,
         ),
         Office::Engineering => (
-            artifact("engineering_system_template_artifact_id")?,
-            artifact("engineering_assignment_template_artifact_id")?,
+            artifact(row.engineering_system_template_artifact_id)?,
+            artifact(row.engineering_assignment_template_artifact_id)?,
         ),
         Office::Quality => (
-            artifact("quality_system_template_artifact_id")?,
-            artifact("quality_assignment_template_artifact_id")?,
+            artifact(row.quality_system_template_artifact_id)?,
+            artifact(row.quality_assignment_template_artifact_id)?,
         ),
     };
     let mission = checked_template_bytes(
-        registered_bytes(process, cas, artifact("mission_artifact_id")?).await?,
+        registered_bytes(process, cas, artifact(row.mission_artifact_id)?).await?,
         &bundle.mission_template,
         "mission template",
     )?;
@@ -601,25 +600,15 @@ fn exact_required_reads(
 
 fn prompt_values(
     assignment_id: AssignmentId,
-    campaign_id: CampaignId,
-    application_revision_id: ApplicationRevisionId,
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
+    evidence: &[AssignmentEvidenceV1],
     mission: &str,
 ) -> Result<BTreeMap<String, String>, AssignmentRuntimeError> {
     let mut values = BTreeMap::from([
         ("ASSIGNMENT_ID".to_owned(), assignment_id.get().to_string()),
-        (
-            "APPLICATION_REVISION_ID".to_owned(),
-            application_revision_id.get().to_string(),
-        ),
-        ("CAMPAIGN_ID".to_owned(), campaign_id.get().to_string()),
         ("MISSION".to_owned(), mission.to_owned()),
-        (
-            "OFFICE".to_owned(),
-            office_name(office_for_target(target)).to_owned(),
-        ),
-        ("TARGET".to_owned(), target_text(target, context)?),
+        ("TARGET".to_owned(), target_text(target, context, evidence)?),
     ]);
     match target {
         DurableAssignmentTarget::Product => {}
@@ -724,34 +713,32 @@ async fn current_campaign_material(
     application_revision_id: ApplicationRevisionId,
     expected: ExpectedRevision,
 ) -> Result<CampaignMaterial, AssignmentRuntimeError> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT revision, aggregate_budget_micro_usd, measured_cost_micro_usd,
                 application_revision_id, lifecycle, cost_state
            FROM factory.campaigns WHERE id = $1",
+        campaign_id.get(),
     )
-    .bind(campaign_id.get())
     .fetch_optional(&store.pool_for_authority())
     .await?
     .ok_or(StoreError::UnknownCampaign { campaign_id })?;
-    let revision = u64::try_from(row.try_get::<i64, _>("revision").map_err(|error| {
-        AssignmentRuntimeError::Application(format!("campaign revision is corrupt: {error}"))
-    })?)
-    .map_err(|_| AssignmentRuntimeError::Application("campaign revision is negative".to_owned()))?;
+    let revision = u64::try_from(row.revision).map_err(|_| {
+        AssignmentRuntimeError::Application("campaign revision is negative".to_owned())
+    })?;
     let revision = AggregateRevision::from_persisted(revision);
     if expected.get() != revision
-        || row.try_get::<i64, _>("application_revision_id")? != application_revision_id.get()
-        || row.try_get::<i16, _>("lifecycle")? != 0
-        || row.try_get::<i16, _>("cost_state")? != 0
+        || row.application_revision_id != application_revision_id.get()
+        || row.lifecycle != 0
+        || row.cost_state != 0
     {
         return Err(AssignmentRuntimeError::Application(
             "campaign changed before assignment packet construction".to_owned(),
         ));
     }
-    let budget =
-        u64::try_from(row.try_get::<i64, _>("aggregate_budget_micro_usd")?).map_err(|_| {
-            AssignmentRuntimeError::Application("campaign budget is corrupt".to_owned())
-        })?;
-    let measured = u64::try_from(row.try_get::<i64, _>("measured_cost_micro_usd")?)
+    let budget = u64::try_from(row.aggregate_budget_micro_usd).map_err(|_| {
+        AssignmentRuntimeError::Application("campaign budget is corrupt".to_owned())
+    })?;
+    let measured = u64::try_from(row.measured_cost_micro_usd)
         .map_err(|_| AssignmentRuntimeError::Application("campaign cost is corrupt".to_owned()))?;
     let remaining = budget.checked_sub(measured).ok_or_else(|| {
         AssignmentRuntimeError::Application("campaign measured cost exceeds budget".to_owned())
@@ -786,6 +773,7 @@ fn assignment_wire(
     profile: &factory_protocol::OfficeProfileV1,
     runtime: &factory_protocol::RuntimeIdentityV1,
     required_reads: &[ReadExactFileV1],
+    assignment_evidence: &[AssignmentEvidenceV1],
     remaining: MicroUsd,
     revision: AggregateRevision,
 ) -> Result<AssignmentPacketWireV1, AssignmentRuntimeError> {
@@ -878,6 +866,15 @@ fn assignment_wire(
                 reason: read.reason.clone(),
             })
             .collect(),
+        assignment_evidence: assignment_evidence
+            .iter()
+            .map(|evidence| AssignmentEvidenceWireV1 {
+                role: evidence.role.wire_name().to_owned(),
+                artifact_id: evidence.artifact_id.get(),
+                digest: evidence.digest.to_hex(),
+                byte_length: evidence.byte_length,
+            })
+            .collect(),
         tools: profile
             .tools
             .iter()
@@ -910,6 +907,7 @@ fn typed_packet(
     limits: factory_protocol::SessionLimitsV1,
     runtime: factory_protocol::RuntimeIdentityV1,
     required_reads: Vec<ReadExactFileV1>,
+    assignment_evidence: Vec<AssignmentEvidenceV1>,
     remaining_campaign_allowance: MicroUsd,
     revision: AggregateRevision,
     packet_digest: ContentDigest,
@@ -933,6 +931,7 @@ fn typed_packet(
         limits,
         runtime,
         required_reads,
+        assignment_evidence,
         terminal_operations: terminal_operations(target_kind),
         remaining_campaign_allowance,
         revision,
@@ -969,13 +968,174 @@ fn terminal_operations(target: DurableAssignmentTarget) -> Vec<TerminalOperation
         DurableAssignmentTarget::Quality { .. } => vec![TerminalOperationV1::QualitySubmitReview],
     }
 }
+/// Flattens the resolver's exact named evidence closure into the same closed
+/// packet list the actor will later use for `artifact.read`. No target prose
+/// is an authority: every item is a durable sealed identity re-verified by
+/// the resolver immediately before packet construction.
+fn exact_assignment_evidence(
+    target: DurableAssignmentTarget,
+    context: &DurableAssignmentLaunchContext,
+) -> Result<Vec<AssignmentEvidenceV1>, AssignmentRuntimeError> {
+    let mut values = Vec::new();
+    let mut push = |role: AssignmentEvidenceRoleV1, reference: SealedArtifactReferenceV1| {
+        values.push(AssignmentEvidenceV1 {
+            role,
+            artifact_id: reference.artifact_id,
+            digest: reference.digest,
+            byte_length: reference.byte_length,
+        });
+    };
+    match target {
+        DurableAssignmentTarget::Product => {
+            if context.evidence.proposal.is_some() || context.evidence.candidate.is_some() {
+                return Err(AssignmentRuntimeError::Application(
+                    "Product context unexpectedly carries upstream evidence".to_owned(),
+                ));
+            }
+        }
+        DurableAssignmentTarget::Engineering { .. } | DurableAssignmentTarget::Quality { .. } => {
+            let proposal = context.evidence.proposal.as_ref().ok_or_else(|| {
+                AssignmentRuntimeError::Application(
+                    "Engineering or Quality target lacks ticket proposal evidence".to_owned(),
+                )
+            })?;
+            push(
+                AssignmentEvidenceRoleV1::TicketProposal,
+                proposal.proposal.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::TicketNarrative,
+                proposal.narrative.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::TicketEvidence,
+                proposal.evidence.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerCommand,
+                proposal.reproducer_command.clone(),
+            );
+            if let Some(stdin) = &proposal.reproducer_stdin {
+                push(AssignmentEvidenceRoleV1::ReproducerStdin, stdin.clone());
+            }
+            push(
+                AssignmentEvidenceRoleV1::ReproducerExpectedStdout,
+                proposal.expected_observation.stdout.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerExpectedStderr,
+                proposal.expected_observation.stderr.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerFirstActualStdout,
+                proposal.first_observation.stdout.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerFirstActualStderr,
+                proposal.first_observation.stderr.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerSecondActualStdout,
+                proposal.second_observation.stdout.clone(),
+            );
+            push(
+                AssignmentEvidenceRoleV1::ReproducerSecondActualStderr,
+                proposal.second_observation.stderr.clone(),
+            );
+            if let DurableAssignmentTarget::Quality { .. } = target {
+                let candidate = context.evidence.candidate.as_ref().ok_or_else(|| {
+                    AssignmentRuntimeError::Application(
+                        "Quality target lacks candidate evidence".to_owned(),
+                    )
+                })?;
+                push(
+                    AssignmentEvidenceRoleV1::ChangedPaths,
+                    candidate.changed_paths.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::RegressionPatch,
+                    candidate.regression_patch.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::RegressionCommandSet,
+                    candidate.regression_command_set.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::RegressionLog,
+                    candidate.regression_log.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::CandidatePatch,
+                    candidate.candidate_patch.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::EngineeringReport,
+                    candidate.engineering_report.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::EngineeringRisks,
+                    candidate.engineering_risks.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::HardValidationCommandSet,
+                    candidate.hard_validation_command_set.clone(),
+                );
+                push(
+                    AssignmentEvidenceRoleV1::HardValidationLog,
+                    candidate.hard_validation_log.clone(),
+                );
+                if let Some(probes) = &candidate.prior_quality_additional_probes {
+                    push(
+                        AssignmentEvidenceRoleV1::QualityAdditionalProbes,
+                        probes.clone(),
+                    );
+                }
+                if let Some(rationale) = &candidate.prior_quality_rationale {
+                    push(
+                        AssignmentEvidenceRoleV1::QualityRationale,
+                        rationale.clone(),
+                    );
+                }
+                if let Some(risks) = &candidate.prior_quality_risks {
+                    push(AssignmentEvidenceRoleV1::QualityRisks, risks.clone());
+                }
+                if let Some(rationale) = &candidate.architect_rationale {
+                    push(
+                        AssignmentEvidenceRoleV1::ExternalDecisionRationale,
+                        rationale.clone(),
+                    );
+                }
+            } else if context.evidence.candidate.is_some() {
+                return Err(AssignmentRuntimeError::Application(
+                    "Engineering context unexpectedly carries candidate evidence".to_owned(),
+                ));
+            }
+        }
+    }
+    values.sort_by_key(|evidence| evidence.role);
+    if values.len() > 24 {
+        return Err(AssignmentRuntimeError::Application(
+            "assignment evidence exceeds the closed packet reference limit".to_owned(),
+        ));
+    }
+    for pair in values.windows(2) {
+        if pair[0].role == pair[1].role {
+            return Err(AssignmentRuntimeError::Application(
+                "assignment evidence closure repeats a closed role".to_owned(),
+            ));
+        }
+    }
+    Ok(values)
+}
+
 fn target_text(
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
+    evidence: &[AssignmentEvidenceV1],
 ) -> Result<String, AssignmentRuntimeError> {
-    match target {
-        DurableAssignmentTarget::Product => Ok("product-research".to_owned()),
-        DurableAssignmentTarget::Engineering { ticket_attempt_id } => Ok(format!(
+    let target = match target {
+        DurableAssignmentTarget::Product => "product-research".to_owned(),
+        DurableAssignmentTarget::Engineering { ticket_attempt_id } => format!(
             "ticket-{}-revision-{}-attempt-{}",
             context
                 .ticket_id
@@ -990,11 +1150,11 @@ fn target_text(
                 ))?
                 .get(),
             ticket_attempt_id.get()
-        )),
+        ),
         DurableAssignmentTarget::Quality {
             ticket_attempt_id,
             candidate_id,
-        } => Ok(format!(
+        } => format!(
             "ticket-{}-revision-{}-attempt-{}-candidate-{}-validation-{}",
             context
                 .ticket_id
@@ -1016,7 +1176,36 @@ fn target_text(
                     "Quality target lacks hard validation ID".to_owned()
                 ))?
                 .get()
-        )),
+        ),
+    };
+    let mut rendered = target;
+    append_target_evidence(&mut rendered, evidence)?;
+    Ok(rendered)
+}
+
+/// Appends only the neutral, closed evidence labels that actors may receive
+/// in `${TARGET}`.  Durable internals can retain their authority-specific
+/// terminology; none of it may leak through this model-visible rendering.
+fn append_target_evidence(
+    rendered: &mut String,
+    evidence: &[AssignmentEvidenceV1],
+) -> Result<(), AssignmentRuntimeError> {
+    for reference in evidence {
+        rendered.push('\n');
+        rendered.push_str(reference.role.wire_name());
+        rendered.push_str(" artifact_id=");
+        rendered.push_str(&reference.artifact_id.get().to_string());
+        rendered.push_str(" digest=");
+        rendered.push_str(&reference.digest.to_hex());
+        rendered.push_str(" byte_length=");
+        rendered.push_str(&reference.byte_length.to_string());
+    }
+    if rendered.len() > 4_096 {
+        Err(AssignmentRuntimeError::Application(
+            "target plus closed assignment evidence exceeds the packet bound".to_owned(),
+        ))
+    } else {
+        Ok(())
     }
 }
 fn repository_identity(context: &DurableAssignmentLaunchContext) -> String {
@@ -1112,4 +1301,26 @@ fn base64(bytes: &[u8]) -> String {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_evidence_uses_neutral_external_decision_vocabulary() {
+        let evidence = [AssignmentEvidenceV1 {
+            role: AssignmentEvidenceRoleV1::ExternalDecisionRationale,
+            artifact_id: factory_protocol::ArtifactId::new(7).unwrap(),
+            digest: ContentDigest::of_bytes(b"external decision rationale"),
+            byte_length: 27,
+        }];
+        let mut rendered = "ticket-1-revision-1-attempt-1".to_owned();
+        append_target_evidence(&mut rendered, &evidence).unwrap();
+        assert!(rendered.contains("external_decision_rationale"));
+        assert!(
+            !rendered.to_ascii_lowercase().contains("architect"),
+            "worker-visible TARGET leaked authority vocabulary: {rendered}"
+        );
+    }
 }

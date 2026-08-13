@@ -94,6 +94,9 @@ pub struct AssignmentPacketWireV1 {
     pub limits: AssignmentLimitsWireV1,
     pub runtime: AssignmentRuntimeWireV1,
     pub required_reads: Vec<AssignmentReadWireV1>,
+    /// Closed, named upstream evidence available through `artifact.read`.
+    /// This is packet authority, not explanatory target prose.
+    pub assignment_evidence: Vec<AssignmentEvidenceWireV1>,
     pub tools: Vec<String>,
     pub terminal_operations: Vec<String>,
     pub remaining_campaign_allowance_micro_usd: u64,
@@ -146,6 +149,130 @@ pub struct AssignmentReadWireV1 {
     pub path: String,
     pub digest: String,
     pub reason: String,
+}
+
+/// One closed evidence identity carried in the canonical assignment packet.
+/// `role` selects a single durable semantic position; it is not an
+/// application-controlled label or a generic artifact metadata key.
+#[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
+pub struct AssignmentEvidenceWireV1 {
+    pub role: String,
+    pub artifact_id: i64,
+    pub digest: String,
+    pub byte_length: u64,
+}
+
+/// The complete named evidence closure the generic SDK host may discover from
+/// an assignment. The names intentionally distinguish stdout/stderr and each
+/// reproduced observation: collapsing them would make the source evidence
+/// ambiguous at the actor boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AssignmentEvidenceRoleV1 {
+    TicketProposal,
+    TicketNarrative,
+    TicketEvidence,
+    ReproducerCommand,
+    ReproducerStdin,
+    ReproducerExpectedStdout,
+    ReproducerExpectedStderr,
+    ReproducerFirstActualStdout,
+    ReproducerFirstActualStderr,
+    ReproducerSecondActualStdout,
+    ReproducerSecondActualStderr,
+    RegressionPatch,
+    RegressionCommandSet,
+    RegressionLog,
+    ChangedPaths,
+    CandidatePatch,
+    EngineeringReport,
+    EngineeringRisks,
+    HardValidationCommandSet,
+    HardValidationLog,
+    QualityAdditionalProbes,
+    QualityRationale,
+    QualityRisks,
+    ExternalDecisionRationale,
+}
+
+impl AssignmentEvidenceRoleV1 {
+    #[must_use]
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::TicketProposal => "ticket_proposal",
+            Self::TicketNarrative => "ticket_narrative",
+            Self::TicketEvidence => "ticket_evidence",
+            Self::ReproducerCommand => "reproducer_command",
+            Self::ReproducerStdin => "reproducer_stdin",
+            Self::ReproducerExpectedStdout => "reproducer_expected_stdout",
+            Self::ReproducerExpectedStderr => "reproducer_expected_stderr",
+            Self::ReproducerFirstActualStdout => "reproducer_first_actual_stdout",
+            Self::ReproducerFirstActualStderr => "reproducer_first_actual_stderr",
+            Self::ReproducerSecondActualStdout => "reproducer_second_actual_stdout",
+            Self::ReproducerSecondActualStderr => "reproducer_second_actual_stderr",
+            Self::RegressionPatch => "regression_patch",
+            Self::RegressionCommandSet => "regression_command_set",
+            Self::RegressionLog => "regression_log",
+            Self::ChangedPaths => "changed_paths",
+            Self::CandidatePatch => "candidate_patch",
+            Self::EngineeringReport => "engineering_report",
+            Self::EngineeringRisks => "engineering_risks",
+            Self::HardValidationCommandSet => "hard_validation_command_set",
+            Self::HardValidationLog => "hard_validation_log",
+            Self::QualityAdditionalProbes => "quality_additional_probes",
+            Self::QualityRationale => "quality_rationale",
+            Self::QualityRisks => "quality_risks",
+            Self::ExternalDecisionRationale => "external_decision_rationale",
+        }
+    }
+
+    pub fn parse_wire_name(value: &str) -> Result<Self, ContractError> {
+        match value {
+            "ticket_proposal" => Ok(Self::TicketProposal),
+            "ticket_narrative" => Ok(Self::TicketNarrative),
+            "ticket_evidence" => Ok(Self::TicketEvidence),
+            "reproducer_command" => Ok(Self::ReproducerCommand),
+            "reproducer_stdin" => Ok(Self::ReproducerStdin),
+            "reproducer_expected_stdout" => Ok(Self::ReproducerExpectedStdout),
+            "reproducer_expected_stderr" => Ok(Self::ReproducerExpectedStderr),
+            "reproducer_first_actual_stdout" => Ok(Self::ReproducerFirstActualStdout),
+            "reproducer_first_actual_stderr" => Ok(Self::ReproducerFirstActualStderr),
+            "reproducer_second_actual_stdout" => Ok(Self::ReproducerSecondActualStdout),
+            "reproducer_second_actual_stderr" => Ok(Self::ReproducerSecondActualStderr),
+            "regression_patch" => Ok(Self::RegressionPatch),
+            "regression_command_set" => Ok(Self::RegressionCommandSet),
+            "regression_log" => Ok(Self::RegressionLog),
+            "changed_paths" => Ok(Self::ChangedPaths),
+            "candidate_patch" => Ok(Self::CandidatePatch),
+            "engineering_report" => Ok(Self::EngineeringReport),
+            "engineering_risks" => Ok(Self::EngineeringRisks),
+            "hard_validation_command_set" => Ok(Self::HardValidationCommandSet),
+            "hard_validation_log" => Ok(Self::HardValidationLog),
+            "quality_additional_probes" => Ok(Self::QualityAdditionalProbes),
+            "quality_rationale" => Ok(Self::QualityRationale),
+            "quality_risks" => Ok(Self::QualityRisks),
+            "external_decision_rationale" => Ok(Self::ExternalDecisionRationale),
+            _ => Err(ContractError::InvalidValue {
+                field: "assignment evidence role",
+                reason: "is not a closed assignment evidence role",
+            }),
+        }
+    }
+}
+
+/// Kernel-domain form of one packet evidence reference. It retains the
+/// artifact's sealed identity instead of accepting an opaque display label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssignmentEvidenceV1 {
+    pub role: AssignmentEvidenceRoleV1,
+    pub artifact_id: ArtifactId,
+    pub digest: ContentDigest,
+    pub byte_length: u64,
+}
+
+impl AssignmentEvidenceV1 {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        Ok(())
+    }
 }
 
 /// A read which the host must perform exactly, before it can submit terminal
@@ -369,6 +496,7 @@ pub struct AssignmentPacketV1 {
     pub limits: SessionLimitsV1,
     pub runtime: RuntimeIdentityV1,
     pub required_reads: Vec<ReadExactFileV1>,
+    pub assignment_evidence: Vec<AssignmentEvidenceV1>,
     pub terminal_operations: Vec<TerminalOperationV1>,
     pub remaining_campaign_allowance: MicroUsd,
     pub revision: AggregateRevision,
@@ -397,6 +525,34 @@ impl AssignmentPacketV1 {
                 return Err(ContractError::InvalidValue {
                     field: "assignment target identity",
                     reason: "office requires its exact durable target shape",
+                });
+            }
+        }
+        if self.assignment_evidence.len() > 24 {
+            return Err(ContractError::InvalidValue {
+                field: "assignment evidence",
+                reason: "exceeds the closed evidence reference limit",
+            });
+        }
+        if self.office == Office::ProductResearch && !self.assignment_evidence.is_empty() {
+            return Err(ContractError::InvalidValue {
+                field: "assignment evidence",
+                reason: "Product has no upstream assignment evidence",
+            });
+        }
+        if self.office != Office::ProductResearch && self.assignment_evidence.is_empty() {
+            return Err(ContractError::InvalidValue {
+                field: "assignment evidence",
+                reason: "Engineering and Quality require upstream evidence",
+            });
+        }
+        let mut evidence_roles = BTreeSet::new();
+        for evidence in &self.assignment_evidence {
+            evidence.validate()?;
+            if !evidence_roles.insert(evidence.role) {
+                return Err(ContractError::InvalidValue {
+                    field: "assignment evidence",
+                    reason: "roles must be unique",
                 });
             }
         }

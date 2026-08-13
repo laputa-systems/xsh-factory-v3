@@ -88,7 +88,6 @@ Deno.test("candidate adapter returns a kernel-owned candidate receipt", async ()
         candidate_id: 9,
         validation_id: 10,
         candidate_tree: "a".repeat(40),
-        candidate_commit: "b".repeat(40),
       }, 4 * 1024 * 1024));
     }
   }

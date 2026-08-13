@@ -292,6 +292,68 @@ fn temporary_index_capture_preserves_binary_symlink_and_exact_tree() {
 }
 
 #[test]
+fn quality_review_worktree_edits_are_discarded_and_cannot_change_candidate_tree() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("quality-reviewed-candidate").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("candidate.txt"), b"candidate tree\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+
+    // Quality receives a distinct detached review worktree at the exact
+    // candidate tree. Any exploratory edit is outside the candidate custody
+    // boundary and is removed with that review worktree.
+    let review = fixture
+        .custody
+        .rematerialize_tree(
+            &repository,
+            capture.tree().clone(),
+            WorktreeKind::Review,
+            WorktreeName::parse("quality-review-edit").unwrap(),
+        )
+        .unwrap();
+    let review_path = review.path().to_owned();
+    fs::write(
+        review.path().join("candidate.txt"),
+        b"quality changed this\n",
+    )
+    .unwrap();
+    fs::write(review.path().join("quality-only.txt"), b"exploration\n").unwrap();
+    fixture.custody.cleanup_worktree(review).unwrap();
+    assert!(!review_path.exists(), "review worktree was not cleaned up");
+
+    let rematerialized = fixture
+        .custody
+        .rematerialize_tree(
+            &repository,
+            capture.tree().clone(),
+            WorktreeKind::Validation,
+            WorktreeName::parse("candidate-after-quality-edit").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read(rematerialized.path().join("candidate.txt")).unwrap(),
+        b"candidate tree\n"
+    );
+    assert!(
+        !rematerialized.path().join("quality-only.txt").exists(),
+        "a review-only file leaked into the exact candidate tree"
+    );
+    fixture.custody.cleanup_worktree(rematerialized).unwrap();
+    assert!(
+        !fixture.repository.join("candidate.txt").exists(),
+        "review edit reached the primary checkout"
+    );
+}
+
+#[test]
 fn empty_tree_and_tree_patch_mismatch_fail_closed() {
     let fixture = Fixture::new();
     let repository = fixture.qualify();
@@ -369,7 +431,7 @@ fn kernel_commit_is_idempotent_and_binds_every_provenance_input() {
     assert!(!first.ref_was_present());
     let second = fixture
         .custody
-        .construct_candidate_commit(&repository, &request)
+        .construct_or_recover_candidate_commit(&repository, &request)
         .unwrap();
     assert!(second.ref_was_present());
     assert_eq!(first.commit(), second.commit());
@@ -474,6 +536,65 @@ fn guarded_fast_forward_is_local_and_refuses_moved_base() {
             .custody
             .assert_snapshot_current(&moved_repository),
         Err(GitCustodyError::RepositoryHeadMoved { .. })
+    ));
+}
+
+#[test]
+fn completed_fast_forward_is_recoverable_only_at_exact_candidate_head() {
+    let fixture = Fixture::new();
+    let before_delivery = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &before_delivery,
+            WorktreeKind::Actor,
+            WorktreeName::parse("delivery-recovery").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("recovery.txt"), b"durable gap\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+    let candidate = fixture
+        .custody
+        .construct_candidate_commit(&before_delivery, &commit_request(&capture, 23))
+        .unwrap();
+    fixture
+        .custody
+        .guarded_local_fast_forward(&before_delivery, &candidate)
+        .unwrap();
+
+    // Simulate a daemon death after the physical FF but before
+    // DecisionStore::record_delivery. Requalification observes the candidate
+    // at HEAD and must prove it rather than attempt a second merge.
+    let after_delivery = fixture.qualify();
+    let recovered = fixture
+        .custody
+        .recover_completed_local_fast_forward(
+            &after_delivery,
+            before_delivery.snapshot().base_commit().clone(),
+            candidate.candidate_ref().clone(),
+            candidate.commit().clone(),
+            candidate.candidate_tree().clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        recovered.previous_commit,
+        *before_delivery.snapshot().base_commit()
+    );
+    assert_eq!(recovered.delivered_commit, *candidate.commit());
+    assert_eq!(recovered.delivered_tree, *candidate.candidate_tree());
+
+    fixture.commit("unrelated move after delivery");
+    let moved = fixture.qualify();
+    assert!(matches!(
+        fixture.custody.recover_completed_local_fast_forward(
+            &moved,
+            before_delivery.snapshot().base_commit().clone(),
+            candidate.candidate_ref().clone(),
+            candidate.commit().clone(),
+            candidate.candidate_tree().clone(),
+        ),
+        Err(GitCustodyError::DeliveryPostconditionMismatch)
     ));
 }
 

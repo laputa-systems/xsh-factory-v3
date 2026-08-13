@@ -50,6 +50,42 @@ export interface RequiredReadAssertion {
   readonly reason: string;
 }
 
+/** Closed upstream evidence named in a signed assignment packet. The host
+ * passes this exact identity to `artifact.read`; text in TARGET is only a
+ * readable rendering of the same packet facts. */
+export type AssignmentEvidenceRoleV1 =
+  | "ticket_proposal"
+  | "ticket_narrative"
+  | "ticket_evidence"
+  | "reproducer_command"
+  | "reproducer_stdin"
+  | "reproducer_expected_stdout"
+  | "reproducer_expected_stderr"
+  | "reproducer_first_actual_stdout"
+  | "reproducer_first_actual_stderr"
+  | "reproducer_second_actual_stdout"
+  | "reproducer_second_actual_stderr"
+  | "regression_patch"
+  | "regression_command_set"
+  | "regression_log"
+  | "changed_paths"
+  | "candidate_patch"
+  | "engineering_report"
+  | "engineering_risks"
+  | "hard_validation_command_set"
+  | "hard_validation_log"
+  | "quality_additional_probes"
+  | "quality_rationale"
+  | "quality_risks"
+  | "external_decision_rationale";
+
+export interface AssignmentEvidenceReferenceV1 {
+  readonly role: AssignmentEvidenceRoleV1;
+  readonly artifact_id: number | string;
+  readonly digest: string;
+  readonly byte_length: number;
+}
+
 export interface PiAssignmentPacket {
   readonly format_version: 1;
   readonly assignment_id: string;
@@ -88,6 +124,7 @@ export interface PiAssignmentPacket {
   };
   readonly tools: readonly HostToolName[];
   readonly required_reads: readonly RequiredReadAssertion[];
+  readonly assignment_evidence: readonly AssignmentEvidenceReferenceV1[];
   readonly terminal_submission_required?: boolean;
 }
 

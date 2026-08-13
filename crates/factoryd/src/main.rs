@@ -14,6 +14,7 @@ use std::{
 };
 
 use factory_kernel::{
+    campaign_driver::{CampaignDriver, CampaignDriverOutcome},
     cas::CasStore,
     durable_authority::DurableAuthorityResolver,
     installed_runtime::{
@@ -67,6 +68,10 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| init_error("factoryd serve requires one installed kernel build"))?;
     let seed = CasStore::temporary_name_seed(current_build, std::process::id(), SystemTime::now())?;
     let cas = Arc::new(CasStore::with_default_limit(cas_runtime_root, seed)?);
+    // A restored database and CAS directory are one provenance unit. Refuse
+    // before binding the local socket if either audit/material facts or any
+    // registered byte identity no longer agrees with the other.
+    store.verify_restore_integrity(cas.as_ref()).await?;
     let installed = store
         .load_current_installed_runtime(cas.as_ref())
         .await?
@@ -87,6 +92,8 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         execution.command_runner().clone(),
         execution.git_custody(),
     ));
+    let architect_resolver: Arc<dyn factory_kernel::operator_rpc::ArchitectTransitionResolver> =
+        authority_resolver.clone();
     let config = LocalTransportConfig::new(args.runtime_root)
         .with_deadlines(args.read_deadline, args.operation_deadline)
         .with_write_deadline(args.write_deadline);
@@ -96,7 +103,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
     let daemon = LocalDaemon::bind(config, &store)
         .await?
         .with_architect_control(store.decision_store())
-        .with_architect_transition_resolver(authority_resolver)
+        .with_architect_transition_resolver(architect_resolver)
         .with_campaign_control(store.process_store(), store.ticket_store())
         .with_navigation_control(store.clone())
         .with_forum_control(store.forum_store())
@@ -122,8 +129,57 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
             "reconciled interrupted actor sessions before serving"
         );
     }
+    // One direct bounded driver consumes durable scheduler actions. It owns
+    // no queue or poll state: every pass rereads the current campaign and all
+    // launch/delivery identities. It sleeps only after a no-work or Architect
+    // gate outcome; actionable work chains immediately through the next
+    // durable scheduler read once its bounded operation returns.
+    let daemon = Arc::new(daemon);
+    let driver = CampaignDriver::new(
+        store.clone(),
+        cas.as_ref().clone(),
+        installed.clone(),
+        execution,
+        Arc::clone(&authority_resolver),
+    );
+    let driver_daemon = Arc::clone(&daemon);
+    let driver_task = smol::spawn(async move {
+        let mut last_error = None::<String>;
+        loop {
+            let wait = match driver.run_next(driver_daemon.as_ref()).await {
+                Ok(
+                    CampaignDriverOutcome::NoRunningCampaign
+                    | CampaignDriverOutcome::AwaitingArchitect { .. }
+                    | CampaignDriverOutcome::Idle { .. }
+                    | CampaignDriverOutcome::Blocked(_),
+                ) => {
+                    last_error = None;
+                    Duration::from_millis(250)
+                }
+                Ok(_) => {
+                    last_error = None;
+                    Duration::ZERO
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    if last_error.as_deref() != Some(message.as_str()) {
+                        tracing::error!(%error, "campaign driver action failed");
+                        last_error = Some(message);
+                    }
+                    // A transition rejection is durable evidence, not a busy
+                    // loop. The next poll rereads all authority after the
+                    // bounded pause and lets an operator repair a real gate.
+                    Duration::from_millis(250)
+                }
+            };
+            if !wait.is_zero() {
+                smol::Timer::after(wait).await;
+            }
+        }
+    });
     tracing::info!(socket = %daemon.operator_socket_path().display(), "factoryd ready on local Unix socket");
     let served = daemon.serve().await;
+    let _ = driver_task.cancel().await;
     store.close().await;
     served.map_err(Into::into)
 }
@@ -167,7 +223,7 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
             deno_lock: args.deno_lock.clone(),
             deno_dir: args.deno_dir.clone(),
             host_source_files: args.pi_host_source_files.clone(),
-            dependency_graph_receipt: args.dependency_graph_receipt.clone(),
+            cache_probe_module: args.pi_host_cache_probe.clone(),
             pi_version: args.pi_version.clone(),
         })?;
         let source = qualify_kernel_source_v1(&args.kernel_source_root, &args.kernel_source_files)?;
@@ -264,7 +320,7 @@ struct InitArgs {
     deno_config: PathBuf,
     deno_lock: PathBuf,
     deno_dir: PathBuf,
-    dependency_graph_receipt: PathBuf,
+    pi_host_cache_probe: RuntimeRelativePath,
     pi_version: String,
     openrouter_credential_environment: String,
 }
@@ -360,7 +416,7 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
     let mut deno_config = None;
     let mut deno_lock = None;
     let mut deno_dir = None;
-    let mut dependency_graph_receipt = None;
+    let mut pi_host_cache_probe = None;
     let mut pi_version = None;
     let mut openrouter_credential_environment = None;
     while let Some(flag) = values.next() {
@@ -398,10 +454,10 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
             "--deno-config" => set_absolute_path(&mut deno_config, value, "--deno-config")?,
             "--deno-lock" => set_absolute_path(&mut deno_lock, value, "--deno-lock")?,
             "--deno-dir" => set_absolute_path(&mut deno_dir, value, "--deno-dir")?,
-            "--dependency-graph-receipt" => set_absolute_path(
-                &mut dependency_graph_receipt,
-                value,
-                "--dependency-graph-receipt",
+            "--pi-host-cache-probe" => set_once(
+                &mut pi_host_cache_probe,
+                parse_relative_path(value, "--pi-host-cache-probe")?,
+                "--pi-host-cache-probe",
             )?,
             "--pi-version" => set_once(&mut pi_version, value, "--pi-version")?,
             "--provider-credential-environment" => set_once(
@@ -433,7 +489,7 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
         deno_config: required(deno_config, "--deno-config")?,
         deno_lock: required(deno_lock, "--deno-lock")?,
         deno_dir: required(deno_dir, "--deno-dir")?,
-        dependency_graph_receipt: required(dependency_graph_receipt, "--dependency-graph-receipt")?,
+        pi_host_cache_probe: required(pi_host_cache_probe, "--pi-host-cache-probe")?,
         pi_version: required(pi_version, "--pi-version")?,
         openrouter_credential_environment: required(
             openrouter_credential_environment,
@@ -488,7 +544,7 @@ fn boxed_init_error(message: &str) -> Box<dyn std::error::Error> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryd serve --database-url <url> --runtime-root <absolute-path> [--read-deadline-ms <positive>] [--operation-deadline-ms <positive>] [--write-deadline-ms <positive>]\n  factoryd init --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --kernel-binary <absolute-path> --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --dependency-graph-receipt <absolute-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>"
+    "usage:\n  factoryd serve --database-url <url> --runtime-root <absolute-path> [--read-deadline-ms <positive>] [--operation-deadline-ms <positive>] [--write-deadline-ms <positive>]\n  factoryd init --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --kernel-binary <absolute-path> --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --pi-host-cache-probe <safe-relative-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>"
 }
 
 #[cfg(test)]
@@ -504,7 +560,6 @@ mod tests {
         source_root: PathBuf,
         host_root: PathBuf,
         cache: PathBuf,
-        receipt: PathBuf,
     }
 
     impl PreflightFixture {
@@ -532,7 +587,7 @@ mod tests {
             let binary = root.join("factoryd");
             fs::write(
                 &binary,
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.4\\n'; exit 0; fi\nif [ \"$1\" = \"check\" ] && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\nexit 17\n",
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.4\\n'; exit 0; fi\nif [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then for value in \"$@\"; do entrypoint=\"$value\"; done; printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"}]}' \"$entrypoint\" \"$entrypoint\"; exit 0; fi\nif { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\nexit 17\n",
             )
             .expect("fake Deno/kernel binary");
             let mut permissions = fs::metadata(&binary)
@@ -553,10 +608,9 @@ mod tests {
             }
             fs::write(host_root.join("main.ts"), "export const value = 1;\n")
                 .expect("host entrypoint");
+            fs::write(host_root.join("probe.ts"), "export {};\n").expect("safe cache probe");
             fs::write(root.join("deno.json"), "{}\n").expect("Deno config");
             fs::write(root.join("deno.lock"), "{}\n").expect("Deno lock");
-            let receipt = root.join("dependency-graph.json");
-            fs::write(&receipt, "{}\n").expect("dependency graph receipt");
             Self {
                 root,
                 binary,
@@ -565,7 +619,6 @@ mod tests {
                 source_root,
                 host_root,
                 cache,
-                receipt,
             }
         }
 
@@ -577,8 +630,11 @@ mod tests {
                 deno_config: self.root.join("deno.json"),
                 deno_lock: self.root.join("deno.lock"),
                 deno_dir: self.cache.clone(),
-                host_source_files: vec![RuntimeRelativePath::parse("main.ts").unwrap()],
-                dependency_graph_receipt: self.receipt.clone(),
+                host_source_files: vec![
+                    RuntimeRelativePath::parse("main.ts").unwrap(),
+                    RuntimeRelativePath::parse("probe.ts").unwrap(),
+                ],
+                cache_probe_module: RuntimeRelativePath::parse("probe.ts").unwrap(),
                 pi_version: "0.84.1".to_owned(),
             })
             .expect("qualify runtime");
@@ -629,19 +685,19 @@ mod tests {
             "--deno-executable".to_owned(),
             "/opt/deno/bin/deno".to_owned(),
             "--pi-host-source-root".to_owned(),
-            "/opt/factory-source".to_owned(),
+            "/opt/factory-source/packages".to_owned(),
             "--pi-host-source-file".to_owned(),
-            "typescript/pi-host/main.ts".to_owned(),
+            "factory-pi-host/main.ts".to_owned(),
             "--pi-host-entrypoint".to_owned(),
-            "/opt/factory-source/typescript/pi-host/main.ts".to_owned(),
+            "/opt/factory-source/packages/factory-pi-host/main.ts".to_owned(),
+            "--pi-host-cache-probe".to_owned(),
+            "factory-pi-host/mod.ts".to_owned(),
             "--deno-config".to_owned(),
             "/opt/factory-source/deno.json".to_owned(),
             "--deno-lock".to_owned(),
             "/opt/factory-source/deno.lock".to_owned(),
             "--deno-dir".to_owned(),
             "/opt/factory-runtime/deno-cache".to_owned(),
-            "--dependency-graph-receipt".to_owned(),
-            "/opt/factory-source/runtime/dependency-graph.json".to_owned(),
             "--pi-version".to_owned(),
             "0.84.1".to_owned(),
             "--provider-credential-environment".to_owned(),
@@ -692,7 +748,7 @@ mod tests {
                 git_executable,
                 ..
             }) if kernel_source_files == vec![RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap()]
-                && pi_host_source_files == vec![RuntimeRelativePath::parse("typescript/pi-host/main.ts").unwrap()]
+                && pi_host_source_files == vec![RuntimeRelativePath::parse("factory-pi-host/main.ts").unwrap()]
                 && kernel_binary == PathBuf::from("/opt/factory/bin/factoryd")
                 && cargo_executable == PathBuf::from("/opt/rust/bin/cargo")
                 && git_executable == PathBuf::from("/opt/git/bin/git")

@@ -24,7 +24,6 @@ use factory_protocol::{
     TerminalReportV1, UsageTotalsV1,
 };
 use miniserde::{Serialize, json};
-use sqlx::Row;
 use thiserror::Error;
 
 use crate::{
@@ -478,6 +477,9 @@ impl QualitySessionState {
         if self.review_submitted || self.review_in_flight {
             return Err("the Quality session already submitted its review");
         }
+        if self.full_suite_in_flight {
+            return Err("the Quality session full suite is still running");
+        }
         let (authority, full_suite) = match (self.authority.clone(), self.full_suite.clone()) {
             (Some(authority), Some(full_suite)) => (authority, full_suite),
             (None, None) => {
@@ -543,6 +545,40 @@ impl KernelSessionRpc {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, LocalTransportError>> + Send>> {
         let this = self.clone();
         Box::pin(async move { this.handle(frame).await })
+    }
+
+    /// A syntactically framed actor request that is rejected by a session
+    /// authority must receive a typed response, just like Forum rejections.
+    /// Closing the inherited socket would erase the actionable candidate or
+    /// read-gate error and turn a recoverable actor mistake into an opaque
+    /// process-custody failure.
+    fn dispatch_response(
+        &self,
+        frame: BoundActorFrame,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, LocalTransportError>> + Send>> {
+        let request_id = frame.envelope().request_id.clone();
+        let operation = frame.envelope().operation.clone();
+        let dispatch = self.dispatch(frame);
+        Box::pin(async move {
+            match dispatch.await {
+                Ok(response) => Ok(response),
+                // The actor already crossed the framed, inherited-identity
+                // boundary. Only a request/domain rejection is recoverable on
+                // that connection; custody, binding, storage, and I/O faults
+                // remain fatal and are never disclosed as actor prose.
+                Err(LocalTransportError::Frame(error)) => {
+                    Ok(json::to_string(&factory_protocol::ErrorResponse {
+                        protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                        request_id,
+                        operation,
+                        error_code: "session_rejected".to_owned(),
+                        message: error.to_string(),
+                    })
+                    .into_bytes())
+                }
+                Err(error) => Err(error),
+            }
+        })
     }
 
     async fn handle(&self, frame: BoundActorFrame) -> Result<Vec<u8>, LocalTransportError> {
@@ -796,22 +832,21 @@ impl KernelSessionRpc {
             .expected_digest
             .parse::<ContentDigest>()
             .map_err(|_| invalid_rpc("artifact.read", "expected digest is invalid"))?;
-        if !self.assignment_artifact_ids().await?.contains(&artifact_id) {
-            return Err(invalid_rpc(
-                "artifact.read",
-                "artifact is outside this assignment evidence closure",
-            ));
-        }
         let sealed = self
             .process
             .registered_artifact(&self.cas, artifact_id)
             .await?;
-        if sealed.digest() != expected_digest {
-            return Err(invalid_rpc(
-                "artifact.read",
-                "artifact digest differs from the assignment evidence reference",
-            ));
-        }
+        require_packet_evidence_reference(
+            &self.packet,
+            artifact_id,
+            expected_digest,
+            sealed.digest(),
+            sealed.byte_length(),
+        )?;
+        require_current_assignment_evidence_closure(
+            &self.assignment_artifact_ids().await?,
+            artifact_id,
+        )?;
         if sealed.byte_length() > ARTIFACT_READ_MAX_BYTES {
             return Err(invalid_rpc(
                 "artifact.read",
@@ -841,35 +876,43 @@ impl KernelSessionRpc {
                 let attempt = self.packet.ticket_attempt_id.ok_or_else(|| {
                     invalid_rpc("artifact.read", "Engineering packet has no attempt target")
                 })?;
-                let row = sqlx::query(
-                    "SELECT tr.proposal_artifact_id, tr.reproducer_artifact_id,
+                let row = sqlx::query!(
+                    "SELECT ta.stage, tr.proposal_artifact_id, tr.reproducer_artifact_id,
                             tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id
                        FROM factory.ticket_attempts ta
                        JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
                       WHERE ta.id = $1 AND ta.campaign_id = $2
                         AND tr.application_revision_id = $3 AND ta.stage IN (0, 4)",
+                    attempt.get(),
+                    self.packet.campaign_id.get(),
+                    self.packet.application_revision_id.get(),
                 )
-                .bind(attempt.get())
-                .bind(self.packet.campaign_id.get())
-                .bind(self.packet.application_revision_id.get())
                 .fetch_optional(&self.process.pool_for_session_runtime())
                 .await
                 .map_err(StoreError::from)?
                 .ok_or_else(|| invalid_rpc("artifact.read", "Engineering target is not active"))?;
                 let mut ids = BTreeSet::new();
-                for field in [
-                    "proposal_artifact_id",
-                    "reproducer_artifact_id",
-                    "expected_observation_artifact_id",
-                    "discovery_observation_artifact_id",
+                for value in [
+                    row.proposal_artifact_id,
+                    row.reproducer_artifact_id,
+                    row.expected_observation_artifact_id,
+                    row.discovery_observation_artifact_id,
                 ] {
-                    ids.insert(artifact_id_from_row(&row, field)?);
+                    ids.insert(
+                        ArtifactId::new(value)
+                            .map_err(|error| artifact_read_error(error.to_string()))?,
+                    );
                 }
                 self.extend_ticket_proposal_closure(
                     &mut ids,
-                    artifact_id_from_row(&row, "proposal_artifact_id")?,
+                    ArtifactId::new(row.proposal_artifact_id)
+                        .map_err(|error| artifact_read_error(error.to_string()))?,
                 )
                 .await?;
+                if row.stage == 4 {
+                    self.extend_rework_candidate_closure(&mut ids, attempt)
+                        .await?;
+                }
                 Ok(ids)
             }
             factory_protocol::Office::Quality => {
@@ -879,7 +922,7 @@ impl KernelSessionRpc {
                 let candidate = self.packet.candidate_id.ok_or_else(|| {
                     invalid_rpc("artifact.read", "Quality packet has no candidate target")
                 })?;
-                let rows = sqlx::query_scalar::<_, i64>(
+                let rows = sqlx::query_scalar!(
                     "SELECT artifact_id FROM (
                          SELECT tr.proposal_artifact_id AS artifact_id
                            FROM factory.candidates c
@@ -900,13 +943,15 @@ impl KernelSessionRpc {
                          UNION SELECT v.log_artifact_id FROM factory.validations v WHERE v.candidate_id = $1
                          UNION SELECT r.rationale_artifact_id FROM factory.reviews r WHERE r.candidate_id = $1
                          UNION SELECT r.risks_artifact_id FROM factory.reviews r WHERE r.candidate_id = $1
+                         UNION SELECT r.additional_probes_artifact_id FROM factory.reviews r
+                          WHERE r.candidate_id = $1 AND r.additional_probes_artifact_id IS NOT NULL
                          UNION SELECT ad.rationale_artifact_id FROM factory.architect_decisions ad WHERE ad.candidate_id = $1
                      ) closure",
+                    candidate.get(),
+                    attempt.get(),
+                    self.packet.campaign_id.get(),
+                    self.packet.application_revision_id.get(),
                 )
-                .bind(candidate.get())
-                .bind(attempt.get())
-                .bind(self.packet.campaign_id.get())
-                .bind(self.packet.application_revision_id.get())
                 .fetch_all(&self.process.pool_for_session_runtime())
                 .await
                 .map_err(StoreError::from)?;
@@ -916,6 +961,9 @@ impl KernelSessionRpc {
                 let mut ids = rows
                     .into_iter()
                     .map(|value| {
+                        let value = value.ok_or_else(|| {
+                            invalid_rpc("artifact.read", "Quality evidence closure is corrupt")
+                        })?;
                         ArtifactId::new(value)
                             .map_err(|error| artifact_read_error(error.to_string()))
                     })
@@ -935,23 +983,87 @@ impl KernelSessionRpc {
         attempt: factory_protocol::TicketAttemptId,
         candidate: factory_protocol::CandidateId,
     ) -> Result<ArtifactId, LocalTransportError> {
-        let value: i64 = sqlx::query_scalar(
+        let value = sqlx::query_scalar!(
             "SELECT tr.proposal_artifact_id
                FROM factory.candidates c
                JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
               WHERE c.id = $1 AND c.ticket_attempt_id = $2 AND ta.campaign_id = $3
                 AND tr.application_revision_id = $4 AND ta.stage IN (2, 6) AND c.lifecycle = 1",
+            candidate.get(),
+            attempt.get(),
+            self.packet.campaign_id.get(),
+            self.packet.application_revision_id.get(),
         )
-        .bind(candidate.get())
-        .bind(attempt.get())
-        .bind(self.packet.campaign_id.get())
-        .bind(self.packet.application_revision_id.get())
         .fetch_optional(&self.process.pool_for_session_runtime())
         .await
         .map_err(StoreError::from)?
         .ok_or_else(|| invalid_rpc("artifact.read", "Quality target is not active"))?;
         ArtifactId::new(value).map_err(|error| artifact_read_error(error.to_string()))
+    }
+
+    /// An Engineering rework has no candidate target in its packet, yet it
+    /// must inspect the one rejected candidate's sealed Quality/review closure
+    /// before it prepares a new tree.  Re-read that exact attempt-local head;
+    /// do not trust an actor-selected candidate ID.
+    async fn extend_rework_candidate_closure(
+        &self,
+        ids: &mut BTreeSet<ArtifactId>,
+        attempt: factory_protocol::TicketAttemptId,
+    ) -> Result<(), LocalTransportError> {
+        let rows = sqlx::query_scalar!(
+            "WITH rework_candidate AS (
+                 SELECT c.id
+                   FROM factory.candidates c
+                   JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
+                  WHERE c.ticket_attempt_id = $1 AND ta.campaign_id = $2
+                    AND ta.stage = 4 AND c.lifecycle = 2
+                  ORDER BY c.created_at DESC, c.id DESC
+                  LIMIT 1
+             )
+             SELECT artifact_id FROM (
+                 SELECT c.changed_paths_artifact_id AS artifact_id
+                   FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.patch_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.engineering_report_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.risks_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.regression_patch_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.regression_command_set_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT c.regression_log_artifact_id FROM factory.candidates c JOIN rework_candidate rc ON rc.id = c.id
+                 UNION SELECT v.command_set_artifact_id FROM factory.validations v JOIN rework_candidate rc ON rc.id = v.candidate_id
+                 UNION SELECT v.log_artifact_id FROM factory.validations v JOIN rework_candidate rc ON rc.id = v.candidate_id
+                 UNION SELECT r.rationale_artifact_id FROM factory.reviews r JOIN rework_candidate rc ON rc.id = r.candidate_id
+                 UNION SELECT r.risks_artifact_id FROM factory.reviews r JOIN rework_candidate rc ON rc.id = r.candidate_id
+                 UNION SELECT r.additional_probes_artifact_id FROM factory.reviews r
+                    JOIN rework_candidate rc ON rc.id = r.candidate_id
+                  WHERE r.additional_probes_artifact_id IS NOT NULL
+                 UNION SELECT ad.rationale_artifact_id FROM factory.architect_decisions ad
+                    JOIN rework_candidate rc ON rc.id = ad.candidate_id
+             ) closure",
+            attempt.get(),
+            self.packet.campaign_id.get(),
+        )
+        .fetch_all(&self.process.pool_for_session_runtime())
+        .await
+        .map_err(StoreError::from)?;
+        if rows.is_empty() {
+            return Err(invalid_rpc(
+                "artifact.read",
+                "Engineering rework has no current rejected candidate evidence",
+            ));
+        }
+        for value in rows {
+            let value = value.ok_or_else(|| {
+                invalid_rpc(
+                    "artifact.read",
+                    "Engineering rework evidence closure is corrupt",
+                )
+            })?;
+            ids.insert(
+                ArtifactId::new(value).map_err(|error| artifact_read_error(error.to_string()))?,
+            );
+        }
+        Ok(())
     }
 
     async fn extend_ticket_proposal_closure(
@@ -1171,7 +1283,7 @@ impl KernelSessionRpc {
             CandidateSubmissionOutcome::Validated {
                 candidate,
                 hard_validation,
-                packet,
+                candidate_tree,
             } => Ok(
                 json::to_string(&factory_protocol::CandidateReceiptResponse {
                     protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
@@ -1181,8 +1293,7 @@ impl KernelSessionRpc {
                     aggregate_revision: candidate.resulting_revision.get(),
                     candidate_id: candidate.candidate_id.get(),
                     validation_id: hard_validation.validation_id.get(),
-                    candidate_tree: packet.candidate_tree.as_str().to_owned(),
-                    candidate_commit: packet.candidate_commit.as_str().to_owned(),
+                    candidate_tree: candidate_tree.as_str().to_owned(),
                 })
                 .into_bytes(),
             ),
@@ -1678,7 +1789,7 @@ where
                     };
                     Box::pin(async move { result })
                 } else {
-                    rpc.dispatch(frame)
+                    rpc.dispatch_response(frame)
                 }
             })
             .await;
@@ -2134,21 +2245,68 @@ fn require_candidate_quality_runtime(
     })
 }
 
-fn artifact_id_from_row(
-    row: &sqlx::postgres::PgRow,
-    field: &str,
-) -> Result<ArtifactId, LocalTransportError> {
-    let value: i64 = row
-        .try_get(field)
-        .map_err(|_| invalid_rpc("artifact.read", "durable artifact field is corrupt"))?;
-    ArtifactId::new(value).map_err(|error| artifact_read_error(error.to_string()))
-}
-
 fn artifact_read_error(detail: impl Into<String>) -> LocalTransportError {
     LocalTransportError::Frame(factory_protocol::FrameError::InvalidJson {
         operation: "artifact.read",
         detail: detail.into(),
     })
+}
+
+/// The signed packet is the actor's complete named evidence capability.  A
+/// durable closure check alone would let an actor guess a currently related
+/// artifact ID; packet membership alone would leave a stale assignment able
+/// to read evidence no longer valid for its current target stage.  Both gates
+/// therefore compare the same full sealed identity before any CAS bytes move.
+fn require_packet_evidence_reference(
+    packet: &AssignmentPacketV1,
+    artifact_id: ArtifactId,
+    requested_digest: ContentDigest,
+    registered_digest: ContentDigest,
+    registered_byte_length: u64,
+) -> Result<(), LocalTransportError> {
+    let reference = packet
+        .assignment_evidence
+        .iter()
+        .find(|reference| reference.artifact_id == artifact_id)
+        .ok_or_else(|| {
+            invalid_rpc(
+                "artifact.read",
+                "artifact is not named by this assignment packet evidence",
+            )
+        })?;
+    if reference.digest != requested_digest {
+        return Err(invalid_rpc(
+            "artifact.read",
+            "requested digest differs from the assignment packet evidence reference",
+        ));
+    }
+    if reference.digest != registered_digest {
+        return Err(invalid_rpc(
+            "artifact.read",
+            "registered artifact digest differs from the assignment packet evidence reference",
+        ));
+    }
+    if reference.byte_length != registered_byte_length {
+        return Err(invalid_rpc(
+            "artifact.read",
+            "registered artifact length differs from the assignment packet evidence reference",
+        ));
+    }
+    Ok(())
+}
+
+fn require_current_assignment_evidence_closure(
+    closure: &BTreeSet<ArtifactId>,
+    artifact_id: ArtifactId,
+) -> Result<(), LocalTransportError> {
+    if closure.contains(&artifact_id) {
+        Ok(())
+    } else {
+        Err(invalid_rpc(
+            "artifact.read",
+            "artifact is not in this assignment's current durable evidence closure",
+        ))
+    }
 }
 
 fn proposal_artifact_references(
@@ -2343,6 +2501,12 @@ mod tests {
                 digest: ContentDigest::of_bytes(b"read"),
                 reason: "test".to_owned(),
             }],
+            assignment_evidence: vec![factory_protocol::AssignmentEvidenceV1 {
+                role: factory_protocol::AssignmentEvidenceRoleV1::TicketProposal,
+                artifact_id: factory_protocol::ArtifactId::new(7).unwrap(),
+                digest: ContentDigest::of_bytes(b"proposal"),
+                byte_length: 8,
+            }],
             terminal_operations: vec![factory_protocol::TerminalOperationV1::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(1),
             revision: AggregateRevision::initial(),
@@ -2428,5 +2592,60 @@ mod tests {
         assert!(!state.engineering.submission_in_flight);
         assert!(!state.quality.full_suite_in_flight);
         assert!(!state.quality.review_in_flight);
+    }
+
+    #[test]
+    fn artifact_read_requires_packet_identity_and_current_durable_closure() {
+        let packet = packet();
+        let reference = &packet.assignment_evidence[0];
+        let expected_id = reference.artifact_id;
+        let expected_digest = reference.digest;
+
+        require_packet_evidence_reference(
+            &packet,
+            expected_id,
+            expected_digest,
+            expected_digest,
+            reference.byte_length,
+        )
+        .expect("exact packet reference is accepted");
+        assert!(
+            require_packet_evidence_reference(
+                &packet,
+                factory_protocol::ArtifactId::new(8).unwrap(),
+                expected_digest,
+                expected_digest,
+                reference.byte_length,
+            )
+            .is_err()
+        );
+        assert!(
+            require_packet_evidence_reference(
+                &packet,
+                expected_id,
+                ContentDigest::of_bytes(b"wrong digest"),
+                expected_digest,
+                reference.byte_length,
+            )
+            .is_err()
+        );
+        assert!(
+            require_packet_evidence_reference(
+                &packet,
+                expected_id,
+                expected_digest,
+                expected_digest,
+                reference.byte_length + 1,
+            )
+            .is_err()
+        );
+
+        let mut closure = BTreeSet::new();
+        closure.insert(expected_id);
+        require_current_assignment_evidence_closure(&closure, expected_id)
+            .expect("current stage retains named reference");
+        assert!(
+            require_current_assignment_evidence_closure(&BTreeSet::new(), expected_id,).is_err()
+        );
     }
 }

@@ -61,6 +61,12 @@ class OperatorTransport implements FrameTransport {
             downstream_ticket_attempt_revision: 8,
             downstream_candidate_id: 13,
             downstream_candidate_revision: 4,
+            downstream_evidence: {
+              candidate_commit: null,
+              latest_validation: null,
+              review: null,
+              architect_decision: null,
+            },
             ready_low_water: 1,
             ready_target: 2,
             ready_maximum: 3,
@@ -69,6 +75,17 @@ class OperatorTransport implements FrameTransport {
             oldest_sponsored_ticket_revision: null,
             scheduler_next_action: "continue_downstream",
             scheduler_constraint: null,
+            session_costs: [{
+              session_id: 14,
+              assignment_id: 15,
+              office: "quality",
+              model_provider: "openai",
+              model_id: "gpt-5.6",
+              outcome: "running",
+              cost_state: "pending",
+              cost_micro_usd: null,
+              elapsed_millis: 1,
+            }],
           };
         case OPERATION.operatorTicketList:
           return { ...envelope, items: [] };

@@ -18,9 +18,12 @@ use thiserror::Error;
 use crate::local_transport::ActorConnectionBinding;
 
 const FORUM_ADVISORY_LOCK_KEY: i64 = 0x4656_335f_464f_5255;
-const FORUM_TOPIC_SUBJECT: i16 = 4;
-const FORUM_THREAD_SUBJECT: i16 = 5;
-const FORUM_POST_SUBJECT: i16 = 6;
+// Keep Forum receipts in their own durable subject family.  Process custody
+// uses 4/5/6 for campaigns, assignments, and sessions respectively; sharing
+// those numbers made an audit subject ambiguous during restore verification.
+const FORUM_TOPIC_SUBJECT: i16 = 10;
+const FORUM_THREAD_SUBJECT: i16 = 11;
+const FORUM_POST_SUBJECT: i16 = 12;
 const CREATE_TOPIC_OPERATION: &str = "forum.topic.create";
 const CREATE_THREAD_OPERATION: &str = "forum.thread.create";
 const POST_OPERATION: &str = "forum.post.append";

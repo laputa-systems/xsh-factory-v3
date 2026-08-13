@@ -208,14 +208,12 @@ function validateFramedSuccess(response: Record<string, unknown>, operation: str
       "candidate_id",
       "validation_id",
       "candidate_tree",
-      "candidate_commit",
     ]);
     requireInteger("audit_id");
     requireInteger("aggregate_revision");
     requireInteger("candidate_id");
     requireInteger("validation_id");
     requireString("candidate_tree");
-    requireString("candidate_commit");
   } else if (operation === "quality.run_full_suite") {
     requireFields([
       "audit_id",
@@ -265,7 +263,7 @@ const TOOL_OPERATIONS: Readonly<Partial<Record<HostToolName, string>>> = {
   forum_post: "forum.post",
 };
 
-/** Converts admitted tool names into daemon-bound, operation-specific wrappers. */
+/** Converts admitted tool names into assigned operation-specific wrappers. */
 export function createFramedToolAdapters(
   client: FramedActorClient,
   names: readonly HostToolName[],
@@ -283,7 +281,7 @@ export function createFramedToolAdapters(
     return [{
       name,
       sdk_definition: {
-        description: `Daemon-bound ${name} operation.`,
+        description: `Assigned ${name} operation.`,
         input_schema: name === "workspace_read"
           ? {
             type: "object",

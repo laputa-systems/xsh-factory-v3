@@ -18,6 +18,11 @@ artifact custody, validation, Git construction, and local delivery. `application
 Deno consumer of `@factory/sdk` that declares only closed product policy and prompt-template paths.
 It does not run inside the daemon.
 
+The organizational metaphor is visible to operators, not to model workers. The XSH mission and all
+six office templates speak only about the product assignment, its evidence, and its allowed tools;
+they deliberately contain no factory, office, director, Architect, campaign, sponsorship, or
+kernel-persona vocabulary. A compile-and-render test guards that boundary.
+
 Read the durable terms and limits in:
 
 - [architecture glossary](docs/architecture-glossary.md)
@@ -51,6 +56,135 @@ drops a database. The `factoryctl init` command synopsis lists the closed requir
 The MVP also registers exactly one OpenRouter credential *environment name* (for example,
 `openrouter=OPENROUTER_API_KEY`) in that sealed receipt. Its value is never read during init or
 stored in PostgreSQL/CAS; it reaches a host only at the later supervised spawn boundary.
+
+`--pi-host-source-root` is a closed source root, not a convenience include path. Init recursively
+inventories every regular file beneath it and requires one `--pi-host-source-file` declaration for
+each; symlinks and any omitted file reject qualification. Use the repository's `packages/` root so
+both `factory-pi-host` and `factory-sdk` local imports are inside that inventory. Keep `deno.json`,
+`deno.lock`, the qualified Deno module-graph digest, and the build-specific `DENO_DIR` outside
+that root;
+the last is retained runtime material, never host source.
+
+The following is the complete MVP initialization/preflight shape. Replace each `<…>` value with an
+absolute local path; `factoryctl` derives `--kernel-binary` from the exact `--factoryd` executable,
+so it must not be supplied separately. The host source root is `packages`, not
+`packages/factory-pi-host`: `main.ts` imports `factory-sdk`, and qualification inventories every
+regular file under the chosen root. The nine runtime modules (`main`, `entrypoint`, `host`,
+`framed-actor`, `sdk-factory`, `transcript`, `types`, `workspace-tools`, and `forum-tools`) are
+therefore included along with `factory-sdk` and the package tests/metadata that the closed-root
+inventory also requires.
+
+```sh
+factoryctl init \
+  --factoryd <repo-root>/target/release/factoryd \
+  --database-url 'postgresql://USER@localhost/factory_v3' \
+  --runtime-root <absolute-runtime-root> \
+  --kernel-source-root <repo-root> \
+  --kernel-source-file crates/factory-protocol/src/application.rs \
+  --kernel-source-file crates/factory-protocol/src/candidate.rs \
+  --kernel-source-file crates/factory-protocol/src/decision.rs \
+  --kernel-source-file crates/factory-protocol/src/error.rs \
+  --kernel-source-file crates/factory-protocol/src/forum.rs \
+  --kernel-source-file crates/factory-protocol/src/identifier.rs \
+  --kernel-source-file crates/factory-protocol/src/lib.rs \
+  --kernel-source-file crates/factory-protocol/src/path.rs \
+  --kernel-source-file crates/factory-protocol/src/process.rs \
+  --kernel-source-file crates/factory-protocol/src/revision.rs \
+  --kernel-source-file crates/factory-protocol/src/state.rs \
+  --kernel-source-file crates/factory-protocol/src/ticket.rs \
+  --kernel-source-file crates/factory-protocol/src/value.rs \
+  --kernel-source-file crates/factory-protocol/src/wire.rs \
+  --kernel-source-file crates/factory-kernel/src/application_activation.rs \
+  --kernel-source-file crates/factory-kernel/src/application_admission.rs \
+  --kernel-source-file crates/factory-kernel/src/application_rpc.rs \
+  --kernel-source-file crates/factory-kernel/src/assignment_runtime.rs \
+  --kernel-source-file crates/factory-kernel/src/campaign_driver.rs \
+  --kernel-source-file crates/factory-kernel/src/candidate_runtime.rs \
+  --kernel-source-file crates/factory-kernel/src/cas.rs \
+  --kernel-source-file crates/factory-kernel/src/command_supervision.rs \
+  --kernel-source-file crates/factory-kernel/src/decision_store.rs \
+  --kernel-source-file crates/factory-kernel/src/durable_authority.rs \
+  --kernel-source-file crates/factory-kernel/src/forum_rpc.rs \
+  --kernel-source-file crates/factory-kernel/src/forum_store.rs \
+  --kernel-source-file crates/factory-kernel/src/git.rs \
+  --kernel-source-file crates/factory-kernel/src/installed_runtime.rs \
+  --kernel-source-file crates/factory-kernel/src/lib.rs \
+  --kernel-source-file crates/factory-kernel/src/local_transport.rs \
+  --kernel-source-file crates/factory-kernel/src/operator_artifact_rpc.rs \
+  --kernel-source-file crates/factory-kernel/src/operator_forum_rpc.rs \
+  --kernel-source-file crates/factory-kernel/src/operator_navigation.rs \
+  --kernel-source-file crates/factory-kernel/src/operator_rpc.rs \
+  --kernel-source-file crates/factory-kernel/src/process.rs \
+  --kernel-source-file crates/factory-kernel/src/process_custody.rs \
+  --kernel-source-file crates/factory-kernel/src/product_runtime.rs \
+  --kernel-source-file crates/factory-kernel/src/restart_recovery.rs \
+  --kernel-source-file crates/factory-kernel/src/scheduler.rs \
+  --kernel-source-file crates/factory-kernel/src/session_runtime.rs \
+  --kernel-source-file crates/factory-kernel/src/storage.rs \
+  --kernel-source-file crates/factory-kernel/src/ticket_store.rs \
+  --kernel-source-file crates/factory-kernel/src/workspace_read.rs \
+  --kernel-source-file crates/factoryd/src/main.rs \
+  --cargo-executable <absolute-cargo> \
+  --git-executable <absolute-git> \
+  --deno-executable <absolute-deno-2.9.4> \
+  --pi-host-source-root <repo-root>/packages \
+  --pi-host-source-file factory-pi-host/candidate_checkpoint_tool_test.ts \
+  --pi-host-source-file factory-pi-host/deno.json \
+  --pi-host-source-file factory-pi-host/entrypoint.ts \
+  --pi-host-source-file factory-pi-host/forum-tools.ts \
+  --pi-host-source-file factory-pi-host/framed-actor.ts \
+  --pi-host-source-file factory-pi-host/framed_actor_test.ts \
+  --pi-host-source-file factory-pi-host/host.ts \
+  --pi-host-source-file factory-pi-host/host_test.ts \
+  --pi-host-source-file factory-pi-host/main.ts \
+  --pi-host-source-file factory-pi-host/mod.ts \
+  --pi-host-source-file factory-pi-host/sdk-factory.ts \
+  --pi-host-source-file factory-pi-host/transcript.ts \
+  --pi-host-source-file factory-pi-host/types.ts \
+  --pi-host-source-file factory-pi-host/workspace-tools.ts \
+  --pi-host-source-file factory-sdk/application-operator.ts \
+  --pi-host-source-file factory-sdk/application.ts \
+  --pi-host-source-file factory-sdk/architect.ts \
+  --pi-host-source-file factory-sdk/architect_test.ts \
+  --pi-host-source-file factory-sdk/candidate.ts \
+  --pi-host-source-file factory-sdk/candidate_test.ts \
+  --pi-host-source-file factory-sdk/compiler.ts \
+  --pi-host-source-file factory-sdk/deno.json \
+  --pi-host-source-file factory-sdk/forum.ts \
+  --pi-host-source-file factory-sdk/forum_test.ts \
+  --pi-host-source-file factory-sdk/mod.ts \
+  --pi-host-source-file factory-sdk/operator-artifact.ts \
+  --pi-host-source-file factory-sdk/operator-artifact_test.ts \
+  --pi-host-source-file factory-sdk/operator.ts \
+  --pi-host-source-file factory-sdk/operator_test.ts \
+  --pi-host-source-file factory-sdk/product.ts \
+  --pi-host-source-file factory-sdk/product_test.ts \
+  --pi-host-source-file factory-sdk/protocol.ts \
+  --pi-host-source-file factory-sdk/quality.ts \
+  --pi-host-source-file factory-sdk/quality_test.ts \
+  --pi-host-entrypoint <repo-root>/packages/factory-pi-host/main.ts \
+  --pi-host-cache-probe factory-pi-host/mod.ts \
+  --deno-config <repo-root>/deno.json \
+  --deno-lock <repo-root>/deno.lock \
+  --deno-dir <absolute-build-specific-deno-dir-outside-packages> \
+  --pi-version 0.84.1 \
+  --provider-credential-environment openrouter=OPENROUTER_API_KEY
+```
+
+Before `init`, populate that exact `DENO_DIR` with the frozen root lock. Init records Deno's
+actual canonical `info --json` module graph while the daemon is stopped. Every later preflight
+uses the inert `factory-pi-host/mod.ts` module with Deno's supported cached-only graph/typecheck
+command; it never executes the FD0 actor host or contacts a provider:
+
+```sh
+DENO_DIR=<absolute-build-specific-deno-dir-outside-packages> \
+  <absolute-deno-2.9.4> cache --frozen --config <repo-root>/deno.json \
+  <repo-root>/packages/factory-pi-host/main.ts
+
+DENO_DIR=<absolute-build-specific-deno-dir-outside-packages> \
+  <absolute-deno-2.9.4> run --check --frozen --cached-only --config <repo-root>/deno.json \
+  --lock <repo-root>/deno.lock <repo-root>/packages/factory-pi-host/mod.ts
+```
 
 After that succeeds, start the local daemon and issue its read-only typed probe:
 

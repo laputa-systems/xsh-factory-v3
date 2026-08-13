@@ -15,7 +15,6 @@ use factory_protocol::{
     parse_command_profile_v1, parse_product_ticket_proposal_v1,
 };
 use miniserde::{Serialize, json};
-use sqlx::{Row, postgres::PgRow};
 
 use crate::{
     candidate_runtime::{
@@ -39,6 +38,7 @@ use crate::{
         ArchitectTransitionFuture, ArchitectTransitionResolutionError, ArchitectTransitionResolver,
         ResolvedCandidateDecisionTransition, ResolvedReleaseTransition,
     },
+    scheduler::ClaimReadyTicketAction,
     session_runtime::{
         CandidateQualityAuthorityFuture, CandidateQualityAuthorityResolutionError,
         CandidateQualityAuthorityResolver,
@@ -175,7 +175,6 @@ impl DurableAuthorityResolver {
                 "resume-hard-validation",
                 action.candidate_id.get(),
             )?,
-            commit: recovery.commit,
         };
         resume_candidate_hard_validation(
             &self.store.process_store(),
@@ -234,11 +233,134 @@ impl DurableAuthorityResolver {
             regression_tree: recovery.regression_tree,
             candidate_patch_digest: recovery.candidate_patch.digest,
             submission: recovery.submission,
-            commit: recovery.commit,
+            commit: self
+                .terminal_commit_policy(
+                    recovery.engineering_session_id,
+                    recovery.campaign_id,
+                    recovery.application_revision_id,
+                    recovery.engineering_started_at_seconds,
+                )
+                .await?,
         };
         resume_candidate_commit_attach(&self.store.decision_store(), &self.git, &authority)
             .await
             .map_err(|error| format!("candidate commit attachment recovery failed: {error}"))
+    }
+
+    /// Re-runs the exact persisted Product reproducer twice on the currently
+    /// qualified default head before an otherwise-ready ticket is claimed.
+    /// The scheduler action is only a revision fence; all ticket, campaign,
+    /// application, command, and expected-observation identities come from
+    /// the durable relation and verified CAS artifacts.
+    pub async fn requalify_sponsored_ticket(
+        &self,
+        action: ClaimReadyTicketAction,
+    ) -> Result<crate::ticket_store::CurrentHeadRequalification, String> {
+        let row = sqlx::query!(
+            "SELECT tr.revision AS ticket_revision, tr.application_revision_id,
+                    tr.proposal_artifact_id, tr.reproducer_artifact_id,
+                    camp.revision AS campaign_revision, kb.build_digest
+               FROM factory.ticket_revisions tr
+               JOIN factory.tickets t ON t.id = tr.ticket_id
+               JOIN factory.campaigns camp ON camp.application_revision_id = tr.application_revision_id
+               JOIN factory.kernel_builds kb ON kb.id = camp.kernel_build_id
+              WHERE tr.id = $1 AND tr.lifecycle = 1 AND t.current_ticket_revision_id = tr.id
+                AND camp.id = $2 AND camp.lifecycle = 0",
+            action.ticket.ticket_revision_id.get(),
+            action.campaign_id.get(),
+        )
+        .fetch_optional(&self.store.pool_for_authority())
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| "sponsored ticket is not claimable in this running campaign".to_owned())?;
+        let ticket_revision = persisted_revision(row.ticket_revision, "ticket revision")?;
+        let campaign_revision = persisted_revision(row.campaign_revision, "campaign revision")?;
+        if ticket_revision != action.ticket.revision
+            || campaign_revision != action.expected_campaign_revision.get()
+        {
+            return Err("sponsored ticket claim action has stale aggregate revisions".to_owned());
+        }
+        let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
+            .map_err(|error| error.to_string())?;
+        let application = self.load_application(application_revision_id).await?;
+        let proposal_bytes = self
+            .artifact_bytes(
+                ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?,
+            )
+            .await?;
+        let proposal = parse_product_ticket_proposal_v1(
+            &proposal_bytes,
+            &application.bundle.ticket_policy.ticket_bounds,
+        )
+        .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
+        self.verify_proposal_artifacts(&proposal).await?;
+        let stored_profile = parse_command_profile_v1(
+            &self
+                .artifact_bytes(
+                    ArtifactId::new(row.reproducer_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+        )
+        .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
+        let proposal_profile = parse_command_profile_v1(
+            &self
+                .artifact_bytes(proposal.reproducer.command.artifact_id)
+                .await?,
+        )
+        .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
+        if stored_profile != proposal_profile
+            || application
+                .bundle
+                .reproducer_profiles
+                .iter()
+                .find(|profile| profile.name == proposal.reproducer_profile)
+                != Some(&stored_profile)
+        {
+            return Err(
+                "stored ticket reproducer no longer matches its admitted profile".to_owned(),
+            );
+        }
+        let reproducer = self
+            .command_from_reproducer(&stored_profile, &proposal)
+            .await?;
+        let workspace = CommandWorkspace::open(application.repository.root()).map_err(|error| {
+            format!("qualified repository cannot be used as command workspace: {error}")
+        })?;
+        let reproduction = self
+            .runner
+            .run_discovery_reproducer(&workspace, &reproducer)
+            .map_err(|error| format!("current-head reproducer failed to run: {error}"))?;
+        let process = self.store.process_store();
+        let kernel_build_id = kernel_build_id_bytes(row.build_digest, "build digest")?;
+        let prefix = format!(
+            "claim-ticket-revision-{}",
+            action.ticket.ticket_revision_id.get()
+        );
+        let first = seal_command_observation_manifest(
+            &process,
+            &self.cas,
+            "kernel-ticket-claim-requalification",
+            &format!("{prefix}-first"),
+            kernel_build_id,
+            reproduction.first(),
+        )
+        .await?;
+        let second = seal_command_observation_manifest(
+            &process,
+            &self.cas,
+            "kernel-ticket-claim-requalification",
+            &format!("{prefix}-second"),
+            kernel_build_id,
+            reproduction.second(),
+        )
+        .await?;
+        Ok(crate::ticket_store::CurrentHeadRequalification {
+            current_head_commit: application.repository.snapshot().base_commit().to_string(),
+            current_head_tree: application.repository.snapshot().base_tree().to_string(),
+            first_actual_observation_artifact_id: first,
+            second_actual_observation_artifact_id: second,
+        })
     }
 
     /// Completes an already-accepted candidate delivery from durable state.
@@ -251,7 +373,7 @@ impl DurableAuthorityResolver {
         &self,
         command: DeliverAcceptedCandidate,
     ) -> Result<DeliveryReceipt, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT c.ticket_attempt_id, c.base_commit, c.candidate_tree, c.candidate_commit,
                     c.revision AS candidate_revision, ta.revision AS attempt_revision,
                     tr.revision AS ticket_revision, tr.ticket_id, tr.application_revision_id,
@@ -262,38 +384,58 @@ impl DurableAuthorityResolver {
                JOIN factory.campaigns camp ON camp.id = ta.campaign_id
                JOIN factory.kernel_builds kb ON kb.id = camp.kernel_build_id
               WHERE c.id = $1 AND c.lifecycle = 3 AND ta.stage = 3 AND camp.lifecycle = 0",
+            command.candidate_id.get(),
         )
-        .bind(command.candidate_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| "candidate is not accepted and awaiting local delivery".to_owned())?;
-        let application_revision_id =
-            ApplicationRevisionId::new(field(&row, "application_revision_id")?)
-                .map_err(|error| error.to_string())?;
+        let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
+            .map_err(|error| error.to_string())?;
         let repository = self
             .load_application(application_revision_id)
             .await?
             .repository;
-        let ticket_id =
-            TicketId::new(field(&row, "ticket_id")?).map_err(|error| error.to_string())?;
-        let candidate_commit = GitCommitId::parse(field::<String>(&row, "candidate_commit")?)
-            .map_err(|error| format!("stored candidate commit is invalid: {error}"))?;
-        let candidate_tree = tree(&row, "candidate_tree")?;
-        let recovered = self
-            .git
-            .recover_candidate_commit(
-                &repository,
-                CandidateRefName::new(ticket_id, command.candidate_id),
-                candidate_commit,
-                candidate_tree,
-            )
-            .map_err(|error| format!("stored candidate commit cannot be delivered: {error}"))?;
-        let delivery = self
-            .git
-            .guarded_local_fast_forward(&repository, &recovered)
-            .map_err(|error| format!("guarded local delivery failed: {error}"))?;
-        let kernel_build_id = kernel_build_id(&row, "build_digest")?;
+        let ticket_id = TicketId::new(row.ticket_id).map_err(|error| error.to_string())?;
+        let candidate_commit = GitCommitId::parse(
+            row.candidate_commit
+                .ok_or_else(|| "accepted candidate is missing its local commit".to_owned())?,
+        )
+        .map_err(|error| format!("stored candidate commit is invalid: {error}"))?;
+        let candidate_tree = GitTreeId::parse(row.candidate_tree)
+            .map_err(|error| format!("stored candidate tree is invalid: {error}"))?;
+        let candidate_ref = CandidateRefName::new(ticket_id, command.candidate_id);
+        let expected_old_commit_object = RepositoryObjectIdV1::parse(row.base_commit.clone())
+            .map_err(|error| format!("stored candidate base object is invalid: {error}"))?;
+        let expected_old_commit = GitCommitId::parse(row.base_commit)
+            .map_err(|error| format!("stored candidate base commit is invalid: {error}"))?;
+        let delivery = if repository.snapshot().base_commit() == &candidate_commit
+            && repository.snapshot().base_tree() == &candidate_tree
+        {
+            self.git
+                .recover_completed_local_fast_forward(
+                    &repository,
+                    expected_old_commit,
+                    candidate_ref,
+                    candidate_commit,
+                    candidate_tree,
+                )
+                .map_err(|error| format!("completed local delivery cannot be recovered: {error}"))?
+        } else {
+            let recovered = self
+                .git
+                .recover_candidate_commit(
+                    &repository,
+                    candidate_ref,
+                    candidate_commit,
+                    candidate_tree,
+                )
+                .map_err(|error| format!("stored candidate commit cannot be delivered: {error}"))?;
+            self.git
+                .guarded_local_fast_forward(&repository, &recovered)
+                .map_err(|error| format!("guarded local delivery failed: {error}"))?
+        };
+        let kernel_build_id = kernel_build_id_bytes(row.build_digest, "build digest")?;
         let receipt_bytes = local_delivery_receipt_bytes(
             command.candidate_id,
             &delivery.previous_commit,
@@ -318,20 +460,23 @@ impl DurableAuthorityResolver {
                 principal: command.principal,
                 command_id: command.command_id,
                 candidate_id: command.candidate_id,
-                expected_candidate_revision: ExpectedRevision::new(revision(
-                    &row,
-                    "candidate_revision",
+                expected_candidate_revision: ExpectedRevision::new(persisted_revision(
+                    row.candidate_revision,
+                    "candidate revision",
                 )?),
-                expected_attempt_revision: ExpectedRevision::new(revision(
-                    &row,
-                    "attempt_revision",
+                expected_attempt_revision: ExpectedRevision::new(persisted_revision(
+                    row.attempt_revision,
+                    "attempt revision",
                 )?),
-                expected_ticket_revision: ExpectedRevision::new(revision(&row, "ticket_revision")?),
-                expected_campaign_revision: ExpectedRevision::new(revision(
-                    &row,
-                    "campaign_revision",
+                expected_ticket_revision: ExpectedRevision::new(persisted_revision(
+                    row.ticket_revision,
+                    "ticket revision",
                 )?),
-                expected_old_commit: object(&row, "base_commit")?,
+                expected_campaign_revision: ExpectedRevision::new(persisted_revision(
+                    row.campaign_revision,
+                    "campaign revision",
+                )?),
+                expected_old_commit: expected_old_commit_object,
                 resulting_commit: RepositoryObjectIdV1::parse(
                     delivery.delivered_commit.to_string(),
                 )
@@ -369,19 +514,18 @@ impl DurableAuthorityResolver {
         &self,
         request: DurableAssignmentLaunchRequest,
     ) -> Result<DurableAssignmentLaunchContext, String> {
-        let row = sqlx::query(
+        let actual_application = sqlx::query_scalar!(
             "SELECT application_revision_id
                FROM factory.campaigns
               WHERE id = $1 AND lifecycle = 0",
+            request.campaign_id.get(),
         )
-        .bind(request.campaign_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| "campaign is absent or no longer running".to_owned())?;
         let actual_application =
-            ApplicationRevisionId::new(field(&row, "application_revision_id")?)
-                .map_err(|error| error.to_string())?;
+            ApplicationRevisionId::new(actual_application).map_err(|error| error.to_string())?;
         if actual_application != request.application_revision_id {
             return Err("campaign application revision differs from launch request".to_owned());
         }
@@ -405,46 +549,60 @@ impl DurableAuthorityResolver {
             .await?;
         match target {
             DurableAssignmentTarget::Engineering { ticket_attempt_id } => {
-                let row = sqlx::query(
+                let row = sqlx::query!(
                     "SELECT claimed_commit, claimed_tree, tr.proposal_artifact_id,
                             tr.ticket_id, tr.id AS ticket_revision_id
                        FROM factory.ticket_attempts ta
                        JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
                       WHERE ta.id = $1 AND ta.campaign_id = $2
                         AND tr.application_revision_id = $3 AND ta.stage IN (0, 4)",
+                    ticket_attempt_id.get(),
+                    assignment.campaign_id.get(),
+                    assignment.application_revision_id.get(),
                 )
-                .bind(ticket_attempt_id.get())
-                .bind(assignment.campaign_id.get())
-                .bind(assignment.application_revision_id.get())
                 .fetch_optional(&self.store.pool_for_authority())
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| "Engineering attempt is not launchable".to_owned())?;
+                let claimed_commit =
+                    GitCommitId::parse(row.claimed_commit).map_err(|error| error.to_string())?;
+                let claimed_tree =
+                    GitTreeId::parse(row.claimed_tree).map_err(|error| error.to_string())?;
+                let proposal_artifact_id =
+                    ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?;
+                if application.repository.snapshot().base_commit() != &claimed_commit
+                    || application.repository.snapshot().base_tree() != &claimed_tree
+                {
+                    return Err(
+                        "qualified repository head no longer matches the claimed Engineering base"
+                            .to_owned(),
+                    );
+                }
                 Ok(DurableAssignmentLaunchContext {
                     application_revision_id: assignment.application_revision_id,
                     target: DurableAssignmentTarget::Engineering { ticket_attempt_id },
                     repository: application.repository,
-                    materialize_commit: commit(&row, "claimed_commit")?,
-                    materialize_tree: tree(&row, "claimed_tree")?,
+                    materialize_commit: claimed_commit,
+                    materialize_tree: claimed_tree,
                     ticket_id: Some(
-                        TicketId::new(field(&row, "ticket_id")?)
-                            .map_err(|error| error.to_string())?,
+                        TicketId::new(row.ticket_id).map_err(|error| error.to_string())?,
                     ),
                     ticket_revision_id: Some(
-                        TicketRevisionId::new(field(&row, "ticket_revision_id")?)
+                        TicketRevisionId::new(row.ticket_revision_id)
                             .map_err(|error| error.to_string())?,
                     ),
                     validation_id: None,
-                    proposal: Some(
-                        self.reference(artifact_id(&row, "proposal_artifact_id")?)
-                            .await?,
-                    ),
+                    proposal: Some(self.reference(proposal_artifact_id).await?),
+                    evidence: DurableAssignmentEvidence {
+                        proposal: Some(
+                            self.proposal_evidence(&application.bundle, proposal_artifact_id)
+                                .await?,
+                        ),
+                        candidate: None,
+                    },
                     application_required_reads: application.bundle.required_reads.clone(),
                     ticket_contract_reads: self
-                        .ticket_contract_reads(
-                            &application.bundle,
-                            artifact_id(&row, "proposal_artifact_id")?,
-                        )
+                        .ticket_contract_reads(&application.bundle, proposal_artifact_id)
                         .await?,
                 })
             }
@@ -452,7 +610,7 @@ impl DurableAuthorityResolver {
                 ticket_attempt_id,
                 candidate_id,
             } => {
-                let row = sqlx::query(
+                let row = sqlx::query!(
                     "SELECT c.base_commit, c.candidate_tree, tr.proposal_artifact_id,
                             tr.ticket_id, tr.id AS ticket_revision_id, v.id AS validation_id
                        FROM factory.candidates c
@@ -468,11 +626,11 @@ impl DurableAuthorityResolver {
                         AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL
                         AND (ta.stage IN (2, 6)
                              OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))",
+                    candidate_id.get(),
+                    ticket_attempt_id.get(),
+                    assignment.campaign_id.get(),
+                    assignment.application_revision_id.get(),
                 )
-                .bind(candidate_id.get())
-                .bind(ticket_attempt_id.get())
-                .bind(assignment.campaign_id.get())
-                .bind(assignment.application_revision_id.get())
                 .fetch_optional(&self.store.pool_for_authority())
                 .await
                 .map_err(db_error)?
@@ -484,29 +642,48 @@ impl DurableAuthorityResolver {
                         candidate_id,
                     },
                     repository: application.repository,
-                    materialize_commit: commit(&row, "base_commit")?,
-                    materialize_tree: tree(&row, "candidate_tree")?,
+                    materialize_commit: GitCommitId::parse(row.base_commit)
+                        .map_err(|error| error.to_string())?,
+                    materialize_tree: GitTreeId::parse(row.candidate_tree)
+                        .map_err(|error| error.to_string())?,
                     ticket_id: Some(
-                        TicketId::new(field(&row, "ticket_id")?)
-                            .map_err(|error| error.to_string())?,
+                        TicketId::new(row.ticket_id).map_err(|error| error.to_string())?,
                     ),
                     ticket_revision_id: Some(
-                        TicketRevisionId::new(field(&row, "ticket_revision_id")?)
+                        TicketRevisionId::new(row.ticket_revision_id)
                             .map_err(|error| error.to_string())?,
                     ),
                     validation_id: Some(
-                        factory_protocol::ValidationId::new(field(&row, "validation_id")?)
+                        factory_protocol::ValidationId::new(row.validation_id)
                             .map_err(|error| error.to_string())?,
                     ),
                     proposal: Some(
-                        self.reference(artifact_id(&row, "proposal_artifact_id")?)
-                            .await?,
+                        self.reference(
+                            ArtifactId::new(row.proposal_artifact_id)
+                                .map_err(|error| error.to_string())?,
+                        )
+                        .await?,
                     ),
+                    evidence: DurableAssignmentEvidence {
+                        proposal: Some(
+                            self.proposal_evidence(
+                                &application.bundle,
+                                ArtifactId::new(row.proposal_artifact_id)
+                                    .map_err(|error| error.to_string())?,
+                            )
+                            .await?,
+                        ),
+                        candidate: Some(
+                            self.candidate_evidence(ticket_attempt_id, candidate_id)
+                                .await?,
+                        ),
+                    },
                     application_required_reads: application.bundle.required_reads.clone(),
                     ticket_contract_reads: self
                         .ticket_contract_reads(
                             &application.bundle,
-                            artifact_id(&row, "proposal_artifact_id")?,
+                            ArtifactId::new(row.proposal_artifact_id)
+                                .map_err(|error| error.to_string())?,
                         )
                         .await?,
                 })
@@ -521,6 +698,10 @@ impl DurableAuthorityResolver {
                 ticket_revision_id: None,
                 validation_id: None,
                 proposal: None,
+                evidence: DurableAssignmentEvidence {
+                    proposal: None,
+                    candidate: None,
+                },
                 application_required_reads: application.bundle.required_reads,
                 ticket_contract_reads: Vec::new(),
             }),
@@ -590,12 +771,7 @@ impl DurableAuthorityResolver {
             .adopt_actor_worktree(&application.repository, packet.workspace_root.as_str())
             .map_err(|error| format!("Engineering worktree custody failed: {error}"))?;
         let session_suffix = session_id.get();
-        let commit_identity = GitIdentity::new("Factory Kernel", "factory-kernel@local")
-            .map_err(|error| format!("kernel Git identity is invalid: {error}"))?;
         let full_suite = full_suite_commands(&application.bundle)?;
-        let timestamp_unix_seconds = self
-            .engineering_commit_timestamp(session_id, packet, &assignment)
-            .await?;
         Ok(ResolvedEngineeringCandidateAuthority {
             application: application.bundle.clone(),
             repository: application.repository.clone(),
@@ -618,16 +794,6 @@ impl DurableAuthorityResolver {
             full_suite_identity: FULL_SUITE_IDENTITY.to_owned(),
             full_suite,
             validation_worktree_name: worktree_name("engineering-validation", session_suffix)?,
-            commit: CandidateCommitPolicy {
-                author: commit_identity.clone(),
-                committer: commit_identity,
-                timestamp_unix_seconds,
-                // The transcript does not exist until the one actor session
-                // terminates. The immutable packet seal is the only session
-                // evidence available before terminal submission; the durable
-                // session row still binds the actual actor session exactly.
-                engineering_session_digest: packet.packet_digest,
-            },
         })
     }
 
@@ -669,13 +835,13 @@ impl DurableAuthorityResolver {
         &self,
         application_revision_id: ApplicationRevisionId,
     ) -> Result<ApplicationContext, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT ar.bundle_artifact_id, r.canonical_local_path, r.default_branch
                FROM factory.application_revisions ar
                JOIN factory.repositories r ON r.id = ar.repository_id
               WHERE ar.id = $1",
+            application_revision_id.get(),
         )
-        .bind(application_revision_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
@@ -685,12 +851,13 @@ impl DurableAuthorityResolver {
                 application_revision_id.get()
             )
         })?;
-        let bundle_artifact_id = artifact_id(&row, "bundle_artifact_id")?;
+        let bundle_artifact_id =
+            ArtifactId::new(row.bundle_artifact_id).map_err(|error| error.to_string())?;
         let bundle_bytes = self.artifact_bytes(bundle_artifact_id).await?;
         let bundle = parse_application_bundle_v1(&bundle_bytes)
             .map_err(|error| format!("admitted application bundle is invalid: {error}"))?;
-        let repository_path: String = field(&row, "canonical_local_path")?;
-        let default_branch: String = field(&row, "default_branch")?;
+        let repository_path = row.canonical_local_path;
+        let default_branch = row.default_branch;
         if bundle.repository.canonical_local_path.as_str() != repository_path
             || bundle.repository.default_branch != default_branch
         {
@@ -715,23 +882,30 @@ impl DurableAuthorityResolver {
         &self,
         packet: &AssignmentPacketV1,
     ) -> Result<AssignmentContext, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT campaign_id, application_revision_id, office, ticket_attempt_id, candidate_id
                FROM factory.assignments
               WHERE id = $1",
+            packet.assignment_id.get(),
         )
-        .bind(packet.assignment_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| "assignment is absent from durable authority".to_owned())?;
-        let campaign_id: i64 = field(&row, "campaign_id")?;
-        let application_revision_id =
-            ApplicationRevisionId::new(field(&row, "application_revision_id")?)
-                .map_err(|error| error.to_string())?;
-        let office: i16 = field(&row, "office")?;
-        let ticket_attempt_id = optional_positive(&row, "ticket_attempt_id", TicketAttemptId::new)?;
-        let candidate_id = optional_positive(&row, "candidate_id", CandidateId::new)?;
+        let campaign_id = row.campaign_id;
+        let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
+            .map_err(|error| error.to_string())?;
+        let office = row.office;
+        let ticket_attempt_id = row
+            .ticket_attempt_id
+            .map(TicketAttemptId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        let candidate_id = row
+            .candidate_id
+            .map(CandidateId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?;
         let expected_office = match packet.office {
             Office::ProductResearch => 0,
             Office::Engineering => 1,
@@ -855,7 +1029,7 @@ impl DurableAuthorityResolver {
         ticket_attempt_id: TicketAttemptId,
         assignment: &AssignmentContext,
     ) -> Result<EngineeringTicket, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT ta.revision AS attempt_revision, tr.id AS ticket_revision_id,
                     tr.revision AS ticket_revision, tr.proposal_artifact_id,
                     tr.reproducer_artifact_id, tr.expected_observation_artifact_id,
@@ -865,31 +1039,78 @@ impl DurableAuthorityResolver {
                JOIN factory.tickets t ON t.id = tr.ticket_id
               WHERE ta.id = $1 AND ta.campaign_id = $2 AND tr.application_revision_id = $3
                 AND ta.stage IN (0, 4)",
+            ticket_attempt_id.get(),
+            assignment.campaign_id.get(),
+            assignment.application_revision_id.get(),
         )
-        .bind(ticket_attempt_id.get())
-        .bind(assignment.campaign_id.get())
-        .bind(assignment.application_revision_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| "Engineering assignment target is not an active attempt".to_owned())?;
         Ok(EngineeringTicket {
-            ticket_id: TicketId::new(field(&row, "ticket_id")?)
+            ticket_id: TicketId::new(row.ticket_id).map_err(|error| error.to_string())?,
+            ticket_revision_id: TicketRevisionId::new(row.ticket_revision_id)
                 .map_err(|error| error.to_string())?,
-            ticket_revision_id: TicketRevisionId::new(field(&row, "ticket_revision_id")?)
+            ticket_revision: persisted_revision(row.ticket_revision, "ticket revision")?,
+            attempt_revision: persisted_revision(row.attempt_revision, "attempt revision")?,
+            proposal_artifact_id: ArtifactId::new(row.proposal_artifact_id)
                 .map_err(|error| error.to_string())?,
-            ticket_revision: revision(&row, "ticket_revision")?,
-            attempt_revision: revision(&row, "attempt_revision")?,
-            proposal_artifact_id: artifact_id(&row, "proposal_artifact_id")?,
-            reproducer_artifact_id: artifact_id(&row, "reproducer_artifact_id")?,
-            expected_observation_artifact_id: artifact_id(
-                &row,
-                "expected_observation_artifact_id",
-            )?,
-            discovery_observation_artifact_id: artifact_id(
-                &row,
-                "discovery_observation_artifact_id",
-            )?,
+            reproducer_artifact_id: ArtifactId::new(row.reproducer_artifact_id)
+                .map_err(|error| error.to_string())?,
+            expected_observation_artifact_id: ArtifactId::new(row.expected_observation_artifact_id)
+                .map_err(|error| error.to_string())?,
+            discovery_observation_artifact_id: ArtifactId::new(
+                row.discovery_observation_artifact_id,
+            )
+            .map_err(|error| error.to_string())?,
+        })
+    }
+
+    /// Loads the only digest eligible for the Engineering provenance trailer.
+    /// Packet bytes prove admission, but only the terminal transcript proves
+    /// the actual actor session that submitted the candidate.  Requiring the
+    /// completed candidate terminal operation, known cost, and complete
+    /// required-read assertion makes a failed/interrupted Engineering session
+    /// unrecoverable for Quality or commit attachment.
+    async fn terminal_commit_policy(
+        &self,
+        session_id: SessionId,
+        campaign_id: factory_protocol::CampaignId,
+        application_revision_id: ApplicationRevisionId,
+        timestamp_unix_seconds: i64,
+    ) -> Result<CandidateCommitPolicy, String> {
+        let engineering_session_digest = sqlx::query_scalar!(
+            "SELECT artifact.digest
+               FROM factory.sessions s
+               JOIN factory.assignments a ON a.id = s.assignment_id
+               JOIN factory.artifacts artifact ON artifact.id = s.transcript_artifact_id
+              WHERE s.id = $1 AND s.campaign_id = $2 AND s.application_revision_id = $3
+                AND s.office = 1 AND a.office = 1 AND a.campaign_id = $2
+                AND a.application_revision_id = $3
+                AND s.lifecycle = 2 AND s.cost_state = 0
+                AND s.terminal_operation = 1
+                AND s.required_read_satisfied_count = s.required_read_expected_count",
+            session_id.get(),
+            campaign_id.get(),
+            application_revision_id.get(),
+        )
+        .fetch_optional(&self.store.pool_for_authority())
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| {
+            "candidate commit attachment requires a succeeded Engineering candidate terminal with known cost and complete required reads".to_owned()
+        })?;
+        let engineering_session_digest: [u8; 32] = engineering_session_digest
+            .try_into()
+            .map_err(|_| "terminal transcript digest has an invalid length".to_owned())?;
+        let engineering_session_digest = ContentDigest::from_bytes(engineering_session_digest);
+        let identity = GitIdentity::new("Factory Kernel", "factory-kernel@local")
+            .map_err(|error| format!("kernel Git identity is invalid: {error}"))?;
+        Ok(CandidateCommitPolicy {
+            author: identity.clone(),
+            committer: identity,
+            timestamp_unix_seconds,
+            engineering_session_digest,
         })
     }
 
@@ -899,7 +1120,7 @@ impl DurableAuthorityResolver {
         required_candidate_lifecycle: i16,
         required_attempt_stage: i16,
     ) -> Result<CandidateRecovery, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT c.revision AS candidate_revision, c.base_commit, c.base_tree,
                     c.regression_tree, c.candidate_tree, c.changed_paths_artifact_id,
                     c.regression_patch_artifact_id, c.regression_command_set_artifact_id,
@@ -912,7 +1133,9 @@ impl DurableAuthorityResolver {
                     tr.application_revision_id, tr.proposal_artifact_id,
                     tr.reproducer_artifact_id, tr.expected_observation_artifact_id,
                     tr.discovery_observation_artifact_id,
-                    camp.id AS campaign_id, kb.build_digest, a.packet_digest,
+                    camp.id AS campaign_id, kb.build_digest,
+                    FLOOR(EXTRACT(EPOCH FROM es.started_at))::BIGINT
+                        AS engineering_started_at_seconds,
                     hv.id AS hard_validation_id
                FROM factory.candidates c
                JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
@@ -925,33 +1148,46 @@ impl DurableAuthorityResolver {
                     AND hv.validation_scope = 0 AND hv.lifecycle = 1
               WHERE c.id = $1 AND c.ticket_attempt_id = $2
                 AND c.lifecycle = $3 AND ta.stage = $4
+                AND c.candidate_commit IS NULL
                 AND camp.lifecycle = 0 AND es.campaign_id = camp.id
                 AND es.office = 1 AND a.office = 1
                 AND a.campaign_id = camp.id
                 AND a.application_revision_id = tr.application_revision_id",
+            action.candidate_id.get(),
+            action.ticket_attempt_id.get(),
+            required_candidate_lifecycle,
+            required_attempt_stage,
         )
-        .bind(action.candidate_id.get())
-        .bind(action.ticket_attempt_id.get())
-        .bind(required_candidate_lifecycle)
-        .bind(required_attempt_stage)
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| {
             "candidate recovery action is no longer at its exact durable stage".to_owned()
         })?;
-        let candidate_revision = revision(&row, "candidate_revision")?;
-        let attempt_revision = revision(&row, "attempt_revision")?;
+        let candidate_revision = persisted_revision(row.candidate_revision, "candidate revision")?;
+        let attempt_revision = persisted_revision(row.attempt_revision, "attempt revision")?;
         if candidate_revision != action.candidate_revision
             || attempt_revision != action.ticket_attempt_revision
         {
             return Err("candidate recovery action has stale aggregate revisions".to_owned());
         }
-        let application_revision_id =
-            ApplicationRevisionId::new(field(&row, "application_revision_id")?)
-                .map_err(|error| error.to_string())?;
+        let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
+            .map_err(|error| error.to_string())?;
         let application = self.load_application(application_revision_id).await?;
-        let proposal_artifact_id = artifact_id(&row, "proposal_artifact_id")?;
+        let persisted_base_commit = GitCommitId::parse(row.base_commit)
+            .map_err(|error| format!("stored candidate base commit is invalid: {error}"))?;
+        let persisted_base_tree = GitTreeId::parse(row.base_tree)
+            .map_err(|error| format!("stored candidate base tree is invalid: {error}"))?;
+        if application.repository.snapshot().base_commit() != &persisted_base_commit
+            || application.repository.snapshot().base_tree() != &persisted_base_tree
+        {
+            return Err(
+                "qualified repository head no longer matches the candidate's persisted base"
+                    .to_owned(),
+            );
+        }
+        let proposal_artifact_id =
+            ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?;
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
         let proposal = parse_product_ticket_proposal_v1(
             &proposal_bytes,
@@ -961,7 +1197,10 @@ impl DurableAuthorityResolver {
         self.verify_proposal_artifacts(&proposal).await?;
         let stored_profile = parse_command_profile_v1(
             &self
-                .artifact_bytes(artifact_id(&row, "reproducer_artifact_id")?)
+                .artifact_bytes(
+                    ArtifactId::new(row.reproducer_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
                 .await?,
         )
         .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
@@ -987,46 +1226,61 @@ impl DurableAuthorityResolver {
         // across recovery. These reads re-verify CAS rather than trusting a
         // foreign key or artifact ID alone.
         let _ = self
-            .artifact_bytes(artifact_id(&row, "expected_observation_artifact_id")?)
+            .artifact_bytes(
+                ArtifactId::new(row.expected_observation_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let _ = self
-            .artifact_bytes(artifact_id(&row, "discovery_observation_artifact_id")?)
+            .artifact_bytes(
+                ArtifactId::new(row.discovery_observation_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let _ = self
-            .reference(artifact_id(&row, "changed_paths_artifact_id")?)
+            .reference(
+                ArtifactId::new(row.changed_paths_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let _ = self
-            .reference(artifact_id(&row, "regression_patch_artifact_id")?)
+            .reference(
+                ArtifactId::new(row.regression_patch_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let _ = self
-            .reference(artifact_id(&row, "regression_command_set_artifact_id")?)
+            .reference(
+                ArtifactId::new(row.regression_command_set_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let _ = self
-            .reference(artifact_id(&row, "regression_log_artifact_id")?)
+            .reference(
+                ArtifactId::new(row.regression_log_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let candidate_patch = self
-            .reference(artifact_id(&row, "patch_artifact_id")?)
+            .reference(ArtifactId::new(row.patch_artifact_id).map_err(|error| error.to_string())?)
             .await?;
         let engineering_report = self
-            .reference(artifact_id(&row, "engineering_report_artifact_id")?)
+            .reference(
+                ArtifactId::new(row.engineering_report_artifact_id)
+                    .map_err(|error| error.to_string())?,
+            )
             .await?;
         let risks = self
-            .reference(artifact_id(&row, "risks_artifact_id")?)
+            .reference(ArtifactId::new(row.risks_artifact_id).map_err(|error| error.to_string())?)
             .await?;
-        let ticket_id =
-            TicketId::new(field(&row, "ticket_id")?).map_err(|error| error.to_string())?;
-        let ticket_revision_id = TicketRevisionId::new(field(&row, "ticket_revision_id")?)
-            .map_err(|error| error.to_string())?;
-        let kernel_build_id = kernel_build_id(&row, "build_digest")?;
-        let packet_digest = digest(&row, "packet_digest")?;
-        let commit_identity = GitIdentity::new("Factory Kernel", "factory-kernel@local")
-            .map_err(|error| format!("kernel Git identity is invalid: {error}"))?;
-        let timestamp_unix_seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| "system clock predates the Unix epoch".to_owned())?
-            .as_secs()
-            .try_into()
-            .map_err(|_| "current commit timestamp is out of range".to_owned())?;
+        let ticket_id = TicketId::new(row.ticket_id).map_err(|error| error.to_string())?;
+        let ticket_revision_id =
+            TicketRevisionId::new(row.ticket_revision_id).map_err(|error| error.to_string())?;
+        let kernel_build_id = kernel_build_id_bytes(row.build_digest, "build digest")?;
+        let full_suite = full_suite_commands(&application.bundle)?;
+        let timestamp_unix_seconds = row.engineering_started_at_seconds.ok_or_else(|| {
+            "Engineering session start timestamp is missing from candidate recovery".to_owned()
+        })?;
         Ok(CandidateRecovery {
             application: application.bundle,
             repository: application.repository,
@@ -1035,40 +1289,40 @@ impl DurableAuthorityResolver {
                 ticket_attempt_id: action.ticket_attempt_id,
                 ticket_revision_id,
                 expected_attempt_revision: ExpectedRevision::new(attempt_revision),
-                expected_ticket_revision: ExpectedRevision::new(revision(&row, "ticket_revision")?),
+                expected_ticket_revision: ExpectedRevision::new(persisted_revision(
+                    row.ticket_revision,
+                    "ticket revision",
+                )?),
                 ticket_revision_digest: ContentDigest::of_bytes(&proposal_bytes),
             },
-            engineering_session_id: SessionId::new(field(&row, "engineering_session_id")?)
+            engineering_session_id: SessionId::new(row.engineering_session_id)
                 .map_err(|error| error.to_string())?,
             kernel_build_id,
-            campaign_id: factory_protocol::CampaignId::new(field(&row, "campaign_id")?)
+            campaign_id: factory_protocol::CampaignId::new(row.campaign_id)
                 .map_err(|error| error.to_string())?,
             application_revision_id,
-            candidate_tree: tree(&row, "candidate_tree")?,
-            regression_tree: tree(&row, "regression_tree")?,
+            candidate_tree: GitTreeId::parse(row.candidate_tree)
+                .map_err(|error| format!("stored candidate tree is invalid: {error}"))?,
+            regression_tree: GitTreeId::parse(row.regression_tree)
+                .map_err(|error| format!("stored regression tree is invalid: {error}"))?,
             candidate_patch,
             submission: factory_protocol::CandidateSubmissionV1 {
                 engineering_report,
-                commit_subject: field(&row, "commit_subject")?,
-                commit_body: field(&row, "commit_body")?,
-                regression_test_identity: field(&row, "regression_test_identity")?,
+                commit_subject: row.commit_subject,
+                commit_body: row.commit_body,
+                regression_test_identity: row.regression_test_identity,
                 risks,
             },
             product_reproducer: self
                 .command_from_reproducer(&stored_profile, &proposal)
                 .await?,
             full_suite,
-            hard_validation_id: optional_positive(
-                &row,
-                "hard_validation_id",
-                factory_protocol::ValidationId::new,
-            )?,
-            commit: CandidateCommitPolicy {
-                author: commit_identity.clone(),
-                committer: commit_identity,
-                timestamp_unix_seconds,
-                engineering_session_digest: packet_digest,
-            },
+            hard_validation_id: row
+                .hard_validation_id
+                .map(factory_protocol::ValidationId::new)
+                .transpose()
+                .map_err(|error| error.to_string())?,
+            engineering_started_at_seconds: timestamp_unix_seconds,
         })
     }
 
@@ -1078,7 +1332,7 @@ impl DurableAuthorityResolver {
         candidate_id: CandidateId,
         assignment: &AssignmentContext,
     ) -> Result<QualityCandidate, String> {
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT ta.revision AS attempt_revision,
                     c.ticket_attempt_id, c.base_commit, c.base_tree, c.regression_tree,
                     c.candidate_tree, c.regression_patch_artifact_id,
@@ -1106,79 +1360,114 @@ impl DurableAuthorityResolver {
                 AND c.lifecycle = 1 AND c.candidate_commit IS NOT NULL
                 AND (ta.stage IN (2, 6)
                      OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))",
+            candidate_id.get(),
+            ticket_attempt_id.get(),
+            assignment.campaign_id.get(),
+            assignment.application_revision_id.get(),
         )
-        .bind(candidate_id.get())
-        .bind(ticket_attempt_id.get())
-        .bind(assignment.campaign_id.get())
-        .bind(assignment.application_revision_id.get())
         .fetch_optional(&self.store.pool_for_authority())
         .await
         .map_err(db_error)?
         .ok_or_else(|| {
             "Quality assignment target is not an exact validated candidate".to_owned()
         })?;
-        let candidate_commit: String = field(&row, "candidate_commit")?;
+        let candidate_commit = row
+            .candidate_commit
+            .ok_or_else(|| "validated candidate is missing its attached commit".to_owned())?;
         let packet = CandidatePacketV1 {
             candidate_id,
             ticket_attempt_id,
-            ticket_revision_id: TicketRevisionId::new(field(&row, "ticket_revision_id")?)
+            ticket_revision_id: TicketRevisionId::new(row.ticket_revision_id)
                 .map_err(|error| error.to_string())?,
-            base_commit: object(&row, "base_commit")?,
-            base_tree: object(&row, "base_tree")?,
-            regression_tree: object(&row, "regression_tree")?,
-            candidate_tree: object(&row, "candidate_tree")?,
+            base_commit: RepositoryObjectIdV1::parse(row.base_commit)
+                .map_err(|error| error.to_string())?,
+            base_tree: RepositoryObjectIdV1::parse(row.base_tree)
+                .map_err(|error| error.to_string())?,
+            regression_tree: RepositoryObjectIdV1::parse(row.regression_tree)
+                .map_err(|error| error.to_string())?,
+            candidate_tree: RepositoryObjectIdV1::parse(row.candidate_tree)
+                .map_err(|error| error.to_string())?,
             regression_patch: self
-                .reference(artifact_id(&row, "regression_patch_artifact_id")?)
+                .reference(
+                    ArtifactId::new(row.regression_patch_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
                 .await?,
             regression_command_set: self
-                .reference(artifact_id(&row, "regression_command_set_artifact_id")?)
+                .reference(
+                    ArtifactId::new(row.regression_command_set_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
                 .await?,
             regression_log: self
-                .reference(artifact_id(&row, "regression_log_artifact_id")?)
+                .reference(
+                    ArtifactId::new(row.regression_log_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
                 .await?,
             candidate_patch: self
-                .reference(artifact_id(&row, "patch_artifact_id")?)
+                .reference(
+                    ArtifactId::new(row.patch_artifact_id).map_err(|error| error.to_string())?,
+                )
                 .await?,
-            engineering_session_id: SessionId::new(field(&row, "engineering_session_id")?)
+            engineering_session_id: SessionId::new(row.engineering_session_id)
                 .map_err(|error| error.to_string())?,
             engineering_report: self
-                .reference(artifact_id(&row, "engineering_report_artifact_id")?)
+                .reference(
+                    ArtifactId::new(row.engineering_report_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
                 .await?,
-            hard_validation_id: factory_protocol::ValidationId::new(field(
-                &row,
-                "hard_validation_id",
-            )?)
-            .map_err(|error| error.to_string())?,
+            hard_validation_id: factory_protocol::ValidationId::new(row.hard_validation_id)
+                .map_err(|error| error.to_string())?,
             candidate_commit: RepositoryObjectIdV1::parse(candidate_commit)
                 .map_err(|error| error.to_string())?,
-            candidate_revision: revision(&row, "candidate_revision")?,
+            candidate_revision: persisted_revision(row.candidate_revision, "candidate revision")?,
         };
         packet.validate().map_err(|error| error.to_string())?;
-        let prior_full_suite = match optional_positive(
-            &row,
-            "quality_validation_id",
-            factory_protocol::ValidationId::new,
-        )? {
+        let prior_full_suite = match row
+            .quality_validation_id
+            .map(factory_protocol::ValidationId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?
+        {
             Some(validation_id) => {
-                let validation_tree = object(&row, "quality_validation_tree")?;
+                let validation_tree =
+                    RepositoryObjectIdV1::parse(row.quality_validation_tree.ok_or_else(|| {
+                        "persisted Quality validation has no pristine tree".to_owned()
+                    })?)
+                    .map_err(|error| error.to_string())?;
                 if validation_tree != packet.candidate_tree {
                     return Err(
                         "persisted Quality validation tree differs from candidate tree".to_owned(),
                     );
                 }
-                let audit_log_id: i64 = field(&row, "quality_validation_audit_log_id")?;
+                let audit_log_id = row.quality_validation_audit_log_id.ok_or_else(|| {
+                    "persisted Quality validation has no audit receipt".to_owned()
+                })?;
                 Some(QualityFullSuiteOutcome {
                     receipt: factory_protocol::QualityValidationReceiptV1 {
                         validation_id,
                         candidate_id,
                         candidate_tree: packet.candidate_tree.clone(),
                         log_artifact: self
-                            .reference(artifact_id(&row, "quality_validation_log_artifact_id")?)
+                            .reference(
+                                ArtifactId::new(
+                                    row.quality_validation_log_artifact_id.ok_or_else(|| {
+                                        "persisted Quality validation has no log artifact"
+                                            .to_owned()
+                                    })?,
+                                )
+                                .map_err(|error| error.to_string())?,
+                            )
                             .await?,
                         revision: packet.candidate_revision,
                     },
                     result: crate::decision_store::ValidationResult::Passed,
-                    resulting_attempt_revision: revision(&row, "attempt_revision")?,
+                    resulting_attempt_revision: persisted_revision(
+                        row.attempt_revision,
+                        "attempt revision",
+                    )?,
                     audit_log_id,
                 })
             }
@@ -1186,8 +1475,180 @@ impl DurableAuthorityResolver {
         };
         Ok(QualityCandidate {
             packet,
-            attempt_revision: revision(&row, "attempt_revision")?,
+            attempt_revision: persisted_revision(row.attempt_revision, "attempt revision")?,
             prior_full_suite,
+        })
+    }
+
+    /// Rehydrates every proposal-owned artifact from the exact admitted
+    /// proposal bytes.  The proposal reference alone is not sufficient for an
+    /// actor to inspect the reproducer observations that define its contract.
+    async fn proposal_evidence(
+        &self,
+        application: &ApplicationBundleV1,
+        proposal_artifact_id: ArtifactId,
+    ) -> Result<DurableProposalEvidence, String> {
+        let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
+        let proposal = parse_product_ticket_proposal_v1(
+            &proposal_bytes,
+            &application.ticket_policy.ticket_bounds,
+        )
+        .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
+        self.verify_proposal_artifacts(&proposal).await?;
+        Ok(DurableProposalEvidence {
+            proposal: self.reference(proposal_artifact_id).await?,
+            narrative: proposal.narrative,
+            evidence: proposal.evidence,
+            reproducer_command: proposal.reproducer.command,
+            reproducer_stdin: proposal.reproducer.stdin,
+            expected_observation: DurableObservationEvidence {
+                stdout: proposal.reproducer.expected_observation.stdout,
+                stderr: proposal.reproducer.expected_observation.stderr,
+            },
+            first_observation: DurableObservationEvidence {
+                stdout: proposal.reproducer.first_observation.stdout,
+                stderr: proposal.reproducer.first_observation.stderr,
+            },
+            second_observation: DurableObservationEvidence {
+                stdout: proposal.reproducer.second_observation.stdout,
+                stderr: proposal.reproducer.second_observation.stderr,
+            },
+        })
+    }
+
+    /// Resolves the exact evidence closure already attached to one validated
+    /// candidate.  Every artifact is converted through `reference`, which
+    /// proves the registered CAS seal remains readable before the assignment
+    /// can name it to an actor.
+    async fn candidate_evidence(
+        &self,
+        ticket_attempt_id: TicketAttemptId,
+        candidate_id: CandidateId,
+    ) -> Result<DurableCandidateEvidence, String> {
+        let row = sqlx::query!(
+            "SELECT c.changed_paths_artifact_id, c.regression_patch_artifact_id,
+                    c.regression_command_set_artifact_id, c.regression_log_artifact_id,
+                    c.patch_artifact_id, c.engineering_report_artifact_id,
+                    c.risks_artifact_id AS engineering_risks_artifact_id,
+                    hv.command_set_artifact_id AS hard_validation_command_set_artifact_id,
+                    hv.log_artifact_id AS hard_validation_log_artifact_id,
+                    review.additional_probes_artifact_id AS prior_quality_additional_probes_artifact_id,
+                    review.rationale_artifact_id AS prior_quality_rationale_artifact_id,
+                    review.risks_artifact_id AS prior_quality_risks_artifact_id,
+                    decision.rationale_artifact_id AS architect_rationale_artifact_id
+               FROM factory.candidates c
+               JOIN factory.validations hv ON hv.candidate_id = c.id
+                    AND hv.validation_scope = 0 AND hv.lifecycle = 1
+               LEFT JOIN factory.reviews review ON review.candidate_id = c.id
+               LEFT JOIN LATERAL (
+                    SELECT rationale_artifact_id
+                      FROM factory.architect_decisions
+                     WHERE candidate_id = c.id
+                     ORDER BY created_at DESC, id DESC
+                     LIMIT 1
+               ) decision ON TRUE
+              WHERE c.id = $1 AND c.ticket_attempt_id = $2 AND c.lifecycle = 1",
+            candidate_id.get(),
+            ticket_attempt_id.get(),
+        )
+        .fetch_optional(&self.store.pool_for_authority())
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| "candidate evidence is not available at this durable stage".to_owned())?;
+        let prior_quality_additional_probes = match row
+            .prior_quality_additional_probes_artifact_id
+            .map(ArtifactId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?
+        {
+            Some(artifact_id) => Some(self.reference(artifact_id).await?),
+            None => None,
+        };
+        let prior_quality_rationale = match row
+            .prior_quality_rationale_artifact_id
+            .map(ArtifactId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?
+        {
+            Some(artifact_id) => Some(self.reference(artifact_id).await?),
+            None => None,
+        };
+        let prior_quality_risks = match row
+            .prior_quality_risks_artifact_id
+            .map(ArtifactId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?
+        {
+            Some(artifact_id) => Some(self.reference(artifact_id).await?),
+            None => None,
+        };
+        let architect_rationale = match row
+            .architect_rationale_artifact_id
+            .map(ArtifactId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?
+        {
+            Some(artifact_id) => Some(self.reference(artifact_id).await?),
+            None => None,
+        };
+        Ok(DurableCandidateEvidence {
+            changed_paths: self
+                .reference(
+                    ArtifactId::new(row.changed_paths_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            regression_patch: self
+                .reference(
+                    ArtifactId::new(row.regression_patch_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            regression_command_set: self
+                .reference(
+                    ArtifactId::new(row.regression_command_set_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            regression_log: self
+                .reference(
+                    ArtifactId::new(row.regression_log_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            candidate_patch: self
+                .reference(
+                    ArtifactId::new(row.patch_artifact_id).map_err(|error| error.to_string())?,
+                )
+                .await?,
+            engineering_report: self
+                .reference(
+                    ArtifactId::new(row.engineering_report_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            engineering_risks: self
+                .reference(
+                    ArtifactId::new(row.engineering_risks_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            hard_validation_command_set: self
+                .reference(
+                    ArtifactId::new(row.hard_validation_command_set_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            hard_validation_log: self
+                .reference(
+                    ArtifactId::new(row.hard_validation_log_artifact_id)
+                        .map_err(|error| error.to_string())?,
+                )
+                .await?,
+            prior_quality_additional_probes,
+            prior_quality_rationale,
+            prior_quality_risks,
+            architect_rationale,
         })
     }
 
@@ -1250,7 +1711,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
         caller_expected_attempt_revision: ExpectedRevision,
     ) -> ArchitectTransitionFuture<'a, ResolvedReleaseTransition> {
         Box::pin(async move {
-            let row = sqlx::query(
+            let row = sqlx::query!(
                 "SELECT ta.revision AS attempt_revision, tr.revision AS ticket_revision,
                         tr.application_revision_id, tr.proposal_artifact_id,
                         tr.reproducer_artifact_id, c.kernel_build_id,
@@ -1260,8 +1721,8 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                    JOIN factory.campaigns c ON c.id = ta.campaign_id
                    JOIN factory.kernel_builds kb ON kb.id = c.kernel_build_id
                   WHERE ta.id = $1 AND ta.stage IN (8, 9) AND ta.released_at IS NULL",
+                ticket_attempt_id.get(),
             )
-            .bind(ticket_attempt_id.get())
             .fetch_optional(&self.store.pool_for_authority())
             .await
             .map_err(|error| ArchitectTransitionResolutionError::Precondition {
@@ -1271,23 +1732,25 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 message: "ticket attempt is not a failed or cancelled unreleased attempt"
                     .to_owned(),
             })?;
-            let attempt_revision = revision(&row, "attempt_revision").map_err(precondition)?;
+            let attempt_revision = persisted_revision(row.attempt_revision, "attempt revision")
+                .map_err(precondition)?;
             if caller_expected_attempt_revision.get() != attempt_revision {
                 return Err(ArchitectTransitionResolutionError::RevisionConflict {
                     expected: caller_expected_attempt_revision.get().get(),
                     current: attempt_revision.get(),
                 });
             }
-            let application_revision_id = ApplicationRevisionId::new(
-                field(&row, "application_revision_id").map_err(precondition)?,
-            )
-            .map_err(|error| precondition(error.to_string()))?;
+            let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
+                .map_err(|error| precondition(error.to_string()))?;
             let application = self
                 .load_application(application_revision_id)
                 .await
                 .map_err(precondition)?;
             let proposal_bytes = self
-                .artifact_bytes(artifact_id(&row, "proposal_artifact_id").map_err(precondition)?)
+                .artifact_bytes(
+                    ArtifactId::new(row.proposal_artifact_id)
+                        .map_err(|error| precondition(error.to_string()))?,
+                )
                 .await
                 .map_err(precondition)?;
             let proposal = parse_product_ticket_proposal_v1(
@@ -1299,7 +1762,10 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 .await
                 .map_err(precondition)?;
             let profile_bytes = self
-                .artifact_bytes(artifact_id(&row, "reproducer_artifact_id").map_err(precondition)?)
+                .artifact_bytes(
+                    ArtifactId::new(row.reproducer_artifact_id)
+                        .map_err(|error| precondition(error.to_string()))?,
+                )
                 .await
                 .map_err(precondition)?;
             let stored_profile = parse_command_profile_v1(&profile_bytes).map_err(|error| {
@@ -1345,7 +1811,8 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 .map_err(|error| {
                     precondition(format!("current-head reproducer failed to run: {error}"))
                 })?;
-            let kernel_build_id = kernel_build_id(&row, "build_digest").map_err(precondition)?;
+            let kernel_build_id =
+                kernel_build_id_bytes(row.build_digest, "build digest").map_err(precondition)?;
             let principal = "kernel-architect-requalification";
             let command_prefix = format!("requalification-attempt-{}", ticket_attempt_id.get());
             let process = self.store.process_store();
@@ -1372,7 +1839,8 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
             Ok(ResolvedReleaseTransition {
                 expected_attempt_revision: ExpectedRevision::new(attempt_revision),
                 expected_ticket_revision: ExpectedRevision::new(
-                    revision(&row, "ticket_revision").map_err(precondition)?,
+                    persisted_revision(row.ticket_revision, "ticket revision")
+                        .map_err(precondition)?,
                 ),
                 requalification: crate::ticket_store::CurrentHeadRequalification {
                     current_head_commit: application
@@ -1395,7 +1863,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
         caller_expected_candidate_revision: ExpectedRevision,
     ) -> ArchitectTransitionFuture<'a, ResolvedCandidateDecisionTransition> {
         Box::pin(async move {
-            let row = sqlx::query(
+            let row = sqlx::query!(
                 "SELECT c.revision AS candidate_revision, ta.revision AS attempt_revision,
                         tr.revision AS ticket_revision
                    FROM factory.candidates c
@@ -1403,9 +1871,9 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
                    JOIN factory.reviews r ON r.candidate_id = c.id
                   WHERE c.id = $1 AND r.id = $2",
+                candidate_id.get(),
+                review_id.get(),
             )
-            .bind(candidate_id.get())
-            .bind(review_id.get())
             .fetch_optional(&self.store.pool_for_authority())
             .await
             .map_err(|error| ArchitectTransitionResolutionError::Precondition {
@@ -1414,7 +1882,9 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
             .ok_or_else(|| ArchitectTransitionResolutionError::Precondition {
                 message: "candidate decision does not name its exact persisted review".to_owned(),
             })?;
-            let candidate_revision = revision(&row, "candidate_revision").map_err(precondition)?;
+            let candidate_revision =
+                persisted_revision(row.candidate_revision, "candidate revision")
+                    .map_err(precondition)?;
             if caller_expected_candidate_revision.get() != candidate_revision {
                 return Err(ArchitectTransitionResolutionError::RevisionConflict {
                     expected: caller_expected_candidate_revision.get().get(),
@@ -1424,10 +1894,12 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
             Ok(ResolvedCandidateDecisionTransition {
                 expected_candidate_revision: ExpectedRevision::new(candidate_revision),
                 expected_attempt_revision: ExpectedRevision::new(
-                    revision(&row, "attempt_revision").map_err(precondition)?,
+                    persisted_revision(row.attempt_revision, "attempt revision")
+                        .map_err(precondition)?,
                 ),
                 expected_ticket_revision: ExpectedRevision::new(
-                    revision(&row, "ticket_revision").map_err(precondition)?,
+                    persisted_revision(row.ticket_revision, "ticket revision")
+                        .map_err(precondition)?,
                 ),
             })
         })
@@ -1459,11 +1931,59 @@ pub struct DurableAssignmentLaunchContext {
     /// Exact sealed Product contract upstream of an Engineering/Quality
     /// assignment. Product has no preceding ticket proposal.
     pub proposal: Option<SealedArtifactReferenceV1>,
+    /// Bounded, named immutable evidence closure rendered into the assignment
+    /// target.  It is intentionally not a metadata map: each reference has a
+    /// stable meaning, is re-verified from CAS here, and can be allowlisted by
+    /// `artifact.read` without granting arbitrary CAS navigation.
+    pub evidence: DurableAssignmentEvidence,
     /// Application-required paths, exactly as admitted with the application.
     pub application_required_reads: Vec<RequiredReadV1>,
     /// Ticket-specific contract reads, parsed from the sealed admitted
     /// proposal. Product has none because it has no upstream ticket target.
     pub ticket_contract_reads: Vec<TicketContractReadV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableAssignmentEvidence {
+    pub proposal: Option<DurableProposalEvidence>,
+    pub candidate: Option<DurableCandidateEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableProposalEvidence {
+    pub proposal: SealedArtifactReferenceV1,
+    pub narrative: SealedArtifactReferenceV1,
+    pub evidence: SealedArtifactReferenceV1,
+    pub reproducer_command: SealedArtifactReferenceV1,
+    pub reproducer_stdin: Option<SealedArtifactReferenceV1>,
+    pub expected_observation: DurableObservationEvidence,
+    pub first_observation: DurableObservationEvidence,
+    pub second_observation: DurableObservationEvidence,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableObservationEvidence {
+    pub stdout: SealedArtifactReferenceV1,
+    pub stderr: SealedArtifactReferenceV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableCandidateEvidence {
+    pub changed_paths: SealedArtifactReferenceV1,
+    pub regression_patch: SealedArtifactReferenceV1,
+    pub regression_command_set: SealedArtifactReferenceV1,
+    pub regression_log: SealedArtifactReferenceV1,
+    pub candidate_patch: SealedArtifactReferenceV1,
+    pub engineering_report: SealedArtifactReferenceV1,
+    pub engineering_risks: SealedArtifactReferenceV1,
+    pub hard_validation_command_set: SealedArtifactReferenceV1,
+    pub hard_validation_log: SealedArtifactReferenceV1,
+    /// Rework Quality must receive the prior additional-probes receipt as
+    /// immutable evidence, rather than reconstructing it from a review row.
+    pub prior_quality_additional_probes: Option<SealedArtifactReferenceV1>,
+    pub prior_quality_rationale: Option<SealedArtifactReferenceV1>,
+    pub prior_quality_risks: Option<SealedArtifactReferenceV1>,
+    pub architect_rationale: Option<SealedArtifactReferenceV1>,
 }
 
 /// Narrow daemon-driver delivery input. All repository, tree, commit, and
@@ -1542,7 +2062,7 @@ struct CandidateRecovery {
     product_reproducer: DeterministicCommand,
     full_suite: Vec<DeterministicCommand>,
     hard_validation_id: Option<factory_protocol::ValidationId>,
-    commit: CandidateCommitPolicy,
+    engineering_started_at_seconds: i64,
 }
 
 #[derive(Serialize)]
@@ -1643,65 +2163,17 @@ fn worktree_name(prefix: &str, session_id: i64) -> Result<WorktreeName, String> 
         .map_err(|error| format!("derived worktree name is invalid: {error}"))
 }
 
-fn field<T>(row: &PgRow, name: &str) -> Result<T, String>
-where
-    for<'r> T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
-    for<'r> &'r str: sqlx::ColumnIndex<PgRow>,
-{
-    row.try_get(name)
-        .map_err(|error| format!("durable field {name} is corrupt: {error}"))
-}
-
-fn optional_positive<T>(
-    row: &PgRow,
-    name: &str,
-    parse: impl FnOnce(i64) -> Result<T, factory_protocol::ContractError>,
-) -> Result<Option<T>, String> {
-    let value: Option<i64> = field(row, name)?;
-    value
-        .map(parse)
-        .transpose()
-        .map_err(|error| format!("durable field {name} is invalid: {error}"))
-}
-
-fn artifact_id(row: &PgRow, name: &str) -> Result<ArtifactId, String> {
-    ArtifactId::new(field(row, name)?).map_err(|error| error.to_string())
-}
-
-fn revision(row: &PgRow, name: &str) -> Result<AggregateRevision, String> {
-    let value: i64 = field(row, name)?;
+fn persisted_revision(value: i64, name: &str) -> Result<AggregateRevision, String> {
     let value = u64::try_from(value).map_err(|_| format!("durable revision {name} is negative"))?;
     Ok(AggregateRevision::from_persisted(value))
 }
 
-fn object(row: &PgRow, name: &str) -> Result<RepositoryObjectIdV1, String> {
-    RepositoryObjectIdV1::parse(field::<String>(row, name)?).map_err(|error| error.to_string())
-}
-
-fn commit(row: &PgRow, name: &str) -> Result<GitCommitId, String> {
-    GitCommitId::parse(field::<String>(row, name)?).map_err(|error| error.to_string())
-}
-
-fn tree(row: &PgRow, name: &str) -> Result<GitTreeId, String> {
-    GitTreeId::parse(field::<String>(row, name)?).map_err(|error| error.to_string())
-}
-
-fn kernel_build_id(row: &PgRow, name: &str) -> Result<KernelBuildId, String> {
-    let bytes: Vec<u8> = field(row, name)?;
+fn kernel_build_id_bytes(bytes: Vec<u8>, name: &str) -> Result<KernelBuildId, String> {
     let bytes: [u8; 32] = bytes
         .as_slice()
         .try_into()
         .map_err(|_| format!("durable field {name} is not a BLAKE3 digest"))?;
     Ok(KernelBuildId::new(ContentDigest::from_bytes(bytes)))
-}
-
-fn digest(row: &PgRow, name: &str) -> Result<ContentDigest, String> {
-    let bytes: Vec<u8> = field(row, name)?;
-    let bytes: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("durable field {name} is not a BLAKE3 digest"))?;
-    Ok(ContentDigest::from_bytes(bytes))
 }
 
 fn db_error(error: sqlx::Error) -> String {

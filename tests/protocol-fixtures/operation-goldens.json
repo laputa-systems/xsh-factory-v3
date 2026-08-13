@@ -498,8 +498,7 @@
       "aggregate_revision": 8,
       "candidate_id": 50,
       "validation_id": 51,
-      "candidate_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "candidate_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "candidate_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "quality.run_full_suite": {
       "protocol_version": 1,
@@ -599,6 +598,21 @@
       "downstream_ticket_attempt_revision": 4,
       "downstream_candidate_id": 92,
       "downstream_candidate_revision": 5,
+      "downstream_evidence": {
+        "candidate_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "latest_validation": {
+          "validation_id": 96,
+          "state": "passed",
+          "log_artifact_id": 97
+        },
+        "review": {
+          "review_id": 98,
+          "review_revision": 2,
+          "verdict": "accept",
+          "rationale_artifact_id": 99
+        },
+        "architect_decision": null
+      },
       "ready_low_water": 1,
       "ready_target": 2,
       "ready_maximum": 3,

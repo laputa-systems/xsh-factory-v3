@@ -7,9 +7,9 @@
 //! or interpret a product-specific proposal.
 
 use factory_protocol::{
-    AggregateRevision, ApplicationRevisionId, ArtifactId, CampaignId, CandidateId, ContentDigest,
-    ExpectedRevision, TicketAttemptId, TicketAttemptStage, TicketBoundsV1, TicketId,
-    TicketRevisionId, TicketState,
+    AggregateRevision, ApplicationRevisionId, ArchitectDecisionId, ArtifactId, CampaignId,
+    CandidateId, ContentDigest, ExpectedRevision, ReviewId, TicketAttemptId, TicketAttemptStage,
+    TicketBoundsV1, TicketId, TicketRevisionId, TicketState, ValidationId,
 };
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -189,6 +189,16 @@ pub struct TicketAttemptReceipt {
     pub was_idempotent_retry: bool,
 }
 
+/// The current pair of durable optimistic-concurrency fences needed to close
+/// an attempt after a daemon-owned assignment fault. This is read-only and is
+/// not an alternate transition: [`FailTicketAttempt`] still locks and checks
+/// both values atomically before it writes the terminal stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TicketAttemptFailureContext {
+    pub attempt_revision: AggregateRevision,
+    pub ticket_revision: AggregateRevision,
+}
+
 /// Explicitly releases a failed attempt after a successful current-head
 /// requalification. A resolved or divergent fresh head remains terminal; it
 /// never silently returns to the ready buffer.
@@ -254,6 +264,10 @@ pub struct TicketBufferStatus {
     /// same bounded read as `downstream_attempt_count`; a missing context with
     /// a nonzero count is intentionally left for the scheduler to fail closed.
     pub downstream_action: Option<DownstreamActionContext>,
+    /// Bounded immutable evidence attached to the exact downstream candidate.
+    /// It explains the action without making a status poll discover later
+    /// candidates or issue an unbounded navigation query.
+    pub downstream_evidence: Option<DownstreamEvidenceContext>,
     pub paid_session_active: bool,
     pub low_water: u32,
     pub target: u32,
@@ -370,8 +384,178 @@ pub struct DownstreamActionContext {
     pub stage: DownstreamActionStage,
     pub ticket_attempt_id: TicketAttemptId,
     pub ticket_attempt_revision: AggregateRevision,
+    /// The ticket's exact optimistic revision lets terminal-failure custody
+    /// release only this downstream work item without rediscovering it.
+    pub ticket_revision: AggregateRevision,
     pub candidate_id: CandidateId,
     pub candidate_revision: AggregateRevision,
+}
+
+/// Closed immutable evidence currently attached to the downstream FIFO head.
+/// The owning candidate remains the exact `DownstreamActionContext` candidate;
+/// these rows cannot grant a transition and are presentation-only facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DownstreamEvidenceContext {
+    pub candidate_commit: Option<String>,
+    pub latest_validation: Option<DownstreamValidationEvidence>,
+    pub review: Option<DownstreamReviewEvidence>,
+    pub architect_decision: Option<DownstreamArchitectDecisionEvidence>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DownstreamValidationEvidence {
+    pub validation_id: ValidationId,
+    pub state: DownstreamValidationState,
+    pub log_artifact_id: ArtifactId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownstreamValidationState {
+    Passed,
+    Failed,
+    Interrupted,
+}
+
+impl DownstreamValidationState {
+    fn from_sql(value: i16) -> Result<Self, StoreError> {
+        match value {
+            1 => Ok(Self::Passed),
+            2 => Ok(Self::Failed),
+            3 => Ok(Self::Interrupted),
+            _ => Err(StoreError::CorruptLifecycleColumn),
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DownstreamReviewEvidence {
+    pub review_id: ReviewId,
+    pub revision: AggregateRevision,
+    pub verdict: DownstreamReviewVerdict,
+    pub rationale_artifact_id: ArtifactId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownstreamReviewVerdict {
+    Accept,
+    Reject,
+}
+
+impl DownstreamReviewVerdict {
+    fn from_sql(value: i16) -> Result<Self, StoreError> {
+        match value {
+            0 => Ok(Self::Accept),
+            1 => Ok(Self::Reject),
+            _ => Err(StoreError::CorruptLifecycleColumn),
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Reject => "reject",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DownstreamArchitectDecisionEvidence {
+    pub architect_decision_id: ArchitectDecisionId,
+    pub kind: DownstreamArchitectDecisionKind,
+    pub rationale_artifact_id: ArtifactId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownstreamArchitectDecisionKind {
+    Deliver,
+    Rework,
+    Reject,
+}
+
+impl DownstreamArchitectDecisionKind {
+    fn from_sql(value: i16) -> Result<Self, StoreError> {
+        match value {
+            2 => Ok(Self::Deliver),
+            3 => Ok(Self::Rework),
+            4 => Ok(Self::Reject),
+            _ => Err(StoreError::CorruptLifecycleColumn),
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Deliver => "deliver",
+            Self::Rework => "rework",
+            Self::Reject => "reject",
+        }
+    }
+}
+
+fn downstream_validation_evidence(
+    validation_id: Option<i64>,
+    lifecycle: Option<i16>,
+    log_artifact_id: Option<i64>,
+) -> Result<Option<DownstreamValidationEvidence>, StoreError> {
+    match (validation_id, lifecycle, log_artifact_id) {
+        (None, None, None) => Ok(None),
+        (Some(validation_id), Some(lifecycle), Some(log_artifact_id)) => {
+            Ok(Some(DownstreamValidationEvidence {
+                validation_id: ValidationId::new(validation_id)?,
+                state: DownstreamValidationState::from_sql(lifecycle)?,
+                log_artifact_id: ArtifactId::new(log_artifact_id)?,
+            }))
+        }
+        _ => Err(StoreError::CorruptLifecycleColumn),
+    }
+}
+
+fn downstream_review_evidence(
+    review_id: Option<i64>,
+    revision: Option<i64>,
+    verdict: Option<i16>,
+    rationale_artifact_id: Option<i64>,
+) -> Result<Option<DownstreamReviewEvidence>, StoreError> {
+    match (review_id, revision, verdict, rationale_artifact_id) {
+        (None, None, None, None) => Ok(None),
+        (Some(review_id), Some(revision), Some(verdict), Some(rationale_artifact_id)) => {
+            Ok(Some(DownstreamReviewEvidence {
+                review_id: ReviewId::new(review_id)?,
+                revision: revision_from_sql(revision)?,
+                verdict: DownstreamReviewVerdict::from_sql(verdict)?,
+                rationale_artifact_id: ArtifactId::new(rationale_artifact_id)?,
+            }))
+        }
+        _ => Err(StoreError::CorruptLifecycleColumn),
+    }
+}
+
+fn downstream_architect_decision_evidence(
+    architect_decision_id: Option<i64>,
+    kind: Option<i16>,
+    rationale_artifact_id: Option<i64>,
+) -> Result<Option<DownstreamArchitectDecisionEvidence>, StoreError> {
+    match (architect_decision_id, kind, rationale_artifact_id) {
+        (None, None, None) => Ok(None),
+        (Some(architect_decision_id), Some(kind), Some(rationale_artifact_id)) => {
+            Ok(Some(DownstreamArchitectDecisionEvidence {
+                architect_decision_id: ArchitectDecisionId::new(architect_decision_id)?,
+                kind: DownstreamArchitectDecisionKind::from_sql(kind)?,
+                rationale_artifact_id: ArtifactId::new(rationale_artifact_id)?,
+            }))
+        }
+        _ => Err(StoreError::CorruptLifecycleColumn),
+    }
 }
 
 /// Read-only immutable application inputs needed for proposal admission.
@@ -923,6 +1107,24 @@ impl TicketStore {
         })
     }
 
+    /// Reads the exact current failure fence without accepting any actor
+    /// identity or state transition. The resident driver uses it only after a
+    /// selected launch has failed, then immediately supplies it to the typed
+    /// failure command above. A concurrent change turns that command into a
+    /// revision conflict rather than a guessed retry.
+    pub async fn failure_context(
+        &self,
+        ticket_attempt_id: TicketAttemptId,
+    ) -> Result<TicketAttemptFailureContext, StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let attempt = ticket_attempt_status(&mut transaction, ticket_attempt_id).await?;
+        transaction.commit().await?;
+        Ok(TicketAttemptFailureContext {
+            attempt_revision: attempt.revision,
+            ticket_revision: attempt.ticket_revision,
+        })
+    }
+
     pub async fn release_ticket_attempt(
         &self,
         command: &ReleaseTicketAttempt,
@@ -1168,7 +1370,8 @@ impl TicketStore {
         // than skipping work and selecting a later row.
         let downstream = sqlx::query!(
             "WITH downstream AS (
-                 SELECT ta.id, ta.revision, ta.stage, ta.created_at
+                 SELECT ta.id, ta.revision, ta.stage, ta.created_at,
+                        tr.revision AS ticket_revision
                  FROM factory.ticket_attempts AS ta
                  JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id
                  JOIN factory.application_revisions AS ticket_application
@@ -1179,15 +1382,26 @@ impl TicketStore {
              SELECT (SELECT count(*)::BIGINT FROM downstream) AS \"count!\",
                     head.id AS \"ticket_attempt_id?\",
                     head.revision AS \"ticket_attempt_revision?\",
+                    head.ticket_revision AS \"ticket_revision?\",
                     head.stage AS \"ticket_attempt_stage?\",
                     candidate.id AS \"candidate_id?\",
                     candidate.revision AS \"candidate_revision?\",
                     candidate.lifecycle AS \"candidate_lifecycle?\",
+                    candidate.candidate_commit AS \"candidate_commit?\",
                     candidate.candidate_commit IS NOT NULL AS \"candidate_commit_present?\",
-                    review.id AS \"quality_review_id?\"
+                    validation.id AS \"validation_id?\",
+                    validation.lifecycle AS \"validation_lifecycle?\",
+                    validation.log_artifact_id AS \"validation_log_artifact_id?\",
+                    review.id AS \"quality_review_id?\",
+                    review.revision AS \"review_revision?\",
+                    review.verdict AS \"review_verdict?\",
+                    review.rationale_artifact_id AS \"review_rationale_artifact_id?\",
+                    decision.id AS \"architect_decision_id?\",
+                    decision.decision_kind AS \"architect_decision_kind?\",
+                    decision.rationale_artifact_id AS \"architect_decision_rationale_artifact_id?\"
              FROM (SELECT 1) AS singleton
              LEFT JOIN LATERAL (
-                 SELECT id, revision, stage
+                 SELECT id, revision, stage, ticket_revision
                  FROM downstream
                  ORDER BY created_at ASC, id ASC
                  LIMIT 1
@@ -1199,7 +1413,21 @@ impl TicketStore {
                  ORDER BY created_at DESC, id DESC
                  LIMIT 1
              ) AS candidate ON TRUE
-             LEFT JOIN factory.reviews AS review ON review.candidate_id = candidate.id",
+             LEFT JOIN LATERAL (
+                 SELECT id, lifecycle, log_artifact_id
+                 FROM factory.validations
+                 WHERE candidate_id = candidate.id
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             ) AS validation ON TRUE
+             LEFT JOIN factory.reviews AS review ON review.candidate_id = candidate.id
+             LEFT JOIN LATERAL (
+                 SELECT id, decision_kind, rationale_artifact_id
+                 FROM factory.architect_decisions
+                 WHERE candidate_id = candidate.id
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             ) AS decision ON TRUE",
             application_key,
             ATTEMPT_HARD_VALIDATION,
             ATTEMPT_REWORK_QUALITY,
@@ -1235,6 +1463,36 @@ impl TicketStore {
         )
         .fetch_optional(&self.pool)
         .await?;
+        let downstream_evidence = match downstream.candidate_id {
+            Some(_) => Some(DownstreamEvidenceContext {
+                candidate_commit: downstream.candidate_commit,
+                latest_validation: downstream_validation_evidence(
+                    downstream.validation_id,
+                    downstream.validation_lifecycle,
+                    downstream.validation_log_artifact_id,
+                )?,
+                review: downstream_review_evidence(
+                    downstream.quality_review_id,
+                    downstream.review_revision,
+                    downstream.review_verdict,
+                    downstream.review_rationale_artifact_id,
+                )?,
+                architect_decision: downstream_architect_decision_evidence(
+                    downstream.architect_decision_id,
+                    downstream.architect_decision_kind,
+                    downstream.architect_decision_rationale_artifact_id,
+                )?,
+            }),
+            None => {
+                if downstream.validation_id.is_some()
+                    || downstream.quality_review_id.is_some()
+                    || downstream.architect_decision_id.is_some()
+                {
+                    return Err(StoreError::CorruptLifecycleColumn);
+                }
+                None
+            }
+        };
         Ok(TicketBufferStatus {
             campaign_id,
             campaign_revision: revision_from_sql(campaign.revision)?,
@@ -1250,6 +1508,7 @@ impl TicketStore {
             downstream_action: match (
                 downstream.ticket_attempt_id,
                 downstream.ticket_attempt_revision,
+                downstream.ticket_revision,
                 downstream.ticket_attempt_stage,
                 downstream.candidate_id,
                 downstream.candidate_revision,
@@ -1259,6 +1518,7 @@ impl TicketStore {
                 (
                     Some(ticket_attempt_id),
                     Some(ticket_attempt_revision),
+                    Some(ticket_revision),
                     Some(ticket_attempt_stage),
                     Some(candidate_id),
                     Some(candidate_revision),
@@ -1275,6 +1535,7 @@ impl TicketStore {
                         stage,
                         ticket_attempt_id: TicketAttemptId::new(ticket_attempt_id)?,
                         ticket_attempt_revision: revision_from_sql(ticket_attempt_revision)?,
+                        ticket_revision: revision_from_sql(ticket_revision)?,
                         candidate_id: CandidateId::new(candidate_id)?,
                         candidate_revision: revision_from_sql(candidate_revision)?,
                     })
@@ -1282,6 +1543,7 @@ impl TicketStore {
                 .transpose()?,
                 _ => None,
             },
+            downstream_evidence,
             paid_session_active,
             low_water: u32_from_sql(i64::from(campaign.ticket_low_water), "low water")?,
             target: u32_from_sql(i64::from(campaign.ticket_target), "ticket target")?,
