@@ -38,17 +38,16 @@ const command = (
   expected_exit_status,
 });
 
-// Product opportunities are admitted as exact commands rather than actor-made
-// shell strings. Each one names a known ignored conformance vector whose
-// desired state is a passing test; Product can therefore prove a real gap
-// twice without inventing a new execution boundary.
-const ignoredVector = (name: string, test_name: string) =>
-  command(
-    name,
-    ["test", "--locked", test_name, "--", "--ignored"],
-    300_000,
-    4_194_304,
-  );
+// Product gets one closed execution boundary and supplies the XSH program as
+// sealed stdin. The command is generic enough for a fresh behavior discovery,
+// while the kernel still checks its exact argv, executable, environment, and
+// resulting evidence before any proposal can advance.
+const xshProgramReproducer = command(
+  "xsh_program_reproducer",
+  ["run", "--quiet", "--locked", "--bin", "xsh", "--", "/dev/stdin"],
+  300_000,
+  4_194_304,
+);
 
 const commonActorTools: readonly ActorToolV1[] = [
   "workspace_read",
@@ -64,13 +63,13 @@ const commonActorTools: readonly ActorToolV1[] = [
   "publication_create",
 ];
 
-// Product is deliberately a narrow evidence collector.  It can read the
-// assigned contracts, make the one supplied reproduction run, seal that
-// observation, and submit it.  Source discovery, implementation, and review
-// belong to the later assignments, so exposing their tools here only creates
-// duplicated paid work.
+// Product may inspect the assigned source and contracts, but it cannot mutate
+// the checkout or perform lifecycle work. Its final reproducer remains the
+// one admitted cargo command with a sealed XSH program as stdin.
 const productActorTools: readonly ActorToolV1[] = [
   "workspace_read",
+  "workspace_search",
+  "workspace_list",
   "shell",
   "artifact_seal",
   "product_submit_ticket",
@@ -168,10 +167,9 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This Engineering-budget correction succeeds active application revision 14.
-  // Pinning that exact bundle makes the change append-only rather than an
-  // accidental application fork.
-  predecessor_bundle: "3a4f96e5424b84d9eba1fa2a9a999bcf63e80ea6578b06dafe24d180bc6ed9c3",
+  // This fresh Product surface succeeds the spent SHA-crypt probe bundle
+  // admitted as application revision 15.
+  predecessor_bundle: "da91d76dbb6acd46c9b59b0028d99794f57a2c8bcce676afb0dfefcfd6a46c37",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -195,7 +193,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
       ),
       tools: productActorTools,
       model: productModel,
-      limits: { turn_limit: 12, wall_limit_millis: 600_000, output_byte_limit: 16_777_216 },
+      limits: { turn_limit: 24, wall_limit_millis: 900_000, output_byte_limit: 16_777_216 },
     },
     {
       assignment_role: "engineering",
@@ -258,10 +256,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
     { path: "docs/CHAPTER-01-why-xsh.md", reason: "product mission" },
     { path: "docs/TEST-MAP.md", reason: "authoritative validation map" },
   ],
-  reproducer_profiles: [
-    ignoredVector("sha256_crypt_vector", "sha256_drepper_vector"),
-    ignoredVector("sha512_crypt_vector", "sha512_drepper_vector"),
-  ],
+  reproducer_profiles: [xshProgramReproducer],
   validation_profiles: {
     focused: [command("focused", ["test", "--locked", "-p", "xsh", "--lib"], 900_000, 67_108_864)],
     // `cargo test` includes integration coverage that assumes a product

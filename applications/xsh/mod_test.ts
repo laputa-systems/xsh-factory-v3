@@ -28,16 +28,16 @@ const expectedOfficeTemplates: Readonly<Record<AssignmentRoleV1, readonly [strin
   quality: ["templates/quality-system.md", "templates/quality-assignment.md"],
 };
 
-Deno.test("XSH worker templates compile deterministically and expose a bounded product portfolio", async () => {
+Deno.test("XSH worker templates compile deterministically and expose a fresh bounded product surface", async () => {
   const first = await compileApplicationV1(xshApplicationV1, sourceRoot());
   const second = await compileApplicationV1(xshApplicationV1, sourceRoot());
 
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "3a4f96e5424b84d9eba1fa2a9a999bcf63e80ea6578b06dafe24d180bc6ed9c3"
+      "da91d76dbb6acd46c9b59b0028d99794f57a2c8bcce676afb0dfefcfd6a46c37"
   ) {
-    throw new Error("the Engineering budget correction must pin the active r14 bundle");
+    throw new Error("the fresh Product surface must pin the active r15 bundle");
   }
   assertExactTemplateDeclaration(first);
 
@@ -53,38 +53,57 @@ Deno.test("XSH worker templates compile deterministically and expose a bounded p
 
   const profiles = xshApplicationV1.reproducer_profiles;
   assertExactStrings(
-    ["sha256_crypt_vector", "sha512_crypt_vector"],
+    ["xsh_program_reproducer"],
     profiles.map((profile) => profile.name),
-    "product opportunity profile names",
+    "product reproducer profile names",
   );
-  for (const profile of profiles) {
-    if (profile.expected_exit_status !== 0) {
-      throw new Error(`${profile.name} must model the expected passing vector`);
-    }
-    if (!profile.argv.includes("--ignored")) {
-      throw new Error(`${profile.name} must explicitly exercise its known ignored vector`);
-    }
+  const reproducer = profiles[0];
+  if (
+    reproducer.expected_exit_status !== 0 ||
+    !("approved_tool" in reproducer.executable) ||
+    reproducer.executable.approved_tool !== "cargo" ||
+    reproducer.argv.join(" ") !== "run --quiet --locked --bin xsh -- /dev/stdin"
+  ) {
+    throw new Error("Product must use the closed generic XSH stdin reproducer");
   }
 
   const productSystem = templateText(first, "templates/product-system.md");
   for (
     const required of [
-      "sha256_drepper_vector",
-      "sha512_drepper_vector",
-      "sha256_crypt_vector",
-      "sha512_crypt_vector",
-      "Submit each independently failing vector",
-      "Do not submit a vector that passes",
-      "single newline stdin artifact",
-      "printf '\\n' > .product-evidence/stdin",
+      "xsh_program_reproducer",
+      "workspace_search",
+      "workspace_list",
+      "smallest XSH program",
+      "same failure",
+      "no defensible reproducible gap",
+      "printf '%s\\n' '<one minimal XSH program>'",
     ]
   ) {
-    assertContains(productSystem, required, "Product portfolio prompt");
+    assertContains(productSystem, required, "Product investigation prompt");
   }
-  if (productSystem.includes("par-map worker index failure")) {
-    throw new Error("Product must not carry the delivered par-map defect into the next portfolio");
+  for (const staleInstruction of [
+    "sha256_drepper_vector",
+    "sha512_drepper_vector",
+    "par-map worker index failure",
+    "Do not search the host, change checkout, inspect source",
+  ]) {
+    if (productSystem.includes(staleInstruction)) {
+      throw new Error(`Product must not retain spent probe instruction ${staleInstruction}`);
+    }
   }
   assertExactRequiredReadInstructions("templates/product-system.md", productSystem);
+
+  const productProfile = profileFor("product_research");
+  if (
+    productProfile.limits.turn_limit !== 24 ||
+    productProfile.limits.wall_limit_millis !== 900_000 ||
+    productProfile.tools.includes("workspace_write") ||
+    productProfile.tools.includes("workspace_edit") ||
+    !productProfile.tools.includes("workspace_search") ||
+    !productProfile.tools.includes("workspace_list")
+  ) {
+    throw new Error("Product must have bounded read-only investigation room");
+  }
 
   const engineeringSystem = templateText(first, "templates/engineering-system.md");
   for (

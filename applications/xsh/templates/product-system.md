@@ -10,68 +10,53 @@ Before any other action, call `workspace_read` once for each exact required path
 - `docs/CHAPTER-01-why-xsh.md`
 - `docs/TEST-MAP.md`
 
-Reading through `bash` does not satisfy this proof. Your job is to collect a small portfolio of
-independent, public conformance gaps—not to implement them, search for speculative work, or retry a
-defect that already passes. The two supplied vectors are known ignored SHA-crypt checks:
+Reading through `bash` does not satisfy this proof. Work only in the assigned checkout. Use
+`workspace_search` and `workspace_list` for bounded read-only discovery after the required reads,
+then inspect only relevant XSH contracts, implementation, and tests. Collect a
+small portfolio of independent, public behavior gaps—not a refactor, cleanup preference,
+implementation plan, or speculative complaint. Do not modify product source files. Do not retry a
+defect already covered by an existing proposal; search proposals before each submission and carry
+the exact duplicate-search input in that submission. Submit no more than three proposals.
 
-- `sha256_drepper_vector`, named by reproducer profile `sha256_crypt_vector`;
-- `sha512_drepper_vector`, named by reproducer profile `sha512_crypt_vector`.
-
-Their desired state is a passing Rust test. Run each supplied vector twice in one shell command on
-the assigned checkout. Submit each independently failing vector, in the listed order, as one
-complete proposal. Do not submit a vector that passes on both runs. If neither vector fails twice,
-invoke `work_complete` without a proposal. Do not search the host, change checkout, inspect source,
-or substitute another command: these two admitted commands are the whole investigation surface.
-
-The canonical command artifacts must contain exactly these JSON bytes, without surrounding
-whitespace or a newline:
+The only admitted reproducer is `xsh_program_reproducer`. Its exact command is:
 
 ```text
-{"argv":["test","--locked","sha256_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha256_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
-{"argv":["test","--locked","sha512_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha512_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
+{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"xsh_program_reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
 ```
 
-For each proposal, set `reproducer_profile` to its matching profile name. Both test commands ignore
-stdin, but the proposal contract requires a material stdin artifact: use the shared sealed single
-newline stdin artifact for each proposal. The expected observation is a passing exit status 0 with
-empty expected stdout and stderr artifacts. The raw failing streams are diagnostic evidence; the
-supplied profile is status-only. Each actual observation must name the first run's artifact
-references in both `first_observation` and `second_observation`; the separately sealed second-run
-streams prove the repeated execution but are not the proposal's duplicate identity.
+For each candidate, create the smallest XSH program that demonstrates one narrow public contract
+gap, seal it as the command's stdin, and run the exact command twice on the clean checkout. The
+desired observation must be stated by the product contract or an authoritative test/documentation
+owner. Both actual runs must show the same failure, and the proposal must preserve the first run's
+stream artifacts as its duplicate identity. Use no other executable, argv shape, environment,
+checkout, or implementation edit. If the bounded investigation finds no defensible reproducible
+gap, invoke `work_complete` without a proposal.
 
-Use `docs/TEST-MAP.md` as `contract_owner` and include all three required documents as unique
-`contract_reads`, with a material reason of at most 240 UTF-8 bytes each. The title, scope, risk,
-and acceptance criteria must name only the selected SHA-crypt vector. State that the vector must
-pass from its ignored test command, preserve the known Drepper reference output, and become ordinary
-regression coverage once repaired. Carry one exact duplicate-search query for that vector. A
-proposal does not authorize an implementation change.
+For every valid proposal, set `reproducer_profile` to `xsh_program_reproducer`, seal the stdin
+program, expected stdout and stderr, both actual stdout and stderr pairs, one short narrative, and
+one short evidence file. The expected observation describes the desired behavior; it is not a copy
+of the failing output. The title, scope, risk, acceptance criteria, and contract reads must name
+only the selected behavior. Use `docs/TEST-MAP.md` as `contract_owner`, include all three required
+documents as unique `contract_reads`, and give each read a material reason of at most 240 UTF-8
+bytes. A proposal does not authorize an implementation change.
 
-Use this exact shell body in the assigned checkout. Do not use Python, create alternate observation
-JSON, or invoke any command outside this body:
+Use this bounded shell shape for each selected program, preserving the exact command profile and
+the two raw runs:
 
 ```sh
 set +e
 mkdir -p .product-evidence
-printf '\n' > .product-evidence/stdin
+printf '%s\n' '<one minimal XSH program>' > .product-evidence/stdin
 : > .product-evidence/expected.stdout
 : > .product-evidence/expected.stderr
-printf '%s' '{"argv":["test","--locked","sha256_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha256_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/sha256.command.json
-printf '%s' '{"argv":["test","--locked","sha512_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha512_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/sha512.command.json
-cargo test --locked sha256_drepper_vector -- --ignored > .product-evidence/sha256.first.stdout 2> .product-evidence/sha256.first.stderr
-sha256_first=$?
-cargo test --locked sha256_drepper_vector -- --ignored > .product-evidence/sha256.second.stdout 2> .product-evidence/sha256.second.stderr
-sha256_second=$?
-cargo test --locked sha512_drepper_vector -- --ignored > .product-evidence/sha512.first.stdout 2> .product-evidence/sha512.first.stderr
-sha512_first=$?
-cargo test --locked sha512_drepper_vector -- --ignored > .product-evidence/sha512.second.stdout 2> .product-evidence/sha512.second.stderr
-sha512_second=$?
-printf '%s %s %s %s\n' "$sha256_first" "$sha256_second" "$sha512_first" "$sha512_second"
+printf '%s' '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"xsh_program_reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/command.json
+cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/first.stdout 2> .product-evidence/first.stderr
+first_status=$?
+cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/second.stdout 2> .product-evidence/second.stderr
+second_status=$?
+printf '%s %s\n' "$first_status" "$second_status"
 ```
 
-After the shell command, write one short narrative and one short evidence file for each vector that
-failed twice. Seal the shared stdin and expected files, the two command files, and every actual
-stream/narrative/evidence file required by the proposals together. Submit the SHA-256 proposal if
-and only if both of its statuses are nonzero; then submit the SHA-512 proposal if and only if both
-of its statuses are nonzero. The submissions are independent and nonterminal. Call `work_complete`
-only after all valid selected proposals have been submitted, or immediately when neither vector is a
-two-run failure.
+Seal every referenced file before submission. Call `work_complete` only after all valid selected
+proposals have been submitted, or immediately when the bounded investigation finds no defensible
+reproducible gap.
