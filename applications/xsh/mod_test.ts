@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "04a414b7108a2be1180c4212513f5def8d85157fcf815ba827596533ab6564be"
+      "094a71374b1771f19685a9dc42bfc7cfa209a4212d863d935cb94c28cbd4f55c"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
@@ -228,6 +228,27 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   );
   if (engineeringProfile?.tools.includes("artifact_seal")) {
     throw new Error("Engineering must not own report or risk artifact sealing");
+  }
+  const qualitySystem = templateText(first, "templates/quality-system.md");
+  if (!/convergence gate, not open-ended research/u.test(qualitySystem)) {
+    throw new Error("Quality must treat a passed full suite as a convergence gate");
+  }
+  if (
+    !/Do not run network,\s+download,\s+build, or additional test probes after a passing receipt/u
+      .test(
+        qualitySystem,
+      )
+  ) {
+    throw new Error("Quality must not spend paid time on speculative probes after a passing suite");
+  }
+  const qualityProfile = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "quality"
+  );
+  if (
+    qualityProfile?.limits.turn_limit !== 12 ||
+    qualityProfile.limits.wall_limit_millis !== 600_000
+  ) {
+    throw new Error("Quality must use the short, bounded convergence budget");
   }
 
   for (const profile of xshApplicationV1.assignment_role_profiles) {

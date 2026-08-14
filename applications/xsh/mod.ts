@@ -156,10 +156,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This policy revision succeeds the active registered revision. Pinning
+  // This policy revision succeeds active application revision 9. Pinning
   // that exact bundle makes the model-policy change append-only rather than
   // an accidental application fork.
-  predecessor_bundle: "04a414b7108a2be1180c4212513f5def8d85157fcf815ba827596533ab6564be",
+  predecessor_bundle: "094a71374b1771f19685a9dc42bfc7cfa209a4212d863d935cb94c28cbd4f55c",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -227,7 +227,10 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
         "quality_submit_review",
       ],
       model: researchReviewModel,
-      limits: { turn_limit: 24, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
+      // Quality is a bounded convergence review after kernel validation, not
+      // a second open-ended research session. Twelve turns cover the three
+      // required reads, evidence seals, full-suite receipt, and one verdict.
+      limits: { turn_limit: 12, wall_limit_millis: 600_000, output_byte_limit: 67_108_864 },
     },
   ],
   ticket_policy: xshProductTicketPolicyV1,
