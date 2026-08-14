@@ -264,7 +264,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     profile.assignment_role === "quality"
   );
   if (
-    qualityProfile?.limits.turn_limit !== 12 ||
+    qualityProfile?.limits.turn_limit !== 16 ||
     qualityProfile.limits.wall_limit_millis !== 600_000
   ) {
     throw new Error("Quality must use the short, bounded convergence budget");

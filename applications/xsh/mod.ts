@@ -232,9 +232,10 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
       ],
       model: researchReviewModel,
       // Quality is a bounded convergence review after kernel validation, not
-      // a second open-ended research session. Twelve turns cover the three
-      // required reads, evidence seals, full-suite receipt, and one verdict.
-      limits: { turn_limit: 12, wall_limit_millis: 600_000, output_byte_limit: 67_108_864 },
+      // a second open-ended research session. Sixteen turns leave enough room
+      // for required reads, one focused inspection, the full-suite receipt,
+      // three evidence seals, and one verdict without creating an abort loop.
+      limits: { turn_limit: 16, wall_limit_millis: 600_000, output_byte_limit: 67_108_864 },
     },
   ],
   ticket_policy: xshProductTicketPolicyV1,
