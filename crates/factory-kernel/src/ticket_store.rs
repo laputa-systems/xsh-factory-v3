@@ -1176,10 +1176,25 @@ impl TicketStore {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(StoreError::TicketAttemptNotReleasable)?;
+        let prior_quality_retry_exists = sqlx::query_scalar!(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM factory.audit_log
+                 WHERE operation = $1
+                   AND subject_kind = $2
+                   AND subject_id = $3
+             ) AS \"exists!\"",
+            QUALITY_RETRY_OPERATION,
+            QUALITY_RETRY_SUBJECT,
+            command.ticket_attempt_id.get(),
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
         if !can_retry_quality_attempt(
             attempt.stage,
             candidate.lifecycle,
             candidate.candidate_commit.is_some(),
+            prior_quality_retry_exists,
         ) {
             return Err(StoreError::TicketAttemptNotReleasable);
         }
@@ -1246,6 +1261,13 @@ impl TicketStore {
                )
                AND NOT EXISTS (
                    SELECT 1
+                   FROM factory.audit_log AS retry
+                   WHERE retry.operation = $5
+                     AND retry.subject_kind = $6
+                     AND retry.subject_id = ta.id
+               )
+               AND NOT EXISTS (
+                   SELECT 1
                    FROM factory.candidates AS newer
                    JOIN factory.ticket_attempts AS newer_attempt
                      ON newer_attempt.id = newer.ticket_attempt_id
@@ -1258,6 +1280,8 @@ impl TicketStore {
             ATTEMPT_FAILED,
             TICKET_IN_FLIGHT,
             CANDIDATE_VALIDATED,
+            QUALITY_RETRY_OPERATION,
+            QUALITY_RETRY_SUBJECT,
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -2456,10 +2480,12 @@ fn can_retry_quality_attempt(
     attempt_stage: i16,
     candidate_lifecycle: i16,
     candidate_commit_present: bool,
+    prior_quality_retry_exists: bool,
 ) -> bool {
     matches!(attempt_stage, ATTEMPT_QUALITY | ATTEMPT_FAILED)
         && candidate_lifecycle == CANDIDATE_VALIDATED
         && candidate_commit_present
+        && !prior_quality_retry_exists
 }
 
 fn release_fingerprint(command: &ReleaseTicketAttempt) -> ContentDigest {
@@ -2571,25 +2597,36 @@ mod tests {
             ATTEMPT_QUALITY,
             CANDIDATE_VALIDATED,
             true,
+            false,
         ));
         assert!(can_retry_quality_attempt(
             ATTEMPT_FAILED,
             CANDIDATE_VALIDATED,
+            true,
+            false,
+        ));
+        assert!(!can_retry_quality_attempt(
+            ATTEMPT_FAILED,
+            CANDIDATE_VALIDATED,
+            true,
             true,
         ));
         assert!(!can_retry_quality_attempt(
             ATTEMPT_REWORK_QUALITY,
             CANDIDATE_VALIDATED,
             true,
+            false,
         ));
         assert!(!can_retry_quality_attempt(
             ATTEMPT_QUALITY,
             CANDIDATE_SUBMITTED,
             true,
+            false,
         ));
         assert!(!can_retry_quality_attempt(
             ATTEMPT_QUALITY,
             CANDIDATE_VALIDATED,
+            false,
             false,
         ));
     }
