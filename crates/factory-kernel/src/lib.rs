@@ -19,6 +19,7 @@ pub mod durable_authority;
 mod forum_rpc;
 pub mod forum_store;
 pub mod git;
+pub mod harness_store;
 pub mod installed_runtime;
 pub mod local_transport;
 /// Authenticated operator adoption of a bounded regular source file into the

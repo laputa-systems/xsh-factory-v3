@@ -44,8 +44,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("canonical migration count");
         assert_eq!(
-            migration_count, 5,
-            "fresh V3 applies the canonical base, office, institutional, and publication migrations"
+            migration_count, 6,
+            "fresh V3 applies the canonical base, office, institutional, publication, and harness migrations"
         );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
@@ -56,8 +56,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
         .await
         .expect("Factory table count");
         assert_eq!(
-            table_count, 34,
-            "the schema adds the small, concrete institutional and publication record set"
+            table_count, 36,
+            "the schema adds the small, concrete institutional, publication, and harness record set"
         );
         inspection.close().await;
         let before = store.kernel_build_status().await.expect("read-only status");
@@ -301,7 +301,7 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         .await
         .expect("Factory table count");
         assert!(
-            table_count <= 34,
+            table_count <= 36,
             "Factory table count exceeded the concrete institutional authority cap"
         );
         let fixed_templates = sqlx::query!(

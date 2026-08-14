@@ -54,6 +54,7 @@ numeric_identifier!(ExperimentRunId, "experiment run ID");
 numeric_identifier!(ClaimId, "claim ID");
 numeric_identifier!(DecisionId, "decision ID");
 numeric_identifier!(PublicationId, "publication ID");
+numeric_identifier!(HarnessCompilationId, "harness compilation ID");
 numeric_identifier!(ForumTopicId, "forum topic ID");
 numeric_identifier!(ForumThreadId, "forum thread ID");
 numeric_identifier!(ForumPostId, "forum post ID");

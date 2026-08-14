@@ -888,6 +888,7 @@ impl Fixture {
                     packet_artifact: packet_artifact.sealed,
                     required_read_manifest_artifact_id: manifest.artifact_id,
                     attempt_ordinal: self.assignment_ordinal,
+                    harness: None,
                 },
             )
             .await

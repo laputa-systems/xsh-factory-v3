@@ -647,6 +647,7 @@ impl RuntimeFixture {
                     packet_artifact: packet_artifact.sealed,
                     required_read_manifest_artifact_id: required_manifest.artifact_id,
                     attempt_ordinal: 1,
+                    harness: None,
                 },
             )
             .await

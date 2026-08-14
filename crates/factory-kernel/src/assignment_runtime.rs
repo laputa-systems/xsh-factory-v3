@@ -21,10 +21,13 @@ use factory_protocol::{
     AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentEvidenceWireV1, AssignmentId,
     AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1, AssignmentPacketWireV1,
     AssignmentReadWireV1, AssignmentRole, AssignmentRuntimeWireV1, CampaignId, ContentDigest,
-    ExpectedRevision, MicroUsd, ReadExactFileV1, RequiredReadV1, SealedArtifactReferenceV1,
-    TerminalOperationV1, TicketContractReadV1, canonical_assignment_packet_json_v1,
-    parse_application_bundle_v1, render_template_v1, unsigned_assignment_packet_digest_v1,
+    ContextInclusionClassV1, ContextItemV1, ContextReferenceV1, ExpectedRevision,
+    HARNESS_COMPILER_VERSION_V1, HarnessSpecV1, MicroUsd, OfficeId, ReadExactFileV1,
+    RequiredReadV1, SealedArtifactReferenceV1, TerminalOperationV1, TicketContractReadV1,
+    canonical_assignment_packet_json_v1, parse_application_bundle_v1, render_template_v1,
+    unsigned_assignment_packet_digest_v1,
 };
+use miniserde::{Serialize, json};
 use thiserror::Error;
 
 use crate::{
@@ -34,6 +37,7 @@ use crate::{
         DurableAuthorityResolver,
     },
     git::{GitCustody, GitCustodyError, OwnedWorktree, WorktreeKind, WorktreeName},
+    harness_store::{HarnessStoreError, RecordHarnessCompilation},
     installed_runtime::{
         InstalledKernelBuildReceiptV1, InstalledKernelExecutionTools, InstalledRuntimeError,
     },
@@ -106,6 +110,9 @@ impl AssignmentRuntimeResources {
 pub enum AssignmentRuntimeError {
     #[error(transparent)]
     Store(#[from] StoreError),
+
+    #[error(transparent)]
+    Harness(#[from] HarnessStoreError),
 
     #[error(transparent)]
     InstalledRuntime(#[from] InstalledRuntimeError),
@@ -234,14 +241,19 @@ pub async fn materialize_and_launch_assignment(
     };
 
     let launch = async {
+        let assignment_role = office_for_target(request.target);
         let application = load_application_material(
             store,
             &process,
             cas,
             request.application_revision_id,
-            office_for_target(request.target),
+            assignment_role,
         )
         .await?;
+        let office_id = store
+            .harness_store()
+            .active_office(request.application_revision_id, assignment_role)
+            .await?;
 
         let required_reads = exact_required_reads(
             &context.application_required_reads,
@@ -260,31 +272,42 @@ pub async fn materialize_and_launch_assignment(
         .await?;
 
         let assignment_evidence = exact_assignment_evidence(request.target, &context)?;
-        let values = prompt_values(
+        let campaign = current_campaign_material(
+            store,
+            request.campaign_id,
+            request.application_revision_id,
+            request.expected_campaign_revision,
+        )
+        .await?;
+        let target_facts = harness_target_facts(request.target, &context)?;
+        let compiled_harness = compile_harness(HarnessCompileInput {
             assignment_id,
-            request.target,
-            &context,
-            &assignment_evidence,
-            &required_reads,
-            &application.mission,
-        )?;
-        let system_prompt = render_declared_template(
-            &application.system_template,
-            &application.system_source,
-            &values,
-        )?;
-        let assignment_prompt = render_declared_template(
-            &application.assignment_template,
-            &application.assignment_source,
-            &values,
-        )?;
+            application_revision_id: request.application_revision_id,
+            office_id,
+            assignment_role,
+            target_facts: &target_facts,
+            assignment_evidence: &assignment_evidence,
+            required_reads: &required_reads,
+            required_manifest_artifact_id: required_manifest.artifact_id,
+            remaining_campaign_allowance: campaign.remaining,
+            application: &application,
+        })?;
+        let harness_spec = register_kernel_bytes(
+            &process,
+            cas,
+            installed.kernel_build_id(),
+            assignment_id,
+            "harness-spec",
+            &compiled_harness.canonical_spec_bytes,
+        )
+        .await?;
         let system = register_kernel_bytes(
             &process,
             cas,
             installed.kernel_build_id(),
             assignment_id,
             "system-prompt",
-            &system_prompt,
+            &compiled_harness.system_prompt,
         )
         .await?;
         let assignment_prompt_artifact = register_kernel_bytes(
@@ -293,40 +316,26 @@ pub async fn materialize_and_launch_assignment(
             installed.kernel_build_id(),
             assignment_id,
             "assignment-prompt",
-            &assignment_prompt,
-        )
-        .await?;
-
-        let campaign = current_campaign_material(
-            store,
-            request.campaign_id,
-            request.application_revision_id,
-            request.expected_campaign_revision,
+            &compiled_harness.assignment_prompt,
         )
         .await?;
         let runtime =
             installed.runtime_identity_for_provider(&application.profile.model.provider)?;
         let workspace_root = absolute_path(resources.workspace.path(), "workspace root")?;
         let staging_absolute = absolute_path(&resources.staging_root, "staging root")?;
-        let target = target_text(
-            request.target,
-            &context,
-            &assignment_evidence,
-            &required_reads,
-        )?;
         let mut wire = assignment_wire(
             assignment_id,
             request.campaign_id,
             request.application_revision_id,
             assignment_packet_kernel_build(&campaign),
             request.target,
-            target.clone(),
+            compiled_harness.target.clone(),
             &context,
             system.artifact_id,
             assignment_prompt_artifact.artifact_id,
             required_manifest.artifact_id,
-            &system_prompt,
-            &assignment_prompt,
+            &compiled_harness.system_prompt,
+            &compiled_harness.assignment_prompt,
             workspace_root.as_str(),
             staging_absolute.as_str(),
             &application.profile,
@@ -345,7 +354,7 @@ pub async fn materialize_and_launch_assignment(
             request.application_revision_id,
             assignment_packet_kernel_build(&campaign),
             request.target,
-            target,
+            compiled_harness.target.clone(),
             system.artifact_id,
             assignment_prompt_artifact.artifact_id,
             required_manifest.artifact_id,
@@ -382,6 +391,19 @@ pub async fn materialize_and_launch_assignment(
                     packet_artifact: packet_artifact.seal,
                     required_read_manifest_artifact_id: required_manifest.artifact_id,
                     attempt_ordinal,
+                    harness: Some(RecordHarnessCompilation {
+                        assignment_id,
+                        application_revision_id: request.application_revision_id,
+                        office_id,
+                        assignment_role,
+                        compiler_version: HARNESS_COMPILER_VERSION_V1,
+                        spec_artifact_id: harness_spec.artifact_id,
+                        system_prompt_artifact_id: system.artifact_id,
+                        assignment_prompt_artifact_id: assignment_prompt_artifact.artifact_id,
+                        packet_artifact_id: packet_artifact.artifact_id,
+                        packet_digest,
+                        context_items: compiled_harness.spec.context_items,
+                    }),
                 },
             )
             .await?;
@@ -749,54 +771,100 @@ fn exact_required_reads(
     Ok(result)
 }
 
-fn prompt_values(
-    assignment_id: AssignmentId,
+/// The compiler needs only these target facts to render a closed harness.
+/// The broader resolver context continues to own worktree and evidence
+/// materialization, but it is not passed through prompt construction.
+#[derive(Clone, Debug)]
+enum HarnessTargetFacts {
+    Product,
+    Engineering {
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
+        ticket_id: factory_protocol::TicketId,
+        ticket_revision_id: factory_protocol::TicketRevisionId,
+        checkpoint: crate::durable_authority::EngineeringCheckpointContract,
+    },
+    Quality {
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
+        candidate_id: factory_protocol::CandidateId,
+        ticket_id: factory_protocol::TicketId,
+        ticket_revision_id: factory_protocol::TicketRevisionId,
+        validation_id: factory_protocol::ValidationId,
+    },
+}
+
+fn harness_target_facts(
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
-    evidence: &[AssignmentEvidenceV1],
-    required_reads: &[ReadExactFileV1],
+) -> Result<HarnessTargetFacts, AssignmentRuntimeError> {
+    match target {
+        DurableAssignmentTarget::Product => Ok(HarnessTargetFacts::Product),
+        DurableAssignmentTarget::Engineering { ticket_attempt_id } => {
+            Ok(HarnessTargetFacts::Engineering {
+                ticket_attempt_id,
+                ticket_id: context.ticket_id.ok_or_else(|| {
+                    AssignmentRuntimeError::Application(
+                        "Engineering target lacks ticket ID".to_owned(),
+                    )
+                })?,
+                ticket_revision_id: context.ticket_revision_id.ok_or_else(|| {
+                    AssignmentRuntimeError::Application(
+                        "Engineering target lacks ticket revision ID".to_owned(),
+                    )
+                })?,
+                checkpoint: context.engineering_checkpoint.clone().ok_or_else(|| {
+                    AssignmentRuntimeError::Application(
+                        "Engineering target lacks its checkpoint contract".to_owned(),
+                    )
+                })?,
+            })
+        }
+        DurableAssignmentTarget::Quality {
+            ticket_attempt_id,
+            candidate_id,
+        } => Ok(HarnessTargetFacts::Quality {
+            ticket_attempt_id,
+            candidate_id,
+            ticket_id: context.ticket_id.ok_or_else(|| {
+                AssignmentRuntimeError::Application("Quality target lacks ticket ID".to_owned())
+            })?,
+            ticket_revision_id: context.ticket_revision_id.ok_or_else(|| {
+                AssignmentRuntimeError::Application(
+                    "Quality target lacks ticket revision ID".to_owned(),
+                )
+            })?,
+            validation_id: context.validation_id.ok_or_else(|| {
+                AssignmentRuntimeError::Application(
+                    "Quality target lacks hard validation ID".to_owned(),
+                )
+            })?,
+        }),
+    }
+}
+
+fn prompt_values(
+    assignment_id: AssignmentId,
+    target: &str,
+    target_facts: &HarnessTargetFacts,
     mission: &str,
 ) -> Result<BTreeMap<String, String>, AssignmentRuntimeError> {
     let mut values = BTreeMap::from([
         ("ASSIGNMENT_ID".to_owned(), assignment_id.get().to_string()),
         ("MISSION".to_owned(), mission.to_owned()),
-        (
-            "TARGET".to_owned(),
-            target_text(target, context, evidence, required_reads)?,
-        ),
+        ("TARGET".to_owned(), target.to_owned()),
     ]);
-    match target {
-        DurableAssignmentTarget::Product => {}
-        DurableAssignmentTarget::Engineering { .. } => {
-            values.insert(
-                "TICKET_ID".to_owned(),
-                context
-                    .ticket_id
-                    .ok_or_else(|| {
-                        AssignmentRuntimeError::Application(
-                            "Engineering target lacks ticket ID".to_owned(),
-                        )
-                    })?
-                    .get()
-                    .to_string(),
-            );
+    match target_facts {
+        HarnessTargetFacts::Product => {}
+        HarnessTargetFacts::Engineering {
+            ticket_id,
+            ticket_revision_id,
+            checkpoint,
+            ..
+        } => {
+            values.insert("TICKET_ID".to_owned(), ticket_id.get().to_string());
             values.insert(
                 "TICKET_REVISION_ID".to_owned(),
-                context
-                    .ticket_revision_id
-                    .ok_or_else(|| {
-                        AssignmentRuntimeError::Application(
-                            "Engineering target lacks ticket revision ID".to_owned(),
-                        )
-                    })?
-                    .get()
-                    .to_string(),
+                ticket_revision_id.get().to_string(),
             );
-            let checkpoint = context.engineering_checkpoint.as_ref().ok_or_else(|| {
-                AssignmentRuntimeError::Application(
-                    "Engineering target lacks its checkpoint contract".to_owned(),
-                )
-            })?;
             values.insert(
                 "REGRESSION_COMMAND".to_owned(),
                 checkpoint.regression_command.clone(),
@@ -806,44 +874,20 @@ fn prompt_values(
                 checkpoint.expected_failure.clone(),
             );
         }
-        DurableAssignmentTarget::Quality { candidate_id, .. } => {
-            values.insert(
-                "TICKET_ID".to_owned(),
-                context
-                    .ticket_id
-                    .ok_or_else(|| {
-                        AssignmentRuntimeError::Application(
-                            "Quality target lacks ticket ID".to_owned(),
-                        )
-                    })?
-                    .get()
-                    .to_string(),
-            );
+        HarnessTargetFacts::Quality {
+            ticket_id,
+            ticket_revision_id,
+            candidate_id,
+            validation_id,
+            ..
+        } => {
+            values.insert("TICKET_ID".to_owned(), ticket_id.get().to_string());
             values.insert(
                 "TICKET_REVISION_ID".to_owned(),
-                context
-                    .ticket_revision_id
-                    .ok_or_else(|| {
-                        AssignmentRuntimeError::Application(
-                            "Quality target lacks ticket revision ID".to_owned(),
-                        )
-                    })?
-                    .get()
-                    .to_string(),
+                ticket_revision_id.get().to_string(),
             );
             values.insert("CANDIDATE_ID".to_owned(), candidate_id.get().to_string());
-            values.insert(
-                "VALIDATION_ID".to_owned(),
-                context
-                    .validation_id
-                    .ok_or_else(|| {
-                        AssignmentRuntimeError::Application(
-                            "Quality target lacks hard validation ID".to_owned(),
-                        )
-                    })?
-                    .get()
-                    .to_string(),
-            );
+            values.insert("VALIDATION_ID".to_owned(), validation_id.get().to_string());
         }
     }
     Ok(values)
@@ -868,6 +912,201 @@ fn render_declared_template(
         })
         .collect::<Result<BTreeMap<_, _>, AssignmentRuntimeError>>()?;
     Ok(render_template_v1(template, source, &values)?)
+}
+
+/// Closed compiler input. All members are resolved durable facts or admitted
+/// policy; this boundary deliberately has no actor text, callback, or
+/// untyped context map.
+struct HarnessCompileInput<'a> {
+    assignment_id: AssignmentId,
+    application_revision_id: ApplicationRevisionId,
+    office_id: OfficeId,
+    assignment_role: AssignmentRole,
+    target_facts: &'a HarnessTargetFacts,
+    assignment_evidence: &'a [AssignmentEvidenceV1],
+    required_reads: &'a [ReadExactFileV1],
+    required_manifest_artifact_id: factory_protocol::ArtifactId,
+    remaining_campaign_allowance: MicroUsd,
+    application: &'a ApplicationMaterial,
+}
+
+struct CompiledHarness {
+    spec: HarnessSpecV1,
+    canonical_spec_bytes: Vec<u8>,
+    target: String,
+    system_prompt: Vec<u8>,
+    assignment_prompt: Vec<u8>,
+}
+
+/// The only assignment-prompt compiler. It turns resolved target facts and
+/// already-admitted application templates into an inspectable, bounded
+/// harness before anything reaches a fungible actor invocation.
+fn compile_harness(
+    input: HarnessCompileInput<'_>,
+) -> Result<CompiledHarness, AssignmentRuntimeError> {
+    let target = target_text(
+        input.target_facts,
+        input.assignment_evidence,
+        input.required_reads,
+    )?;
+    let mut context_items = vec![ContextItemV1 {
+        reference: ContextReferenceV1::Office(input.office_id),
+        inclusion: ContextInclusionClassV1::DirectTarget,
+        reason: "the admitted office owns this invocation".to_owned(),
+    }];
+    match input.target_facts {
+        HarnessTargetFacts::Product => {}
+        HarnessTargetFacts::Engineering {
+            ticket_id,
+            ticket_revision_id,
+            ..
+        }
+        | HarnessTargetFacts::Quality {
+            ticket_id,
+            ticket_revision_id,
+            ..
+        } => {
+            context_items.push(ContextItemV1 {
+                reference: ContextReferenceV1::Ticket(*ticket_id),
+                inclusion: ContextInclusionClassV1::DirectTarget,
+                reason: "the selected ticket is the direct assignment target".to_owned(),
+            });
+            context_items.push(ContextItemV1 {
+                reference: ContextReferenceV1::TicketRevision(*ticket_revision_id),
+                inclusion: ContextInclusionClassV1::DirectTarget,
+                reason: "the selected ticket revision is the direct assignment target".to_owned(),
+            });
+        }
+    }
+    context_items.push(ContextItemV1 {
+        reference: ContextReferenceV1::Artifact(input.required_manifest_artifact_id),
+        inclusion: ContextInclusionClassV1::RequiredConstraint,
+        reason: "exact workspace reads are required before mutation".to_owned(),
+    });
+    for evidence in input.assignment_evidence {
+        context_items.push(ContextItemV1 {
+            reference: ContextReferenceV1::Artifact(evidence.artifact_id),
+            inclusion: ContextInclusionClassV1::DirectEvidence,
+            reason: format!("direct {} evidence", evidence.role.wire_name()),
+        });
+    }
+    // Several closed evidence roles may intentionally name one immutable
+    // artifact. A harness lists a durable reference once: selection priority
+    // is deterministic (target, required constraint, then role-sorted
+    // evidence), while the sealed packet retains every role-specific proof.
+    let mut selected_references = BTreeSet::new();
+    context_items.retain(|item| selected_references.insert(item.reference));
+    let spec = HarnessSpecV1 {
+        compiler_version: HARNESS_COMPILER_VERSION_V1,
+        application_revision_id: input.application_revision_id,
+        office_id: input.office_id,
+        assignment_role: input.assignment_role,
+        objective: target.clone(),
+        context_items,
+        capabilities: input.application.profile.tools.clone(),
+        remaining_campaign_allowance: input.remaining_campaign_allowance,
+    };
+    spec.validate()?;
+    let values = prompt_values(
+        input.assignment_id,
+        &target,
+        input.target_facts,
+        &input.application.mission,
+    )?;
+    let system_prompt = render_declared_template(
+        &input.application.system_template,
+        &input.application.system_source,
+        &values,
+    )?;
+    let assignment_prompt = render_declared_template(
+        &input.application.assignment_template,
+        &input.application.assignment_source,
+        &values,
+    )?;
+    Ok(CompiledHarness {
+        canonical_spec_bytes: canonical_harness_spec_json(&spec).into_bytes(),
+        spec,
+        target,
+        system_prompt,
+        assignment_prompt,
+    })
+}
+
+#[derive(Serialize)]
+struct HarnessSpecWire<'a> {
+    compiler_version: u16,
+    application_revision_id: i64,
+    office_id: i64,
+    assignment_role: &'a str,
+    objective: &'a str,
+    context_items: Vec<HarnessContextItemWire<'a>>,
+    capabilities: Vec<&'a str>,
+    remaining_campaign_allowance_micro_usd: u64,
+}
+
+#[derive(Serialize)]
+struct HarnessContextItemWire<'a> {
+    reference_kind: &'a str,
+    reference_id: i64,
+    inclusion_class: &'a str,
+    reason: &'a str,
+}
+
+/// A fixed-field, ordered DTO makes the sealed spec stable across retries.
+/// This is an artifact format, not an extensible external API.
+fn canonical_harness_spec_json(spec: &HarnessSpecV1) -> String {
+    let context_items = spec
+        .context_items
+        .iter()
+        .map(|item| {
+            let (reference_kind, reference_id) = harness_reference_parts(item.reference);
+            HarnessContextItemWire {
+                reference_kind,
+                reference_id,
+                inclusion_class: harness_inclusion_name(item.inclusion),
+                reason: &item.reason,
+            }
+        })
+        .collect();
+    let capabilities = spec
+        .capabilities
+        .iter()
+        .map(|tool| tool_name(*tool))
+        .collect();
+    json::to_string(&HarnessSpecWire {
+        compiler_version: spec.compiler_version,
+        application_revision_id: spec.application_revision_id.get(),
+        office_id: spec.office_id.get(),
+        assignment_role: office_name(spec.assignment_role),
+        objective: &spec.objective,
+        context_items,
+        capabilities,
+        remaining_campaign_allowance_micro_usd: spec.remaining_campaign_allowance.get(),
+    })
+}
+
+fn harness_reference_parts(reference: ContextReferenceV1) -> (&'static str, i64) {
+    match reference {
+        ContextReferenceV1::Artifact(id) => ("artifact", id.get()),
+        ContextReferenceV1::Project(id) => ("project", id.get()),
+        ContextReferenceV1::Rfc(id) => ("rfc", id.get()),
+        ContextReferenceV1::RfcRevision(id) => ("rfc_revision", id.get()),
+        ContextReferenceV1::Ticket(id) => ("ticket", id.get()),
+        ContextReferenceV1::TicketRevision(id) => ("ticket_revision", id.get()),
+        ContextReferenceV1::Experiment(id) => ("experiment", id.get()),
+        ContextReferenceV1::Claim(id) => ("claim", id.get()),
+        ContextReferenceV1::Decision(id) => ("decision", id.get()),
+        ContextReferenceV1::Office(id) => ("office", id.get()),
+    }
+}
+
+const fn harness_inclusion_name(value: ContextInclusionClassV1) -> &'static str {
+    match value {
+        ContextInclusionClassV1::DirectTarget => "direct_target",
+        ContextInclusionClassV1::RequiredConstraint => "required_constraint",
+        ContextInclusionClassV1::DirectEvidence => "direct_evidence",
+        ContextInclusionClassV1::CurrentDecision => "current_decision",
+    }
 }
 
 struct CampaignMaterial {
@@ -1313,54 +1552,36 @@ fn exact_assignment_evidence(
 }
 
 fn target_text(
-    target: DurableAssignmentTarget,
-    context: &DurableAssignmentLaunchContext,
+    target_facts: &HarnessTargetFacts,
     evidence: &[AssignmentEvidenceV1],
     required_reads: &[ReadExactFileV1],
 ) -> Result<String, AssignmentRuntimeError> {
-    let target = match target {
-        DurableAssignmentTarget::Product => "product-research".to_owned(),
-        DurableAssignmentTarget::Engineering { ticket_attempt_id } => format!(
+    let target = match target_facts {
+        HarnessTargetFacts::Product => "product-research".to_owned(),
+        HarnessTargetFacts::Engineering {
+            ticket_attempt_id,
+            ticket_id,
+            ticket_revision_id,
+            ..
+        } => format!(
             "ticket-{}-revision-{}-attempt-{}",
-            context
-                .ticket_id
-                .ok_or_else(|| AssignmentRuntimeError::Application(
-                    "Engineering target lacks ticket ID".to_owned()
-                ))?
-                .get(),
-            context
-                .ticket_revision_id
-                .ok_or_else(|| AssignmentRuntimeError::Application(
-                    "Engineering target lacks ticket revision ID".to_owned()
-                ))?
-                .get(),
+            ticket_id.get(),
+            ticket_revision_id.get(),
             ticket_attempt_id.get()
         ),
-        DurableAssignmentTarget::Quality {
+        HarnessTargetFacts::Quality {
             ticket_attempt_id,
             candidate_id,
+            ticket_id,
+            ticket_revision_id,
+            validation_id,
         } => format!(
             "ticket-{}-revision-{}-attempt-{}-candidate-{}-validation-{}",
-            context
-                .ticket_id
-                .ok_or_else(|| AssignmentRuntimeError::Application(
-                    "Quality target lacks ticket ID".to_owned()
-                ))?
-                .get(),
-            context
-                .ticket_revision_id
-                .ok_or_else(|| AssignmentRuntimeError::Application(
-                    "Quality target lacks ticket revision ID".to_owned()
-                ))?
-                .get(),
+            ticket_id.get(),
+            ticket_revision_id.get(),
             ticket_attempt_id.get(),
             candidate_id.get(),
-            context
-                .validation_id
-                .ok_or_else(|| AssignmentRuntimeError::Application(
-                    "Quality target lacks hard validation ID".to_owned()
-                ))?
-                .get()
+            validation_id.get()
         ),
     };
     let mut rendered = target;
@@ -1641,5 +1862,43 @@ mod tests {
 
         assert_eq!(assignment_packet_kernel_build(&campaign), campaign_build);
         assert_ne!(assignment_packet_kernel_build(&campaign), installed_build);
+    }
+
+    #[test]
+    fn harness_spec_artifact_spelling_is_stable_and_keeps_context_typed() {
+        let spec = HarnessSpecV1 {
+            compiler_version: HARNESS_COMPILER_VERSION_V1,
+            application_revision_id: ApplicationRevisionId::new(1).unwrap(),
+            office_id: OfficeId::new(2).unwrap(),
+            assignment_role: AssignmentRole::Engineering,
+            objective: "ticket-3-revision-4-attempt-5".to_owned(),
+            context_items: vec![
+                ContextItemV1 {
+                    reference: ContextReferenceV1::Office(OfficeId::new(2).unwrap()),
+                    inclusion: ContextInclusionClassV1::DirectTarget,
+                    reason: "the admitted office owns this invocation".to_owned(),
+                },
+                ContextItemV1 {
+                    reference: ContextReferenceV1::Ticket(
+                        factory_protocol::TicketId::new(3).unwrap(),
+                    ),
+                    inclusion: ContextInclusionClassV1::DirectTarget,
+                    reason: "the selected ticket is the direct assignment target".to_owned(),
+                },
+            ],
+            capabilities: vec![
+                factory_protocol::ActorToolV1::WorkspaceRead,
+                factory_protocol::ActorToolV1::ArtifactRead,
+            ],
+            remaining_campaign_allowance: MicroUsd::new(42),
+        };
+        assert_eq!(
+            canonical_harness_spec_json(&spec),
+            canonical_harness_spec_json(&spec)
+        );
+        let rendered = canonical_harness_spec_json(&spec);
+        assert!(rendered.contains("\"reference_kind\":\"office\""));
+        assert!(rendered.contains("\"reference_kind\":\"ticket\""));
+        assert!(!rendered.contains("context_text"));
     }
 }

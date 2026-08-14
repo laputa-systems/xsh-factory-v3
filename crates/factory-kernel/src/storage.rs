@@ -1426,6 +1426,9 @@ pub enum StoreError {
     Cas(#[from] crate::cas::CasError),
 
     #[error(transparent)]
+    Harness(#[from] crate::harness_store::HarnessStoreError),
+
+    #[error(transparent)]
     InstalledRuntime(#[from] crate::installed_runtime::InstalledRuntimeError),
 
     #[error("schema identity mismatch: expected {SCHEMA_IDENTITY:?}, observed {observed:?}")]
@@ -1578,6 +1581,9 @@ pub enum StoreError {
 
     #[error("invalid process command field: {field}")]
     InvalidProcessCommand { field: &'static str },
+
+    #[error("harness packet artifact differs from the sealed assignment packet")]
+    HarnessPacketArtifactMismatch,
 
     #[error("unknown campaign {campaign_id}")]
     UnknownCampaign {

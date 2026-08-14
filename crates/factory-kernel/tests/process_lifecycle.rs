@@ -219,6 +219,7 @@ fn tranche5_lifecycle_judges() {
                     packet_artifact: first.command.packet_artifact,
                     required_read_manifest_artifact_id: fixture.expected_manifest.artifact_id,
                     attempt_ordinal: 1,
+                    harness: None,
                 },
             )
             .await;
@@ -242,6 +243,7 @@ fn tranche5_lifecycle_judges() {
                     packet_artifact: unregistered_packet_artifact,
                     required_read_manifest_artifact_id: fixture.expected_manifest.artifact_id,
                     attempt_ordinal: 99,
+                    harness: None,
                 },
             )
             .await;
@@ -309,6 +311,7 @@ fn tranche5_lifecycle_judges() {
                         .command
                         .required_read_manifest_artifact_id,
                     attempt_ordinal: first.command.attempt_ordinal,
+                    harness: None,
                 },
             )
             .await;
@@ -543,6 +546,7 @@ fn tranche5_lifecycle_judges() {
                     packet_artifact: closed_packet.packet_artifact.sealed,
                     required_read_manifest_artifact_id: fixture.expected_manifest.artifact_id,
                     attempt_ordinal: 4,
+                    harness: None,
                 },
             )
             .await;
@@ -635,6 +639,7 @@ fn tranche5_lifecycle_judges() {
                     packet_artifact: frozen_next.packet_artifact.sealed,
                     required_read_manifest_artifact_id: fixture.expected_manifest.artifact_id,
                     attempt_ordinal: 2,
+                    harness: None,
                 },
             )
             .await;
@@ -913,6 +918,7 @@ impl Fixture {
             packet_artifact: packet_fixture.packet_artifact.sealed,
             required_read_manifest_artifact_id: self.expected_manifest.artifact_id,
             attempt_ordinal: ordinal,
+            harness: None,
         };
         let assignment = self
             .store

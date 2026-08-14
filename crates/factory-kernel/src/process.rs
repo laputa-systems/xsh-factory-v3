@@ -18,6 +18,7 @@ use factory_protocol::{
 use sqlx::{PgPool, Postgres};
 
 use crate::cas::{CasArtifact, CasStore};
+use crate::harness_store::{RecordHarnessCompilation, persist_harness_compilation};
 use crate::storage::{self, KernelStore, StoreError};
 use crate::workspace_read::SealedRequiredReadAssertion;
 
@@ -125,6 +126,9 @@ pub struct CreateAssignment {
     pub packet_artifact: CasArtifact,
     pub required_read_manifest_artifact_id: ArtifactId,
     pub attempt_ordinal: u32,
+    /// The closed compiler receipt sealed with this assignment. This is
+    /// kernel-derived material, never caller-provided actor intent.
+    pub harness: Option<RecordHarnessCompilation>,
 }
 
 /// A sequence value reserved by the kernel before an assignment packet is
@@ -1130,12 +1134,18 @@ impl ProcessStore {
         {
             return Err(StoreError::RequiredReadManifestMismatch);
         }
+        if let Some(harness) = &command.harness {
+            validate_harness_for_assignment(command, harness)?;
+        }
         let fingerprint = fingerprint_assignment(command);
         let mut tx = self.pool.begin().await?;
         lock_process_transaction(&mut tx).await?;
         if let Some(receipt) = find_audit(&mut tx, command, ASSIGNMENT_CREATE, fingerprint).await? {
             require_subject(&receipt, ASSIGNMENT_SUBJECT)?;
             let assignment_id = AssignmentId::new(receipt.subject_id)?;
+            if let Some(harness) = &command.harness {
+                persist_harness_compilation(&mut tx, harness).await?;
+            }
             let campaign_revision =
                 current_campaign_revision(&mut tx, command.packet.campaign_id).await?;
             tx.commit().await?;
@@ -1210,6 +1220,11 @@ impl ProcessStore {
         require_artifact(&mut tx, command.packet.assignment_prompt_artifact_id, None).await?;
         require_artifact(&mut tx, command.required_read_manifest_artifact_id, None).await?;
         verify_prompt_artifacts(&mut tx, &wire).await?;
+        if let Some(harness) = &command.harness
+            && harness.packet_artifact_id != packet_artifact_id
+        {
+            return Err(StoreError::HarnessPacketArtifactMismatch);
+        }
         let id = command.identity.assignment_id().get();
         let role_code = assignment_role_code(command.packet.assignment_role);
         let model = &command.packet.model;
@@ -1262,6 +1277,9 @@ impl ProcessStore {
         )
         .execute(&mut *tx)
         .await?;
+        if let Some(harness) = &command.harness {
+            persist_harness_compilation(&mut tx, harness).await?;
+        }
         let assignment_revision = AggregateRevision::initial();
         let next_campaign_revision = campaign_revision.next()?;
         sqlx::query!(
@@ -2930,6 +2948,28 @@ fn fingerprint_assignment(c: &CreateAssignment) -> ContentDigest {
     hash_u32(&mut h, c.attempt_ordinal);
     ContentDigest::from_bytes(*h.finalize().as_bytes())
 }
+
+/// A harness is kernel-derived compiler output. Its visible packet artifacts
+/// must be the same seals that the assignment transition is about to admit;
+/// otherwise a caller could pair a valid packet with an unrelated narrative
+/// of how it was supposedly compiled.
+fn validate_harness_for_assignment(
+    command: &CreateAssignment,
+    harness: &RecordHarnessCompilation,
+) -> Result<(), StoreError> {
+    harness.validate()?;
+    if harness.assignment_id != command.identity.assignment_id()
+        || harness.application_revision_id != command.packet.application_revision_id
+        || harness.assignment_role != command.packet.assignment_role
+        || harness.system_prompt_artifact_id != command.packet.system_prompt_artifact_id
+        || harness.assignment_prompt_artifact_id != command.packet.assignment_prompt_artifact_id
+        || harness.packet_digest != command.packet.packet_digest
+    {
+        return Err(StoreError::PacketIdentityMismatch);
+    }
+    Ok(())
+}
+
 fn fingerprint_session_start(c: &StartSession) -> ContentDigest {
     let mut h = blake3::Hasher::new();
     hash_str(&mut h, SESSION_START);

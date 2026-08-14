@@ -4,6 +4,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use factory_kernel::cas::{CasArtifact, CasStore};
+use factory_kernel::harness_store::RecordHarnessCompilation;
 use factory_kernel::local_transport::{LocalDaemon, LocalTransportConfig};
 use factory_kernel::process::{CancelCampaign, CreateAssignment, StartCampaign, StartSession};
 use factory_kernel::storage::{
@@ -13,8 +14,9 @@ use factory_kernel::storage::{
 use factory_protocol::{
     ASSIGNMENT_PACKET_V1_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationKey,
     ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV1, AssignmentRole,
-    ContentDigest, CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1,
-    ReadExactFileV1, ReadObservationV1, RepositoryRelativePath, RuntimeIdentityV1,
+    ContentDigest, ContextInclusionClassV1, ContextItemV1, ContextReferenceV1,
+    CredentialDescriptorV1, ExpectedRevision, HARNESS_COMPILER_VERSION_V1, MicroUsd,
+    ModelProfileV1, ReadExactFileV1, ReadObservationV1, RepositoryRelativePath, RuntimeIdentityV1,
     SealedArtifactReferenceV1, SessionLimitsV1, StopReasonV1, TerminalOperationV1,
     TerminalReportV1, UsageTotalsV1,
 };
@@ -74,6 +76,7 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
         let system = seal_and_register(&store, &build, "system-prompt", b"system prompt").await;
         let assignment_prompt =
             seal_and_register(&store, &build, "assignment-prompt", b"assignment prompt").await;
+        let harness_spec = seal_and_register(&store, &build, "harness-spec", b"harness spec").await;
         let process = store.process_store();
         let identity = process
             .reserve_assignment_identity()
@@ -144,6 +147,11 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
             .unwrap()
             .into_bytes();
         let packet_artifact = seal_and_register(&store, &build, "packet", &packet_bytes).await;
+        let office_id = store
+            .harness_store()
+            .active_office(application, AssignmentRole::ProductResearch)
+            .await
+            .expect("Product office");
         let assignment = process
             .create_assignment(
                 &build.cas,
@@ -157,10 +165,47 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                     packet_artifact: packet_artifact.sealed,
                     required_read_manifest_artifact_id: expected_seal.artifact_id,
                     attempt_ordinal: 1,
+                    harness: Some(RecordHarnessCompilation {
+                        assignment_id: identity.assignment_id(),
+                        application_revision_id: application,
+                        office_id,
+                        assignment_role: AssignmentRole::ProductResearch,
+                        compiler_version: HARNESS_COMPILER_VERSION_V1,
+                        spec_artifact_id: harness_spec.artifact_id,
+                        system_prompt_artifact_id: system.artifact_id,
+                        assignment_prompt_artifact_id: assignment_prompt.artifact_id,
+                        packet_artifact_id: packet_artifact.artifact_id,
+                        packet_digest,
+                        context_items: vec![
+                            ContextItemV1 {
+                                reference: ContextReferenceV1::Office(office_id),
+                                inclusion: ContextInclusionClassV1::DirectTarget,
+                                reason: "the admitted office owns this invocation".to_owned(),
+                            },
+                            ContextItemV1 {
+                                reference: ContextReferenceV1::Artifact(expected_seal.artifact_id),
+                                inclusion: ContextInclusionClassV1::RequiredConstraint,
+                                reason: "exact workspace reads are required before mutation"
+                                    .to_owned(),
+                            },
+                        ],
+                    }),
                 },
             )
             .await
             .expect("assignment");
+        let persisted_harness = store
+            .harness_store()
+            .compilation_for_assignment(assignment.assignment_id)
+            .await
+            .expect("harness receipt")
+            .expect("assignment and harness must commit together");
+        assert_eq!(persisted_harness.packet_digest, packet_digest);
+        assert_eq!(persisted_harness.context_items.len(), 2);
+        assert_eq!(
+            persisted_harness.context_items[1].reason,
+            "exact workspace reads are required before mutation"
+        );
         let session = process
             .start_session(&StartSession {
                 principal: "architect".to_owned(),
