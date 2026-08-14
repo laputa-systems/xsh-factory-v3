@@ -156,10 +156,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This policy revision succeeds active application revision 9. Pinning
+  // This policy revision succeeds active application revision 10. Pinning
   // that exact bundle makes the model-policy change append-only rather than
   // an accidental application fork.
-  predecessor_bundle: "094a71374b1771f19685a9dc42bfc7cfa209a4212d863d935cb94c28cbd4f55c",
+  predecessor_bundle: "7037b96969423c218ecae6c6e9ac875462c68bb6bd99f6dabae2a439ef29f686",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -207,7 +207,11 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
         "candidate_submit",
       ],
       model: engineeringModel,
-      limits: { turn_limit: 220, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
+      // Engineering receives a bounded defect and controller-owned evidence.
+      // Eighteen turns cover the checkpoint, narrow source inspection, fix,
+      // direct reproducer, native gate, and submission without inviting a
+      // second research campaign inside one implementation assignment.
+      limits: { turn_limit: 18, wall_limit_millis: 900_000, output_byte_limit: 67_108_864 },
     },
     {
       assignment_role: "quality",

@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "094a71374b1771f19685a9dc42bfc7cfa209a4212d863d935cb94c28cbd4f55c"
+      "7037b96969423c218ecae6c6e9ac875462c68bb6bd99f6dabae2a439ef29f686"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
@@ -228,6 +228,15 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   );
   if (engineeringProfile?.tools.includes("artifact_seal")) {
     throw new Error("Engineering must not own report or risk artifact sealing");
+  }
+  if (!/Keep every shell source-inspection response under 8 KiB/u.test(engineeringSystem)) {
+    throw new Error("Engineering must bound source-inspection response size");
+  }
+  if (
+    engineeringProfile?.limits.turn_limit !== 18 ||
+    engineeringProfile.limits.wall_limit_millis !== 900_000
+  ) {
+    throw new Error("Engineering must use the bounded implementation budget");
   }
   const qualitySystem = templateText(first, "templates/quality-system.md");
   if (!/convergence gate, not open-ended research/u.test(qualitySystem)) {

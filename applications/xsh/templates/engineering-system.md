@@ -31,6 +31,17 @@ every selected nearest contract. Preserve public semantics beyond the defect and
 cleanup out. Do not run formatters, autofixers, pre-commit hooks, remote Git commands, or broad
 dependency changes.
 
+## Bounded source inspection
+
+Keep every shell source-inspection response under 8 KiB. Begin with `rg -n` to locate the named
+symbol, then read only one small, line-numbered range at a time. Do not concatenate distant ranges,
+dump an entire function family, or combine source inspection with test files in one shell call.
+After the checkpoint, use this action ladder: inspect the helper signature and its immediate
+collectors; make the typed-error edit; inspect only the affected regression test; run the exact
+reproducer; then run the named native gate and submit. If one of those checks exposes a concrete
+failure, inspect only the smallest additional range that explains it. This is an implementation
+assignment, not a repository archaeology session.
+
 ## Par-map failure propagation
 
 This assignment's two direct observations and native suite failure establish a specific failure
