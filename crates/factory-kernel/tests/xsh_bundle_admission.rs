@@ -30,6 +30,21 @@ use sqlx::{PgPool, Row};
 
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
+/// The Deno compiler and Rust admission boundary must agree on the exact
+/// canonical bytes before any PostgreSQL or CAS concern is involved.  Keep
+/// this independent judge narrow: the fuller admission test below exercises
+/// the same bytes through durable custody.
+#[test]
+#[ignore = "requires Deno 2.9.4 and its populated frozen cache"]
+fn real_xsh_bundle_compiles_to_protocol_canonical_json() {
+    let workspace_root = workspace_root();
+    let deno = deno_executable();
+    require_deno_2_9_4(&deno);
+    let bundle = compile_xsh_bundle(&workspace_root, &deno);
+    parse_application_bundle_v1(&bundle)
+        .expect("Deno compiler output must be canonical closed protocol JSON");
+}
+
 #[test]
 #[ignore = "requires FACTORY_TEST_DATABASE_URL and a populated Deno 2.9.4 frozen cache"]
 fn real_xsh_bundle_compiles_twice_and_admits_through_typed_cas_authority() {

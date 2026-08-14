@@ -219,14 +219,28 @@ pub fn decode_routing_envelope(
     Ok(envelope)
 }
 
-pub fn decode_operation_request<T: Deserialize>(
+pub fn decode_operation_request<T: Deserialize + Serialize>(
     frame: &[u8],
     maximum: usize,
     expected: &'static str,
 ) -> Result<T, FrameError> {
     let envelope = decode_routing_envelope(frame, maximum)?;
     require_operation(&envelope, expected)?;
-    decode_json_frame(frame, maximum, expected)
+    let payload = decode_frame(frame, maximum)?;
+    let request: T = decode_json_frame(frame, maximum, expected)?;
+    // miniserde's DTO decoder intentionally ignores unrecognized keys. At a
+    // transport authority boundary that would turn an accidentally expanded
+    // command into a silently accepted one. Re-serializing the closed DTO and
+    // requiring byte identity rejects unknown/duplicate fields, alternate key
+    // order, and whitespace without introducing an untyped JSON value into
+    // the protocol domain.
+    if json::to_string(&request).as_bytes() != payload {
+        return Err(FrameError::InvalidJson {
+            operation: expected,
+            detail: "request bytes are not canonical V1 JSON or contain unknown fields".into(),
+        });
+    }
+    Ok(request)
 }
 
 #[must_use]
@@ -923,13 +937,13 @@ impl OperatorInstitutionalSearchRequest {
                 });
             }
         }
-        if let Some(cursor) = self.cursor()? {
-            if cursor.kind() != kind {
-                return Err(ContractError::InvalidValue {
-                    field: "institutional search cursor",
-                    reason: "must have the selected object kind",
-                });
-            }
+        if let Some(cursor) = self.cursor()?
+            && cursor.kind() != kind
+        {
+            return Err(ContractError::InvalidValue {
+                field: "institutional search cursor",
+                reason: "must have the selected object kind",
+            });
         }
         Ok(())
     }
@@ -2337,6 +2351,12 @@ pub fn canonical_application_bundle_json_v1(
     );
     field_string(
         &mut out,
+        "assignment_role_profiles",
+        &canonical_assignment_role_profiles(&bundle.assignment_role_profiles),
+        false,
+    );
+    field_string(
+        &mut out,
         "commit_message_policy",
         &canonical_commit_message_policy(&bundle.commit_message_policy),
         false,
@@ -2352,12 +2372,6 @@ pub fn canonical_application_bundle_json_v1(
         &mut out,
         "mission_template",
         &canonical_template(&bundle.mission_template),
-        false,
-    );
-    field_string(
-        &mut out,
-        "assignment_role_profiles",
-        &canonical_assignment_role_profiles(&bundle.assignment_role_profiles),
         false,
     );
     field_optional_string(

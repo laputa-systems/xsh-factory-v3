@@ -56,6 +56,7 @@ class OperatorTransport implements FrameTransport {
             remaining_budget_micro_usd: 90,
             deadline_unix_millis: 4_000_000_000_000,
             delivery_target: 1,
+            failure_reason: null,
             base_commit: "b".repeat(40),
             candidate_tree: "c".repeat(40),
             candidate_commit: null,

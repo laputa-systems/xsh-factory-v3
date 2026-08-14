@@ -1,6 +1,6 @@
 import {
-  compileApplicationV1,
   type AssignmentRoleV1,
+  compileApplicationV1,
   renderTemplateV1,
   type TemplateDeclarationV1,
 } from "@factory/sdk";

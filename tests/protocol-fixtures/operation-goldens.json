@@ -534,8 +534,10 @@
       "protocol_version": 1,
       "request_id": "req-4",
       "operation": "candidate.checkpoint_regression",
-      "audit_id": 4,
-      "aggregate_revision": 8
+      "regression_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "regression_patch_artifact_id": 40,
+      "regression_command_set_artifact_id": 41,
+      "regression_log_artifact_id": 42
     },
     "candidate.submit": {
       "protocol_version": 1,
@@ -637,6 +639,7 @@
       "remaining_budget_micro_usd": 999990,
       "deadline_unix_millis": 4000000000000,
       "delivery_target": 1,
+      "failure_reason": null,
       "base_commit": "cccccccccccccccccccccccccccccccccccccccc",
       "candidate_tree": "dddddddddddddddddddddddddddddddddddddddd",
       "candidate_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

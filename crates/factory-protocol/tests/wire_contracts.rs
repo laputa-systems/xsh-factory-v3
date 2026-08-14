@@ -129,6 +129,41 @@ fn campaign_operator_frames_are_closed_and_exclude_daemon_resolved_pins() {
 }
 
 #[test]
+fn operation_frames_reject_unknown_or_noncanonical_fields_before_dispatch() {
+    let request = wire::OperatorCampaignStatusRequest {
+        protocol_version: wire::PROTOCOL_VERSION_V1,
+        request_id: "campaign-status-closed".to_owned(),
+        operation: wire::OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
+        campaign_id: 9,
+    };
+    let canonical = json::to_string(&request);
+    let unknown = format!("{},\"ignored\":true}}", &canonical[..canonical.len() - 1]);
+    let frame = wire::encode_frame(unknown.as_bytes(), wire::REQUEST_FRAME_MAX_BYTES).unwrap();
+    assert!(matches!(
+        wire::decode_operation_request::<wire::OperatorCampaignStatusRequest>(
+            &frame,
+            wire::REQUEST_FRAME_MAX_BYTES,
+            wire::OP_OPERATOR_CAMPAIGN_STATUS,
+        ),
+        Err(wire::FrameError::InvalidJson { .. })
+    ));
+
+    let reordered = format!(
+        "{{\"campaign_id\":9,\"protocol_version\":1,\"request_id\":\"campaign-status-closed\",\"operation\":\"{}\"}}",
+        wire::OP_OPERATOR_CAMPAIGN_STATUS
+    );
+    let frame = wire::encode_frame(reordered.as_bytes(), wire::REQUEST_FRAME_MAX_BYTES).unwrap();
+    assert!(matches!(
+        wire::decode_operation_request::<wire::OperatorCampaignStatusRequest>(
+            &frame,
+            wire::REQUEST_FRAME_MAX_BYTES,
+            wire::OP_OPERATOR_CAMPAIGN_STATUS,
+        ),
+        Err(wire::FrameError::InvalidJson { .. })
+    ));
+}
+
+#[test]
 fn operator_navigation_requests_are_closed_and_known() {
     let request = wire::OperatorTicketListRequest {
         protocol_version: wire::PROTOCOL_VERSION_V1,
@@ -432,6 +467,9 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_WORKSPACE_READ => round_trip::<WorkspaceReadResponse>(success),
             OP_ARTIFACT_SEAL_WORKSPACE_FILE => round_trip::<ArtifactReceiptResponse>(success),
             OP_ARTIFACT_READ => round_trip::<ArtifactReadResponse>(success),
+            OP_CANDIDATE_CHECKPOINT_REGRESSION => {
+                round_trip::<RegressionCheckpointReceiptResponse>(success);
+            }
             OP_CANDIDATE_SUBMIT => round_trip::<CandidateReceiptResponse>(success),
             OP_QUALITY_RUN_FULL_SUITE => round_trip::<QualityValidationReceiptResponse>(success),
             OP_QUALITY_SUBMIT_REVIEW => round_trip::<QualityReviewReceiptResponse>(success),

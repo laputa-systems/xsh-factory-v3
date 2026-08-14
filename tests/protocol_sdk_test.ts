@@ -81,6 +81,18 @@ Deno.test("every closed operation has request, success, conflict, and error gold
       ? "packet_verification"
       : operation === OPERATION.artifactRead
       ? "artifact_read"
+      : operation === OPERATION.candidateCheckpointRegression
+      ? "regression_checkpoint"
+      : operation === OPERATION.candidateSubmit
+      ? "candidate"
+      : operation === OPERATION.qualityRunFullSuite
+      ? "quality_validation"
+      : operation === OPERATION.qualitySubmitReview
+      ? "quality_review"
+      : operation === OPERATION.architectSponsorTicketRevision ||
+          operation === OPERATION.architectReleaseTicketAttempt ||
+          operation === OPERATION.architectDecideCandidate
+      ? "architect_decision"
       : operation === OPERATION.operatorApplicationShow
       ? "application_show"
       : operation === OPERATION.operatorApplicationRegister ||
@@ -203,6 +215,44 @@ Deno.test("TypeScript frame boundary rejects malformed and oversized input", () 
   );
   assert(isKnownOperation(OPERATION.workComplete));
   assert(!isKnownOperation("not.an.operation"));
+});
+
+Deno.test("SDK frames reject reserved request overrides and expanded response shapes", async () => {
+  const transport: FrameTransport = {
+    exchange(): Promise<Uint8Array> {
+      throw new Error("reserved request must fail before transport");
+    },
+  };
+  const client = new LocalProtocolClient(transport);
+  await assertRejects(
+    () =>
+      client.workspaceRead({
+        artifact_id: 1,
+        expected_digest: "a".repeat(64),
+        request_id: "attempted-override",
+      } as never),
+    FrameProtocolError,
+    "reserved field",
+  );
+
+  assertThrows(
+    () =>
+      validateProtocolResponse(
+        {
+          protocol_version: 1,
+          request_id: "strict-response",
+          operation: OPERATION.workComplete,
+          audit_id: 7,
+          aggregate_revision: 8,
+          invented_authority: true,
+        },
+        OPERATION.workComplete,
+        "strict-response",
+        "receipt",
+      ),
+    FrameProtocolError,
+    "unknown or missing fields",
+  );
 });
 
 Deno.test("institutional navigation requires one closed kind and a matching cursor", () => {

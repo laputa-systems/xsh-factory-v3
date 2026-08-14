@@ -156,7 +156,9 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
     })
 }
 
-fn decode<T: miniserde::Deserialize>(frame: &BoundActorFrame) -> Result<T, ForumRpcError> {
+fn decode<T: miniserde::Deserialize + miniserde::Serialize>(
+    frame: &BoundActorFrame,
+) -> Result<T, ForumRpcError> {
     factory_protocol::decode_operation_request(
         frame.frame(),
         REQUEST_FRAME_MAX_BYTES,

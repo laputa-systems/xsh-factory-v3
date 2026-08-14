@@ -566,6 +566,24 @@ function requiredResponseFields(
   }
 }
 
+function exactResponseFields(
+  response: Record<string, unknown>,
+  fields: Iterable<string>,
+  operation: string,
+): void {
+  const expected = [...new Set(fields)].sort();
+  const actual = Object.keys(response).sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((field, index) => field !== expected[index])
+  ) {
+    throw new FrameProtocolError(
+      "invalid_json",
+      `response for ${operation} has unknown or missing fields`,
+    );
+  }
+}
+
 /** Validates the closed response envelope and its operation-specific success shape. */
 export function validateProtocolResponse(
   value: unknown,
@@ -574,6 +592,29 @@ export function validateProtocolResponse(
   shape: ProtocolResponseShape = "receipt",
 ): asserts value is Record<string, unknown> {
   const response = responseObject(value, expectedOperation);
+  const topLevelFields = new Set<string>([
+    "protocol_version",
+    "request_id",
+    "operation",
+  ]);
+  // Keep each response branch next to its value validators while collecting
+  // its declared fields for one exact top-level check below. Nested DTOs use
+  // the ordinary required-field helper and have their own domain validator.
+  const requiredResponseFields = (
+    record: Record<string, unknown>,
+    fields: readonly string[],
+    operation: string,
+  ): void => {
+    for (const field of fields) {
+      if (!(field in record)) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${operation} is missing required field ${field}`,
+        );
+      }
+      if (record === response) topLevelFields.add(field);
+    }
+  };
   if (response.protocol_version !== PROTOCOL_VERSION_V1) {
     throw new FrameProtocolError(
       "unsupported_protocol",
@@ -613,7 +654,13 @@ export function validateProtocolResponse(
     ) {
       requiredResponseFields(response, ["current_revision"], expectedOperation);
       responseInteger(response, "current_revision", expectedOperation);
+      topLevelFields.add("current_revision");
     }
+    exactResponseFields(
+      response,
+      [...topLevelFields, "error_code", "message"],
+      expectedOperation,
+    );
     return;
   }
 
@@ -893,8 +940,11 @@ export function validateProtocolResponse(
           "repository_id",
           "aggregate_budget_micro_usd",
           "measured_cost_state",
+          "measured_cost_micro_usd",
+          "remaining_budget_micro_usd",
           "deadline_unix_millis",
           "delivery_target",
+          "failure_reason",
           "base_commit",
           "candidate_tree",
           "candidate_commit",
@@ -905,11 +955,18 @@ export function validateProtocolResponse(
           "proposed_ticket_count",
           "in_flight_ticket_count",
           "downstream_ticket_attempt_count",
+          "downstream_action_stage",
+          "downstream_ticket_attempt_id",
+          "downstream_ticket_attempt_revision",
+          "downstream_candidate_id",
+          "downstream_candidate_revision",
           "downstream_evidence",
           "ready_low_water",
           "ready_target",
           "ready_maximum",
           "proposal_maximum",
+          "oldest_sponsored_ticket_revision_id",
+          "oldest_sponsored_ticket_revision",
           "scheduler_next_action",
           "scheduler_constraint",
           "session_costs",
@@ -1122,7 +1179,17 @@ export function validateProtocolResponse(
     case "ticket_show":
       requiredResponseFields(
         response,
-        ["ticket_id", "ticket_revision_id", "ticket_revision", "state", "evidence", "attempts"],
+        [
+          "ticket_id",
+          "ticket_revision_id",
+          "ticket_revision",
+          "application_revision_id",
+          "state",
+          "sponsorship_reason",
+          "blocked_reason",
+          "evidence",
+          "attempts",
+        ],
         expectedOperation,
       );
       responseInteger(response, "ticket_id", expectedOperation);
@@ -1138,7 +1205,16 @@ export function validateProtocolResponse(
           "candidate_revision",
           "state",
           "ticket_attempt_id",
+          "ticket_revision_id",
+          "ticket_revision",
+          "base_commit",
+          "candidate_tree",
+          "candidate_commit",
           "evidence",
+          "validations",
+          "review",
+          "latest_architect_decision",
+          "delivery_receipt",
           "delivery",
         ],
         expectedOperation,
@@ -1228,6 +1304,7 @@ export function validateProtocolResponse(
       }
       break;
   }
+  exactResponseFields(response, topLevelFields, expectedOperation);
 }
 
 function validateNullableDownstreamEvidence(
@@ -1253,6 +1330,22 @@ function validateRequestId(value: string): void {
   ) {
     throw new FrameProtocolError("invalid_json", "request_id must be a nonempty bounded string");
   }
+}
+
+function closedRequestPayload(payload: unknown, operation: string): Record<string, unknown> {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new FrameProtocolError("invalid_json", `request for ${operation} must be an object`);
+  }
+  const record = payload as Record<string, unknown>;
+  for (const field of ["protocol_version", "request_id", "operation"]) {
+    if (Object.prototype.hasOwnProperty.call(record, field)) {
+      throw new FrameProtocolError(
+        "invalid_json",
+        `request for ${operation} must not override reserved field ${field}`,
+      );
+    }
+  }
+  return record;
 }
 
 export interface RoutingEnvelope {
@@ -2103,11 +2196,12 @@ export class LocalProtocolClient {
   async #exchange<R, T>(operation: OperationName, payload: T): Promise<R> {
     const requestId = this.#requestId();
     validateRequestId(requestId);
+    const fields = closedRequestPayload(payload, operation);
     const request: RoutingEnvelope & Record<string, unknown> = {
       protocol_version: PROTOCOL_VERSION_V1,
       request_id: requestId,
       operation,
-      ...payload as Record<string, unknown>,
+      ...fields,
     };
     const responseFrame = await this.#transport.exchange(
       encodeJsonFrame(request, REQUEST_FRAME_MAX_BYTES),

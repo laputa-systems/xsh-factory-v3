@@ -14,6 +14,8 @@ import type {
   CandidateShowResponse,
   FactorydStatusCall,
   FactorydStatusResponse,
+  InstitutionalSearchResponse,
+  InstitutionalShowResponse,
   LocalProtocolClient,
   OperatorAuditShowCall,
   OperatorCampaignCancelCall,
@@ -24,15 +26,10 @@ import type {
   OperatorInstitutionalShowCall,
   OperatorTicketListCall,
   OperatorTicketShowCall,
-  InstitutionalSearchResponse,
-  InstitutionalShowResponse,
   TicketListResponse,
   TicketShowResponse,
 } from "./protocol.ts";
-import {
-  validateInstitutionalReference,
-  validateInstitutionalSearchInputV1,
-} from "./protocol.ts";
+import { validateInstitutionalReference, validateInstitutionalSearchInputV1 } from "./protocol.ts";
 import { exactObject, validateCommandIdentityV1 } from "./candidate.ts";
 
 export const OPERATOR_LIMITS_V1 = {

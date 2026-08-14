@@ -138,7 +138,9 @@ Deno.test("XSH Product proposal validator binds owner to a stated contract read"
 });
 
 Deno.test("XSH Quality policy exposes the independent validation and sealed review tools", () => {
-  const quality = xshApplicationV1.assignment_role_profiles.find((profile) => profile.assignment_role === "quality");
+  const quality = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "quality"
+  );
   assert(quality !== undefined);
   assert(quality.tools.includes("artifact_seal"));
   assert(quality.tools.includes("quality_run_full_suite"));

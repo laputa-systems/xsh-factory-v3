@@ -372,6 +372,26 @@ The following are intentionally outside this plan:
 Those are separate proposals. They may build on the tightened model only after
 the current one-delivery XSH lane remains demonstrably correct.
 
+## Implementation record
+
+The five ordered phases above are complete. Their boundaries were landed as
+separate reviewable commits so later work can identify the durable contract
+that introduced each seam:
+
+| Phase | Delivered boundary | Commit |
+| --- | --- | --- |
+| 0 | Vocabulary, architecture contract, and Forum retirement rule | `7228875` |
+| 1 | Durable offices and fungible assignment roles | `085afe8` |
+| 2 | Typed institutional records, links, search, and navigation | `cdd2bc0` |
+| 3 | Anchored immutable publications and read-only legacy Forum paths | `083a543` |
+| 4 | Explicit sealed harness compilation and assignment-owned replay receipt | `6666730` |
+| 5 | Closed canonical frames, exact SDK response shapes, and cross-layer parity fixtures | this commit |
+
+The implementation intentionally leaves the deferred work above deferred;
+none of these phases adds universal-world storage, dynamic organization,
+generic metadata, agent reputation, embedding retrieval, or application
+callbacks into the kernel.
+
 ## Required implementation practice
 
 Before any phase, read the owning architecture, control-plane, evidence,

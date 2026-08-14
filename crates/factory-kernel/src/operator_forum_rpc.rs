@@ -183,7 +183,7 @@ pub(crate) enum OperatorForumRpcError {
     OperationNotForum { operation: String },
 }
 
-fn decode<T: miniserde::Deserialize>(
+fn decode<T: miniserde::Deserialize + miniserde::Serialize>(
     frame: &[u8],
     operation: &'static str,
 ) -> Result<T, OperatorForumRpcError> {

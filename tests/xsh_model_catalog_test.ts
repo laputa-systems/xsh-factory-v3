@@ -23,7 +23,10 @@ Deno.test("XSH office model profiles exactly match Pi's frozen offline catalog",
 
   for (const office of xshApplicationV1.assignment_role_profiles) {
     const model = runtime.getModel(office.model.provider, office.model.model_id);
-    assert(model !== undefined, `${office.assignment_role} model is absent from Pi's offline catalog`);
+    assert(
+      model !== undefined,
+      `${office.assignment_role} model is absent from Pi's offline catalog`,
+    );
     verifyModelDescriptor(
       model,
       { model: office.model } as unknown as PiAssignmentPacket,
