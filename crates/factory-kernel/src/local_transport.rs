@@ -31,10 +31,12 @@ use factory_protocol::{
     ForumCreateThreadRequestV1, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
     ForumListTopicsRequestV1, ForumPostRequestV1, ForumPostsResponseV1, ForumReadThreadRequestV1,
     ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1, ForumTopicsResponseV1,
-    FrameError, OperationReceiptResponse, OperatorApplicationActivateRequest,
-    OperatorApplicationRegisterRequest, OperatorApplicationShowRequest,
-    OperatorArtifactSealReceiptResponse, OperatorArtifactSealRequest, OperatorAuditShowRequest,
-    OperatorCampaignStatusRequest, OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
+    FrameError, InstitutionalSearchResponse, InstitutionalShowResponse, OperationReceiptResponse,
+    OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
+    OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
+    OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
+    OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
+    OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
     OperatorStartCampaignRequest, OperatorStatusRequest, OperatorStatusResponse,
     OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1,
     REQUEST_FRAME_MAX_BYTES, RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId,
@@ -692,6 +694,28 @@ impl OperatorClient {
         request: OperatorAuditShowRequest,
     ) -> Result<AuditShowResponse, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_OPERATOR_SHOW_AUDIT)
+            .await
+    }
+
+    /// Searches the concrete institutional relations through the authenticated
+    /// operator socket. The kernel applies the fixed 50-row ceiling and owns
+    /// all query planning; this client never receives a database capability.
+    pub async fn institutional_search(
+        &self,
+        request: OperatorInstitutionalSearchRequest,
+    ) -> Result<InstitutionalSearchResponse, LocalTransportError> {
+        self.application_exchange(&request, factory_protocol::OP_OPERATOR_INSTITUTIONAL_SEARCH)
+            .await
+    }
+
+    /// Shows one typed institutional identity through the authenticated local
+    /// operator socket. The reference is validated by the kernel before any
+    /// concrete table is selected.
+    pub async fn institutional_show(
+        &self,
+        request: OperatorInstitutionalShowRequest,
+    ) -> Result<InstitutionalShowResponse, LocalTransportError> {
+        self.application_exchange(&request, factory_protocol::OP_OPERATOR_INSTITUTIONAL_SHOW)
             .await
     }
 
@@ -1774,7 +1798,9 @@ async fn serve_operator_connection(
         factory_protocol::OP_OPERATOR_LIST_TICKETS
         | factory_protocol::OP_OPERATOR_SHOW_TICKET
         | factory_protocol::OP_OPERATOR_SHOW_CANDIDATE
-        | factory_protocol::OP_OPERATOR_SHOW_AUDIT => {
+        | factory_protocol::OP_OPERATOR_SHOW_AUDIT
+        | factory_protocol::OP_OPERATOR_INSTITUTIONAL_SEARCH
+        | factory_protocol::OP_OPERATOR_INSTITUTIONAL_SHOW => {
             let router = navigation_rpc.ok_or(LocalTransportError::NavigationControlUnavailable)?;
             let response = with_operation_deadline(operation_deadline, async move {
                 router

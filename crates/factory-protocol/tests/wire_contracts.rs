@@ -155,6 +155,50 @@ fn operator_navigation_requests_are_closed_and_known() {
 }
 
 #[test]
+fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
+    let request = wire::OperatorInstitutionalSearchRequest {
+        protocol_version: wire::PROTOCOL_VERSION_V1,
+        request_id: "institutional-search-1".to_owned(),
+        operation: wire::OP_OPERATOR_INSTITUTIONAL_SEARCH.to_owned(),
+        query: "typed records".to_owned(),
+        kind: "rfc".to_owned(),
+        project_id: Some(7),
+        owner_office_id: Some(3),
+        limit: 20,
+        cursor: Some(wire::InstitutionalReferenceWireV1 {
+            kind: "rfc".to_owned(),
+            id: 9,
+        }),
+    };
+    assert_eq!(request.validate(), Ok(()));
+    let frame = wire::encode_json_frame(&request, wire::REQUEST_FRAME_MAX_BYTES).unwrap();
+    assert_eq!(
+        wire::decode_operation_request::<wire::OperatorInstitutionalSearchRequest>(
+            &frame,
+            wire::REQUEST_FRAME_MAX_BYTES,
+            wire::OP_OPERATOR_INSTITUTIONAL_SEARCH,
+        )
+        .unwrap(),
+        request
+    );
+
+    let mismatched_cursor = wire::OperatorInstitutionalSearchRequest {
+        cursor: Some(wire::InstitutionalReferenceWireV1 {
+            kind: "experiment".to_owned(),
+            id: 9,
+        }),
+        ..request
+    };
+    assert!(mismatched_cursor.validate().is_err());
+    let unknown_kind = wire::OperatorInstitutionalSearchRequest {
+        kind: "anything".to_owned(),
+        cursor: None,
+        ..mismatched_cursor
+    };
+    assert!(unknown_kind.validate().is_err());
+}
+
+#[test]
 fn canonical_bundle_parser_admits_closed_domain_values() {
     let template = |placeholder: Vec<String>| wire::TemplateWireV1 {
         source_path: "templates/system.md".to_owned(),
@@ -362,6 +406,12 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_OPERATOR_SHOW_TICKET => round_trip::<OperatorTicketShowRequest>(request),
             OP_OPERATOR_SHOW_CANDIDATE => round_trip::<OperatorCandidateShowRequest>(request),
             OP_OPERATOR_SHOW_AUDIT => round_trip::<OperatorAuditShowRequest>(request),
+            OP_OPERATOR_INSTITUTIONAL_SEARCH => {
+                round_trip::<OperatorInstitutionalSearchRequest>(request);
+            }
+            OP_OPERATOR_INSTITUTIONAL_SHOW => {
+                round_trip::<OperatorInstitutionalShowRequest>(request);
+            }
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionVerifyPacketRequest>(request),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<SessionSealArtifactRequest>(request),
             OP_SESSION_SUBMIT_TERMINAL => round_trip::<SessionSubmitTerminalRequest>(request),
@@ -402,6 +452,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_OPERATOR_SHOW_TICKET => round_trip::<TicketShowResponse>(success),
             OP_OPERATOR_SHOW_CANDIDATE => round_trip::<CandidateShowResponse>(success),
             OP_OPERATOR_SHOW_AUDIT => round_trip::<AuditShowResponse>(success),
+            OP_OPERATOR_INSTITUTIONAL_SEARCH => {
+                round_trip::<InstitutionalSearchResponse>(success);
+            }
+            OP_OPERATOR_INSTITUTIONAL_SHOW => round_trip::<InstitutionalShowResponse>(success),
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionPacketVerificationResponse>(success),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<ArtifactReceiptResponse>(success),
             OP_FORUM_LIST_TOPICS => round_trip::<ForumTopicsResponseV1>(success),

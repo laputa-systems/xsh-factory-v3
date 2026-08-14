@@ -12,6 +12,141 @@ export const REQUEST_FRAME_MAX_BYTES = 1 << 20;
 export const RESPONSE_FRAME_MAX_BYTES = 4 << 20;
 export const FRAME_PREFIX_BYTES = 4;
 
+/** Closed institutional identities used only at the navigation boundary. */
+export const INSTITUTIONAL_OBJECT_KINDS = [
+  "project",
+  "rfc",
+  "rfc_revision",
+  "ticket",
+  "ticket_revision",
+  "experiment",
+  "experiment_run",
+  "claim",
+  "decision",
+  "office",
+] as const;
+export type InstitutionalObjectKind = (typeof INSTITUTIONAL_OBJECT_KINDS)[number];
+export interface InstitutionalReferenceV1 {
+  readonly kind: InstitutionalObjectKind;
+  readonly id: number;
+}
+export interface InstitutionalSearchInputV1 {
+  readonly query: string;
+  readonly kind: InstitutionalObjectKind;
+  readonly project_id?: number | null;
+  readonly owner_office_id?: number | null;
+  readonly limit: number;
+  readonly cursor?: InstitutionalReferenceV1 | null;
+}
+export interface InstitutionalSearchHitV1 {
+  readonly reference: InstitutionalReferenceV1;
+  readonly title: string;
+  readonly summary: string;
+  readonly created_at_micros: number;
+}
+export interface InstitutionalPageV1<T> {
+  readonly items: readonly T[];
+  readonly next_cursor: InstitutionalReferenceV1 | null;
+}
+
+export function validateInstitutionalReference(
+  value: unknown,
+  field = "institutional reference",
+): asserts value is InstitutionalReferenceV1 {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new FrameProtocolError("invalid_json", `${field} must be an object`);
+  }
+  const reference = value as Record<string, unknown>;
+  if (
+    Object.keys(reference).sort().join(",") !== "id,kind" ||
+    typeof reference.kind !== "string" ||
+    !(INSTITUTIONAL_OBJECT_KINDS as readonly string[]).includes(reference.kind) ||
+    !Number.isSafeInteger(reference.id) ||
+    (reference.id as number) < 1
+  ) {
+    throw new FrameProtocolError(
+      "invalid_json",
+      `${field} must contain one closed kind and positive ID`,
+    );
+  }
+}
+
+export function validateInstitutionalSearchInputV1(
+  value: unknown,
+): asserts value is InstitutionalSearchInputV1 {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("invalid institutional search: input must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  const keys = Object.keys(input).sort();
+  const allowed = ["cursor", "kind", "limit", "owner_office_id", "project_id", "query"];
+  if (keys.some((key) => !allowed.includes(key)) || !keys.includes("query") || !keys.includes("kind") || !keys.includes("limit")) {
+    throw new TypeError("invalid institutional search: fields are not closed");
+  }
+  if (
+    typeof input.query !== "string" ||
+    new TextEncoder().encode(input.query).byteLength > 4 * 1024 ||
+    input.query.includes("\0")
+  ) {
+    throw new TypeError("invalid institutional search: query is not bounded text");
+  }
+  if (!Number.isSafeInteger(input.limit) || (input.limit as number) < 1 || (input.limit as number) > 50) {
+    throw new TypeError("invalid institutional search: limit must be between 1 and 50");
+  }
+  if (typeof input.kind !== "string" ||
+      !(INSTITUTIONAL_OBJECT_KINDS as readonly string[]).includes(input.kind)) {
+    throw new TypeError("invalid institutional search: kind is not closed");
+  }
+  for (const [field, label] of [["project_id", "project ID"], ["owner_office_id", "office ID"]] as const) {
+    const id = input[field];
+    if (id !== undefined && id !== null && (!Number.isSafeInteger(id) || (id as number) < 1)) {
+      throw new TypeError(`invalid institutional search: ${label} is invalid`);
+    }
+  }
+  if (input.cursor !== undefined && input.cursor !== null) {
+    validateInstitutionalReference(input.cursor, "institutional search cursor");
+    if (input.kind !== (input.cursor as InstitutionalReferenceV1).kind) {
+      throw new TypeError("invalid institutional search: cursor kind must match kind");
+    }
+  }
+}
+
+export function validateInstitutionalSearchHitV1(
+  value: unknown,
+): asserts value is InstitutionalSearchHitV1 {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new FrameProtocolError("invalid_json", "institutional search hit must be an object");
+  }
+  const hit = value as Record<string, unknown>;
+  if (Object.keys(hit).sort().join(",") !== "created_at_micros,reference,summary,title") {
+    throw new FrameProtocolError("invalid_json", "institutional search hit fields are not closed");
+  }
+  validateInstitutionalReference(hit.reference, "institutional search hit reference");
+  for (const field of ["title", "summary"] as const) {
+    if (typeof hit[field] !== "string") {
+      throw new FrameProtocolError("invalid_json", `institutional search hit requires ${field}`);
+    }
+  }
+  if (!Number.isSafeInteger(hit.created_at_micros) || (hit.created_at_micros as number) < 0) {
+    throw new FrameProtocolError("invalid_json", "institutional search hit timestamp is invalid");
+  }
+}
+
+export function validateInstitutionalPageV1<T>(
+  value: unknown,
+  validateItem: (item: unknown) => asserts item is T,
+): asserts value is InstitutionalPageV1<T> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new FrameProtocolError("invalid_json", "institutional page must be an object");
+  }
+  const page = value as Record<string, unknown>;
+  if (!("items" in page) || !("next_cursor" in page) || !Array.isArray(page.items) || page.items.length > 50) {
+    throw new FrameProtocolError("invalid_json", "institutional page is not bounded");
+  }
+  for (const item of page.items) validateItem(item);
+  if (page.next_cursor !== null) validateInstitutionalReference(page.next_cursor, "institutional next cursor");
+}
+
 export const OPERATION = {
   workspaceRead: "workspace.read",
   artifactSealWorkspaceFile: "artifact.seal_workspace_file",
@@ -37,6 +172,8 @@ export const OPERATION = {
   operatorTicketShow: "operator.ticket.show",
   operatorCandidateShow: "operator.candidate.show",
   operatorAuditShow: "operator.audit.show",
+  operatorInstitutionalSearch: "operator.institutional.search",
+  operatorInstitutionalShow: "operator.institutional.show",
   sessionVerifyPacket: "session.verify_packet",
   sessionSealArtifact: "session.seal_artifact",
   sessionSubmitTerminal: "session.submit_terminal",
@@ -203,6 +340,8 @@ export type ProtocolResponseShape =
   | "ticket_show"
   | "candidate_show"
   | "audit_show"
+  | "institutional_search"
+  | "institutional_show"
   | "page";
 
 function responseObject(value: unknown, operation: string): Record<string, unknown> {
@@ -864,6 +1003,39 @@ export function validateProtocolResponse(
         );
       }
       break;
+    case "institutional_search":
+      requiredResponseFields(response, ["items", "next_cursor"], expectedOperation);
+      validateInstitutionalPageV1(
+        { items: response.items, next_cursor: response.next_cursor },
+        validateInstitutionalSearchHitV1,
+      );
+      break;
+    case "institutional_show":
+      requiredResponseFields(
+        response,
+        [
+          "reference",
+          "application_revision_id",
+          "owner_office_id",
+          "title",
+          "summary",
+          "lifecycle",
+          "revision",
+          "created_at_micros",
+        ],
+        expectedOperation,
+      );
+      validateInstitutionalReference(response.reference, "institutional show reference");
+      responseInteger(response, "application_revision_id", expectedOperation);
+      if (response.owner_office_id !== null) {
+        responseInteger(response, "owner_office_id", expectedOperation);
+      }
+      responseString(response, "title", expectedOperation);
+      responseString(response, "summary", expectedOperation);
+      responseString(response, "lifecycle", expectedOperation);
+      responseInteger(response, "revision", expectedOperation);
+      responseInteger(response, "created_at_micros", expectedOperation);
+      break;
   }
 }
 
@@ -1104,6 +1276,12 @@ export interface OperatorCandidateShowCall {
 /** One closed audit subject selector, never a SQL or free-text query. */
 export interface OperatorAuditShowCall {
   readonly selector: string;
+}
+/** Bounded search over the concrete institutional relations. */
+export interface OperatorInstitutionalSearchCall extends InstitutionalSearchInputV1 {}
+/** One typed positive kind/id identity at the polymorphic navigation boundary. */
+export interface OperatorInstitutionalShowCall {
+  readonly reference: InstitutionalReferenceV1;
 }
 export interface SessionVerifyPacketCall {
   readonly packet_digest: string;
@@ -1479,6 +1657,26 @@ export interface AuditShowResponse {
   readonly items: readonly AuditEntryResponse[];
 }
 
+export interface InstitutionalSearchResponse extends InstitutionalPageV1<InstitutionalSearchHitV1> {
+  readonly protocol_version: number;
+  readonly request_id: string;
+  readonly operation: typeof OPERATION.operatorInstitutionalSearch;
+}
+
+export interface InstitutionalShowResponse {
+  readonly protocol_version: number;
+  readonly request_id: string;
+  readonly operation: typeof OPERATION.operatorInstitutionalShow;
+  readonly reference: InstitutionalReferenceV1;
+  readonly application_revision_id: number;
+  readonly owner_office_id: number | null;
+  readonly title: string;
+  readonly summary: string;
+  readonly lifecycle: string;
+  readonly revision: number;
+  readonly created_at_micros: number;
+}
+
 export interface SessionPacketVerificationResponse {
   readonly protocol_version: number;
   readonly request_id: string;
@@ -1655,6 +1853,18 @@ export class LocalProtocolClient {
     return await this.#read(OPERATION.operatorAuditShow, call);
   }
 
+  async operatorInstitutionalSearch(
+    call: OperatorInstitutionalSearchCall,
+  ): Promise<InstitutionalSearchResponse> {
+    return await this.#read(OPERATION.operatorInstitutionalSearch, call);
+  }
+
+  async operatorInstitutionalShow(
+    call: OperatorInstitutionalShowCall,
+  ): Promise<InstitutionalShowResponse> {
+    return await this.#read(OPERATION.operatorInstitutionalShow, call);
+  }
+
   async sessionVerifyPacket(
     call: SessionVerifyPacketCall,
   ): Promise<SessionPacketVerificationResponse> {
@@ -1707,6 +1917,8 @@ export class LocalProtocolClient {
       | TicketShowResponse
       | CandidateShowResponse
       | AuditShowResponse
+      | InstitutionalSearchResponse
+      | InstitutionalShowResponse
       | ConflictResponse
       | ErrorResponse
     >(responseFrame, operation, RESPONSE_FRAME_MAX_BYTES);
@@ -1756,6 +1968,10 @@ export class LocalProtocolClient {
         ? "candidate_show"
         : operation === OPERATION.operatorAuditShow
         ? "audit_show"
+        : operation === OPERATION.operatorInstitutionalSearch
+        ? "institutional_search"
+        : operation === OPERATION.operatorInstitutionalShow
+        ? "institutional_show"
         : "receipt",
     );
     if ("error_code" in response) {

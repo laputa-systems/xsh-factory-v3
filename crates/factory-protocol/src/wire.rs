@@ -17,8 +17,9 @@ use crate::{
     AssignmentRoleProfileV1, CandidateDecisionRequestV1, CandidateDecisionV1,
     CandidateSubmissionV1, CommandObservationV1, CommandProfileV1, CommitMessagePolicyV1,
     ContentDigest, ContractError, DeliveryModeV1, DuplicateSearchInputV1, DurationMillis,
-    EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, KernelBuildId, MicroUsd, ModelCapabilityV1,
-    ModelProfileV1, OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1,
+    EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, InstitutionalObjectKind,
+    InstitutionalReference, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1,
+    OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1,
     OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1, OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1,
     ProductTicketProposalV1, QualityFullSuiteRequestV1, QualityReviewSubmissionV1,
     ReleaseDecisionV1, RepositoryBindingV1, RepositoryRelativePath, RequiredReadV1, ReviewId,
@@ -79,6 +80,11 @@ pub const OP_OPERATOR_LIST_TICKETS: &str = "operator.ticket.list";
 pub const OP_OPERATOR_SHOW_TICKET: &str = "operator.ticket.show";
 pub const OP_OPERATOR_SHOW_CANDIDATE: &str = "operator.candidate.show";
 pub const OP_OPERATOR_SHOW_AUDIT: &str = "operator.audit.show";
+/// Bounded read-only navigation over the concrete institutional relations.
+/// The operation accepts only closed kind/id references; it is not a generic
+/// object directory or query language.
+pub const OP_OPERATOR_INSTITUTIONAL_SEARCH: &str = "operator.institutional.search";
+pub const OP_OPERATOR_INSTITUTIONAL_SHOW: &str = "operator.institutional.show";
 pub const OP_SESSION_VERIFY_PACKET: &str = "session.verify_packet";
 pub const OP_SESSION_SEAL_ARTIFACT: &str = "session.seal_artifact";
 pub const OP_SESSION_SUBMIT_TERMINAL: &str = "session.submit_terminal";
@@ -247,6 +253,8 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_OPERATOR_SHOW_TICKET
             | OP_OPERATOR_SHOW_CANDIDATE
             | OP_OPERATOR_SHOW_AUDIT
+            | OP_OPERATOR_INSTITUTIONAL_SEARCH
+            | OP_OPERATOR_INSTITUTIONAL_SHOW
             | OP_SESSION_VERIFY_PACKET
             | OP_SESSION_SEAL_ARTIFACT
             | OP_SESSION_SUBMIT_TERMINAL
@@ -837,6 +845,99 @@ read_request!(OperatorCandidateShowRequest { candidate_id: i64 });
 // `candidate:4`, `campaign:2`, `application-revision:8`, or `audit:99`.
 // It is not a subject-kind number, SQL fragment, or search expression.
 read_request!(OperatorAuditShowRequest { selector: String });
+
+/// The only polymorphism permitted by institutional navigation.  A wire
+/// reference remains a flat closed value so miniserde cannot accept a map of
+/// arbitrary metadata in its place.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstitutionalReferenceWireV1 {
+    pub kind: String,
+    pub id: i64,
+}
+
+impl InstitutionalReferenceWireV1 {
+    pub fn reference(&self) -> Result<InstitutionalReference, ContractError> {
+        InstitutionalReference::from_kind_and_id(
+            InstitutionalObjectKind::parse(&self.kind)?,
+            self.id,
+        )
+    }
+
+    #[must_use]
+    pub fn from_reference(reference: InstitutionalReference) -> Self {
+        Self {
+            kind: reference.kind().as_str().to_owned(),
+            id: reference.id(),
+        }
+    }
+}
+
+// Search is intentionally one fixed projection over one concrete
+// institutional relation.  Requiring the kind keeps the `id` cursor stable;
+// a mixed-noun feed would need a larger compound cursor and would be a second
+// query language rather than useful navigation.
+read_request!(OperatorInstitutionalSearchRequest {
+    query: String,
+    kind: String,
+    project_id: Option<i64>,
+    owner_office_id: Option<i64>,
+    limit: u8,
+    cursor: Option<InstitutionalReferenceWireV1>,
+});
+
+impl OperatorInstitutionalSearchRequest {
+    /// Validates the bounded values that remain ordinary transport scalars.
+    /// The typed ID helpers below cover the object and scope identities.
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.query.len() > crate::INSTITUTIONAL_SUMMARY_MAX_BYTES || self.query.contains('\0') {
+            return Err(ContractError::InvalidValue {
+                field: "institutional search query",
+                reason: "must be bounded UTF-8 without NUL",
+            });
+        }
+        let kind = self.object_kind()?;
+        let _ = self.project_id()?;
+        let _ = self.owner_office_id()?;
+        if let Some(cursor) = self.cursor()? {
+            if cursor.kind() != kind {
+                return Err(ContractError::InvalidValue {
+                    field: "institutional search cursor",
+                    reason: "must have the selected object kind",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn object_kind(&self) -> Result<InstitutionalObjectKind, ContractError> {
+        InstitutionalObjectKind::parse(&self.kind)
+    }
+
+    pub fn project_id(&self) -> Result<Option<crate::ProjectId>, ContractError> {
+        self.project_id.map(crate::ProjectId::new).transpose()
+    }
+
+    pub fn owner_office_id(&self) -> Result<Option<crate::OfficeId>, ContractError> {
+        self.owner_office_id.map(crate::OfficeId::new).transpose()
+    }
+
+    pub fn cursor(&self) -> Result<Option<InstitutionalReference>, ContractError> {
+        self.cursor
+            .as_ref()
+            .map(InstitutionalReferenceWireV1::reference)
+            .transpose()
+    }
+}
+
+read_request!(OperatorInstitutionalShowRequest {
+    reference: InstitutionalReferenceWireV1,
+});
+
+impl OperatorInstitutionalShowRequest {
+    pub fn institutional_reference(&self) -> Result<InstitutionalReference, ContractError> {
+        self.reference.reference()
+    }
+}
 read_request!(SessionVerifyPacketRequest {
     packet_digest: String,
     packet_bytes_b64: String,
@@ -1327,6 +1428,44 @@ pub struct AuditShowResponse {
     pub operation: String,
     pub selector: String,
     pub items: Vec<AuditEntryResponse>,
+}
+
+/// One small, common search hit.  Detailed bodies remain sealed artifacts;
+/// this projection exists only to make durable institutional identities
+/// discoverable without exposing an unbounded query surface.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstitutionalSearchHitResponse {
+    pub reference: InstitutionalReferenceWireV1,
+    pub title: String,
+    pub summary: String,
+    pub created_at_micros: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstitutionalSearchResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub items: Vec<InstitutionalSearchHitResponse>,
+    pub next_cursor: Option<InstitutionalReferenceWireV1>,
+}
+
+/// Fixed common projection returned by `operator.institutional.show`.
+/// `lifecycle` is a closed noun-specific spelling produced by the kernel,
+/// while the identity and scope fields stay numeric and typed at the wire.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstitutionalShowResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub reference: InstitutionalReferenceWireV1,
+    pub application_revision_id: i64,
+    pub owner_office_id: Option<i64>,
+    pub title: String,
+    pub summary: String,
+    pub lifecycle: String,
+    pub revision: u64,
+    pub created_at_micros: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

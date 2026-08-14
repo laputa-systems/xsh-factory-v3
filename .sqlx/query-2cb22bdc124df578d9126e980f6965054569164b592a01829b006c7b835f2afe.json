@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT ta.id, ta.campaign_id, c.kernel_build_id AS kernel_build_database_id,\n                ta.ticket_revision_id, ta.stage, ta.candidate_ordinal, ta.rework_ordinal,\n                ta.released_at IS NOT NULL AS \"released!\", ta.revision AS attempt_revision,\n                ta.claimed_commit, ta.claimed_tree,\n                tr.ticket_id, tr.lifecycle AS ticket_revision_lifecycle,\n                tr.revision AS ticket_revision_aggregate_revision,\n                tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id,\n                t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,\n                t.current_ticket_revision_id\n         FROM factory.ticket_attempts ta\n         JOIN factory.campaigns c ON c.id = ta.campaign_id\n         JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n         JOIN factory.tickets t ON t.id = tr.ticket_id\n         WHERE ta.id = $1\n         FOR UPDATE OF ta, tr, t, c",
+  "query": "SELECT ta.id, ta.campaign_id, c.application_revision_id,\n                c.kernel_build_id AS kernel_build_database_id,\n                ta.ticket_revision_id, ta.stage, ta.candidate_ordinal, ta.rework_ordinal,\n                ta.released_at IS NOT NULL AS \"released!\", ta.revision AS attempt_revision,\n                ta.claimed_commit, ta.claimed_tree,\n                tr.ticket_id, tr.lifecycle AS ticket_revision_lifecycle,\n                tr.revision AS ticket_revision_aggregate_revision,\n                tr.expected_observation_artifact_id, tr.discovery_observation_artifact_id,\n                t.lifecycle AS ticket_lifecycle, t.revision AS ticket_aggregate_revision,\n                t.current_ticket_revision_id\n         FROM factory.ticket_attempts ta\n         JOIN factory.campaigns c ON c.id = ta.campaign_id\n         JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id\n         JOIN factory.tickets t ON t.id = tr.ticket_id\n         WHERE ta.id = $1\n         FOR UPDATE OF ta, tr, t, c",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "application_revision_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "application_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "kernel_build_database_id",
         "type_info": "Int8",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "ticket_revision_id",
         "type_info": "Int8",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "stage",
         "type_info": "Int2",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "candidate_ordinal",
         "type_info": "Int4",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "rework_ordinal",
         "type_info": "Int4",
         "origin": {
@@ -81,13 +92,13 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "released!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "attempt_revision",
         "type_info": "Int8",
         "origin": {
@@ -98,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "claimed_commit",
         "type_info": "Text",
         "origin": {
@@ -109,7 +120,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "claimed_tree",
         "type_info": "Text",
         "origin": {
@@ -120,7 +131,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "ticket_id",
         "type_info": "Int8",
         "origin": {
@@ -131,7 +142,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "ticket_revision_lifecycle",
         "type_info": "Int2",
         "origin": {
@@ -142,7 +153,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "ticket_revision_aggregate_revision",
         "type_info": "Int8",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "expected_observation_artifact_id",
         "type_info": "Int8",
         "origin": {
@@ -164,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "discovery_observation_artifact_id",
         "type_info": "Int8",
         "origin": {
@@ -175,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "ticket_lifecycle",
         "type_info": "Int2",
         "origin": {
@@ -186,7 +197,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "ticket_aggregate_revision",
         "type_info": "Int8",
         "origin": {
@@ -197,7 +208,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "current_ticket_revision_id",
         "type_info": "Int8",
         "origin": {
@@ -221,6 +232,7 @@
       false,
       false,
       false,
+      false,
       null,
       false,
       false,
@@ -235,5 +247,5 @@
       false
     ]
   },
-  "hash": "c757cbab1c60ebbe81f5fd26abb23d5d20be3e24f427402b7153a3aa12fb589d"
+  "hash": "2cb22bdc124df578d9126e980f6965054569164b592a01829b006c7b835f2afe"
 }

@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.candidates (\n                 ticket_attempt_id, application_revision_id,\n                 base_commit, base_tree, regression_tree, candidate_tree,\n                 changed_paths_artifact_id, regression_patch_artifact_id,\n                 regression_command_set_artifact_id, regression_log_artifact_id,\n                 patch_artifact_id, engineering_session_id,\n                 engineering_report_artifact_id, commit_subject, commit_body,\n                 regression_test_identity, risks_artifact_id, lifecycle, revision\n             ) VALUES (\n                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                 $13, $14, $15, $16, $17, 0, 0\n             )\n             RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.candidates",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "91f37fef3ba8ed9c1b38ae590fdd94227070c8ce2cb5f3b5ccb559761833a038"
+}

@@ -44,8 +44,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("canonical migration count");
         assert_eq!(
-            migration_count, 3,
-            "fresh V3 applies the canonical base and two additive authority migrations"
+            migration_count, 4,
+            "fresh V3 applies the canonical base, office, and institutional migrations"
         );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
@@ -56,8 +56,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
         .await
         .expect("Factory table count");
         assert_eq!(
-            table_count, 21,
-            "the schema adds one durable-office relation to the original authority tables"
+            table_count, 32,
+            "the schema adds the small, concrete institutional record set"
         );
         inspection.close().await;
         let before = store.kernel_build_status().await.expect("read-only status");
@@ -278,8 +278,9 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             .await
             .expect("activate application");
         // The canonical fresh schema stores seven fixed templates directly on
-        // the application revision. The durable-office relation is the only
-        // additional Phase 1 table; templates remain direct authority facts.
+        // the application revision. Durable offices and the small closed set
+        // of institutional records add named relations; templates remain
+        // direct authority facts.
         let inspection = sqlx::PgPool::connect(&test_database_url())
             .await
             .expect("read-only schema inspection pool");
@@ -300,8 +301,8 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         .await
         .expect("Factory table count");
         assert!(
-            table_count <= 21,
-            "Factory table count exceeded the durable-office authority cap"
+            table_count <= 32,
+            "Factory table count exceeded the concrete institutional authority cap"
         );
         let fixed_templates = sqlx::query!(
             "SELECT mission_artifact_id,

@@ -20,10 +20,18 @@ import type {
   OperatorCampaignStartCall,
   OperatorCampaignStatusCall,
   OperatorCandidateShowCall,
+  OperatorInstitutionalSearchCall,
+  OperatorInstitutionalShowCall,
   OperatorTicketListCall,
   OperatorTicketShowCall,
+  InstitutionalSearchResponse,
+  InstitutionalShowResponse,
   TicketListResponse,
   TicketShowResponse,
+} from "./protocol.ts";
+import {
+  validateInstitutionalReference,
+  validateInstitutionalSearchInputV1,
 } from "./protocol.ts";
 import { exactObject, validateCommandIdentityV1 } from "./candidate.ts";
 
@@ -89,6 +97,20 @@ export class OperatorAdapterV1 {
   async showAudit(input: OperatorAuditShowCall): Promise<AuditShowResponse> {
     validateAuditShowV1(input);
     return await this.#client.operatorAuditShow(input);
+  }
+
+  async searchInstitutional(
+    input: OperatorInstitutionalSearchCall,
+  ): Promise<InstitutionalSearchResponse> {
+    validateInstitutionalSearchV1(input);
+    return await this.#client.operatorInstitutionalSearch(input);
+  }
+
+  async showInstitutional(
+    input: OperatorInstitutionalShowCall,
+  ): Promise<InstitutionalShowResponse> {
+    validateInstitutionalShowV1(input);
+    return await this.#client.operatorInstitutionalShow(input);
   }
 }
 
@@ -157,6 +179,15 @@ export function validateAuditShowV1(input: OperatorAuditShowCall): void {
   ) {
     throw new TypeError("invalid operator audit show: selector must be a closed positive subject");
   }
+}
+
+export function validateInstitutionalSearchV1(input: OperatorInstitutionalSearchCall): void {
+  validateInstitutionalSearchInputV1(input);
+}
+
+export function validateInstitutionalShowV1(input: OperatorInstitutionalShowCall): void {
+  exactObject(input, "institutional show", ["reference"]);
+  validateInstitutionalReference(input.reference, "institutional show reference");
 }
 
 function commandId(value: string): void {

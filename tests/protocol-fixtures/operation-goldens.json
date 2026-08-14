@@ -24,6 +24,8 @@
     "operator.ticket.show",
     "operator.candidate.show",
     "operator.audit.show",
+    "operator.institutional.search",
+    "operator.institutional.show",
     "session.verify_packet",
     "session.seal_artifact",
     "session.submit_terminal",
@@ -344,6 +346,23 @@
       "request_id": "req-33",
       "operation": "operator.audit.show",
       "selector": "ticket:91"
+    },
+    "operator.institutional.search": {
+      "protocol_version": 1,
+      "request_id": "req-34",
+      "operation": "operator.institutional.search",
+      "query": "typed records",
+      "kind": "rfc",
+      "project_id": 7,
+      "owner_office_id": 3,
+      "limit": 20,
+      "cursor": null
+    },
+    "operator.institutional.show": {
+      "protocol_version": 1,
+      "request_id": "req-35",
+      "operation": "operator.institutional.show",
+      "reference": { "kind": "rfc", "id": 9 }
     },
     "session.verify_packet": {
       "protocol_version": 1,
@@ -797,6 +816,31 @@
         "aggregate_revision": 3
       }]
     },
+    "operator.institutional.search": {
+      "protocol_version": 1,
+      "request_id": "req-34",
+      "operation": "operator.institutional.search",
+      "items": [{
+        "reference": { "kind": "rfc", "id": 9 },
+        "title": "Typed records",
+        "summary": "RFC summary",
+        "created_at_micros": 100
+      }],
+      "next_cursor": null
+    },
+    "operator.institutional.show": {
+      "protocol_version": 1,
+      "request_id": "req-35",
+      "operation": "operator.institutional.show",
+      "reference": { "kind": "rfc", "id": 9 },
+      "application_revision_id": 7,
+      "owner_office_id": 3,
+      "title": "Typed records",
+      "summary": "RFC summary",
+      "lifecycle": "draft",
+      "revision": 0,
+      "created_at_micros": 100
+    },
     "session.verify_packet": {
       "protocol_version": 1,
       "request_id": "req-16",
@@ -1063,6 +1107,22 @@
       "current_revision": 3,
       "message": "stale"
     },
+    "operator.institutional.search": {
+      "protocol_version": 1,
+      "request_id": "req-34",
+      "operation": "operator.institutional.search",
+      "error_code": "revision_conflict",
+      "current_revision": 3,
+      "message": "stale"
+    },
+    "operator.institutional.show": {
+      "protocol_version": 1,
+      "request_id": "req-35",
+      "operation": "operator.institutional.show",
+      "error_code": "revision_conflict",
+      "current_revision": 3,
+      "message": "stale"
+    },
     "session.verify_packet": {
       "protocol_version": 1,
       "request_id": "req-16",
@@ -1310,6 +1370,20 @@
       "protocol_version": 1,
       "request_id": "req-33",
       "operation": "operator.audit.show",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.institutional.search": {
+      "protocol_version": 1,
+      "request_id": "req-34",
+      "operation": "operator.institutional.search",
+      "error_code": "invalid_request",
+      "message": "invalid"
+    },
+    "operator.institutional.show": {
+      "protocol_version": 1,
+      "request_id": "req-35",
+      "operation": "operator.institutional.show",
       "error_code": "invalid_request",
       "message": "invalid"
     },

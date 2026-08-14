@@ -10,14 +10,17 @@ use factory_protocol::{
     CandidateReviewNavigationResponse, CandidateShowResponse,
     CandidateValidationNavigationResponse, ContentDigest, ContractError,
     DeliveryNavigationResponse, ErrorResponse, EvidenceArtifactResponse, FrameError,
-    OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT, OP_OPERATOR_SHOW_CANDIDATE,
-    OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest, OperatorCandidateShowRequest,
-    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1,
-    TicketAttemptNavigationResponse, TicketListItemResponse, TicketListResponse,
-    TicketShowResponse, decode_operation_request, decode_routing_envelope,
+    InstitutionalObjectKind, InstitutionalReference, InstitutionalSearchHitResponse,
+    InstitutionalSearchResponse, InstitutionalShowResponse, OP_OPERATOR_INSTITUTIONAL_SEARCH,
+    OP_OPERATOR_INSTITUTIONAL_SHOW, OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT,
+    OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest,
+    OperatorCandidateShowRequest, OperatorInstitutionalSearchRequest,
+    OperatorInstitutionalShowRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
+    PROTOCOL_VERSION_V1, TicketAttemptNavigationResponse, TicketListItemResponse,
+    TicketListResponse, TicketShowResponse, decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use thiserror::Error;
 
 use crate::storage::KernelStore;
@@ -78,12 +81,381 @@ impl OperatorNavigationRpc {
             OP_OPERATOR_SHOW_TICKET => self.show_ticket(frame).await,
             OP_OPERATOR_SHOW_CANDIDATE => self.show_candidate(frame).await,
             OP_OPERATOR_SHOW_AUDIT => self.show_audit(frame).await,
+            OP_OPERATOR_INSTITUTIONAL_SEARCH => self.institutional_search(frame).await,
+            OP_OPERATOR_INSTITUTIONAL_SHOW => self.institutional_show(frame).await,
             _ => return Err(OperatorNavigationRpcError::OperationNotNavigation { operation }),
         };
         Ok(match response {
             Ok(response) => response,
             Err(rejection) => rejection.response(request_id, envelope.operation),
         })
+    }
+
+    async fn institutional_search(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {
+        let request: OperatorInstitutionalSearchRequest = decode_operation_request(
+            frame,
+            factory_protocol::REQUEST_FRAME_MAX_BYTES,
+            OP_OPERATOR_INSTITUTIONAL_SEARCH,
+        )
+        .map_err(NavigationRejection::Frame)?;
+        request.validate().map_err(NavigationRejection::Contract)?;
+        if !(1..=50).contains(&request.limit) {
+            return Err(NavigationRejection::Navigation(
+                NavigationError::InvalidInstitutionalLimit,
+            ));
+        }
+        let kind = request
+            .object_kind()
+            .map_err(NavigationRejection::Contract)?;
+        let cursor = request.cursor().map_err(NavigationRejection::Contract)?;
+        let project_id = request
+            .project_id()
+            .map_err(NavigationRejection::Contract)?
+            .map(|id| id.get());
+        let owner_office_id = request
+            .owner_office_id()
+            .map_err(NavigationRejection::Contract)?
+            .map(|id| id.get());
+        if matches!(kind, InstitutionalObjectKind::Publication) {
+            return Err(NavigationRejection::Navigation(
+                NavigationError::UnsupportedInstitutionalKind {
+                    kind: InstitutionalObjectKind::Publication,
+                },
+            ));
+        }
+        let limit =
+            i64::from(request.limit)
+                .checked_add(1)
+                .ok_or(NavigationRejection::Navigation(
+                    NavigationError::InvalidInstitutionalLimit,
+                ))?;
+        let mut items = self
+            .institutional_search_kind(
+                kind,
+                &request.query,
+                cursor.map(InstitutionalReference::id),
+                project_id,
+                owner_office_id,
+                limit,
+            )
+            .await
+            .map_err(NavigationRejection::Navigation)?;
+        let has_more = items.len() > usize::from(request.limit);
+        items.truncate(usize::from(request.limit));
+        let next_cursor = has_more
+            .then(|| items.last().map(|item| item.reference.clone()))
+            .flatten();
+        Ok(json::to_string(&InstitutionalSearchResponse {
+            protocol_version: PROTOCOL_VERSION_V1,
+            request_id: request.request_id,
+            operation: OP_OPERATOR_INSTITUTIONAL_SEARCH.to_owned(),
+            items,
+            next_cursor,
+        })
+        .into_bytes())
+    }
+
+    async fn institutional_search_kind(
+        &self,
+        kind: InstitutionalObjectKind,
+        query: &str,
+        cursor_id: Option<i64>,
+        project_id: Option<i64>,
+        owner_office_id: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<InstitutionalSearchHitResponse>, NavigationError> {
+        // Every branch is a literal statement over one concrete relation. The
+        // values are bound parameters, and the limit is applied by PostgreSQL
+        // before rows cross the kernel boundary.
+        let sql = match kind {
+            InstitutionalObjectKind::Project => {
+                "SELECT id, title, summary,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT AS created_at_micros
+                   FROM factory.projects
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND ($3::BIGINT IS NULL OR id = $3)
+                    AND ($4::BIGINT IS NULL OR owner_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Rfc => {
+                "SELECT id, title, summary,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT AS created_at_micros
+                   FROM factory.rfcs
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND ($3::BIGINT IS NULL OR project_id = $3)
+                    AND ($4::BIGINT IS NULL OR owner_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::RfcRevision => {
+                "SELECT revision.id, parent.title,
+                        revision.summary,
+                        floor(extract(epoch FROM revision.created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.rfc_revisions AS revision
+                   JOIN factory.rfcs AS parent ON parent.id = revision.rfc_id
+                  WHERE ($1 = '' OR revision.search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR revision.id < $2)
+                    AND ($3::BIGINT IS NULL OR parent.project_id = $3)
+                    AND ($4::BIGINT IS NULL OR revision.author_office_id = $4)
+                  ORDER BY revision.id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Ticket => {
+                "SELECT id, 'Ticket ' || id::TEXT, 'Ticket revision ' || revision::TEXT,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.tickets
+                  WHERE ($1 = '' OR id::TEXT = $1)
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND $4::BIGINT IS NULL
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::TicketRevision => {
+                "SELECT revision.id, 'Ticket ' || revision.ticket_id::TEXT,
+                        'Ticket revision ' || revision.revision_ordinal::TEXT,
+                        floor(extract(epoch FROM revision.created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.ticket_revisions AS revision
+                  WHERE ($1 = '' OR revision.id::TEXT = $1)
+                    AND ($2::BIGINT IS NULL OR revision.id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND $4::BIGINT IS NULL
+                  ORDER BY revision.id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Experiment => {
+                "SELECT id, question, summary,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT AS created_at_micros
+                   FROM factory.experiments
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND ($3::BIGINT IS NULL OR project_id = $3)
+                    AND ($4::BIGINT IS NULL OR owner_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::ExperimentRun => {
+                "SELECT id, 'Experiment run ' || run_ordinal::TEXT,
+                        base_commit || ' @ ' || base_tree,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.experiment_runs
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND ($4::BIGINT IS NULL OR owner_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Claim => {
+                "SELECT id, proposition, proposition,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT AS created_at_micros
+                   FROM factory.claims
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND ($4::BIGINT IS NULL OR owner_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Decision => {
+                "SELECT id, title, summary,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT AS created_at_micros
+                   FROM factory.decisions
+                  WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND ($4::BIGINT IS NULL OR deciding_office_id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Office => {
+                "SELECT id,
+                        COALESCE(CASE assignment_role
+                            WHEN 0 THEN 'Product research office'
+                            WHEN 1 THEN 'Engineering office'
+                            WHEN 2 THEN 'Quality office'
+                            ELSE 'Institutional office' END, 'Institutional office'),
+                        'Durable office ' || id::TEXT,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.offices
+                  WHERE ($1 = '' OR id::TEXT = $1)
+                    AND ($2::BIGINT IS NULL OR id < $2)
+                    AND $3::BIGINT IS NULL
+                    AND ($4::BIGINT IS NULL OR id = $4)
+                  ORDER BY id DESC LIMIT $5"
+            }
+            InstitutionalObjectKind::Publication => {
+                return Err(NavigationError::UnsupportedInstitutionalKind { kind });
+            }
+        };
+        let rows = sqlx::query(sql)
+            .bind(query)
+            .bind(cursor_id)
+            .bind(project_id)
+            .bind(owner_office_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                let id: i64 = row.try_get("id")?;
+                let created_at_micros: i64 = row.try_get("created_at_micros")?;
+                Ok(InstitutionalSearchHitResponse {
+                    reference: factory_protocol::InstitutionalReferenceWireV1 {
+                        kind: kind.as_str().to_owned(),
+                        id: positive(id, "institutional object ID")?,
+                    },
+                    title: row.try_get("title")?,
+                    summary: row.try_get("summary")?,
+                    created_at_micros: micros(created_at_micros)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn institutional_show(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {
+        let request: OperatorInstitutionalShowRequest = decode_operation_request(
+            frame,
+            factory_protocol::REQUEST_FRAME_MAX_BYTES,
+            OP_OPERATOR_INSTITUTIONAL_SHOW,
+        )
+        .map_err(NavigationRejection::Frame)?;
+        let reference = request
+            .institutional_reference()
+            .map_err(NavigationRejection::Contract)?;
+        let kind = reference.kind();
+        let id = reference.id();
+        let sql = match kind {
+            InstitutionalObjectKind::Project => {
+                "SELECT application_revision_id, owner_office_id, title, summary, lifecycle,
+                        revision, floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.projects WHERE id = $1"
+            }
+            InstitutionalObjectKind::Rfc => {
+                "SELECT application_revision_id, owner_office_id, title, summary, lifecycle,
+                        revision, floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.rfcs WHERE id = $1"
+            }
+            InstitutionalObjectKind::RfcRevision => {
+                "SELECT revision.application_revision_id, revision.author_office_id,
+                        parent.title, revision.summary, revision.lifecycle, revision.revision_ordinal,
+                        floor(extract(epoch FROM revision.created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.rfc_revisions AS revision
+                   JOIN factory.rfcs AS parent ON parent.id = revision.rfc_id
+                  WHERE revision.id = $1"
+            }
+            InstitutionalObjectKind::Ticket => {
+                "SELECT application_revision_id, NULL::BIGINT, 'Ticket ' || id::TEXT,
+                        'Ticket revision ' || revision::TEXT, lifecycle, revision,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.tickets WHERE id = $1"
+            }
+            InstitutionalObjectKind::TicketRevision => {
+                "SELECT revision.application_revision_id, NULL::BIGINT,
+                        'Ticket ' || revision.ticket_id::TEXT,
+                        'Ticket revision ' || revision.revision_ordinal::TEXT,
+                        revision.lifecycle, revision.revision,
+                        floor(extract(epoch FROM revision.created_at) * 1000000)::BIGINT
+                   FROM factory.ticket_revisions AS revision WHERE revision.id = $1"
+            }
+            InstitutionalObjectKind::Experiment => {
+                "SELECT application_revision_id, owner_office_id, question, summary, lifecycle,
+                        revision, floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.experiments WHERE id = $1"
+            }
+            InstitutionalObjectKind::ExperimentRun => {
+                "SELECT application_revision_id, owner_office_id,
+                        'Experiment run ' || run_ordinal::TEXT,
+                        base_commit || ' @ ' || base_tree, lifecycle, revision,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.experiment_runs WHERE id = $1"
+            }
+            InstitutionalObjectKind::Claim => {
+                "SELECT application_revision_id, owner_office_id, proposition, proposition,
+                        lifecycle, revision,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.claims WHERE id = $1"
+            }
+            InstitutionalObjectKind::Decision => {
+                "SELECT application_revision_id, deciding_office_id, title, summary, lifecycle,
+                        revision, floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.decisions WHERE id = $1"
+            }
+            InstitutionalObjectKind::Office => {
+                "SELECT application_revision_id, NULL::BIGINT,
+                        COALESCE(CASE assignment_role
+                            WHEN 0 THEN 'Product research office'
+                            WHEN 1 THEN 'Engineering office'
+                            WHEN 2 THEN 'Quality office'
+                            ELSE 'Institutional office' END, 'Institutional office'),
+                        'Durable office ' || id::TEXT, lifecycle, revision,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.offices WHERE id = $1"
+            }
+            InstitutionalObjectKind::Publication => {
+                return Err(NavigationRejection::Navigation(
+                    NavigationError::UnsupportedInstitutionalKind { kind },
+                ))
+            }
+        };
+        let row = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(navigation_database)?
+            .ok_or_else(|| {
+                NavigationRejection::Navigation(NavigationError::NotFound {
+                    subject: "institutional object",
+                })
+            })?;
+        let lifecycle_code: i16 = row
+            .try_get("lifecycle")
+            .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
+        let revision_value: i64 = row
+            .try_get("revision")
+            .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
+        let application_revision_id: i64 = row
+            .try_get("application_revision_id")
+            .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
+        let created_at_micros: i64 = row
+            .try_get("created_at_micros")
+            .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
+        let owner_office_id: Option<i64> = row
+            .try_get("owner_office_id")
+            .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
+        let response = InstitutionalShowResponse {
+            protocol_version: PROTOCOL_VERSION_V1,
+            request_id: request.request_id,
+            operation: OP_OPERATOR_INSTITUTIONAL_SHOW.to_owned(),
+            reference: factory_protocol::InstitutionalReferenceWireV1::from_reference(reference),
+            application_revision_id: positive(application_revision_id, "application revision ID")
+                .map_err(NavigationRejection::Navigation)?,
+            owner_office_id: owner_office_id
+                .map(|id| positive(id, "office ID"))
+                .transpose()
+                .map_err(NavigationRejection::Navigation)?,
+            title: row.try_get("title").map_err(|error| {
+                NavigationRejection::Navigation(NavigationError::Database(error))
+            })?,
+            summary: row.try_get("summary").map_err(|error| {
+                NavigationRejection::Navigation(NavigationError::Database(error))
+            })?,
+            lifecycle: institutional_lifecycle_name(kind, lifecycle_code)
+                .map_err(NavigationRejection::Navigation)?
+                .to_owned(),
+            revision: revision(revision_value).map_err(NavigationRejection::Navigation)?,
+            created_at_micros: micros(created_at_micros)
+                .map_err(NavigationRejection::Navigation)?,
+        };
+        Ok(json::to_string(&response).into_bytes())
     }
 
     async fn list_tickets(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {
@@ -681,6 +1053,10 @@ enum NavigationError {
     InvalidSelector,
     #[error("stored {field} is outside its closed protocol range")]
     Corrupt { field: &'static str },
+    #[error("institutional kind {kind:?} is not available in the current schema")]
+    UnsupportedInstitutionalKind { kind: InstitutionalObjectKind },
+    #[error("institutional search limit must be between 1 and 50")]
+    InvalidInstitutionalLimit,
 }
 
 impl NavigationError {
@@ -688,6 +1064,8 @@ impl NavigationError {
         match self {
             Self::NotFound { .. } => "navigation_not_found",
             Self::InvalidSelector => "invalid_audit_selector",
+            Self::UnsupportedInstitutionalKind { .. } => "institutional_kind_unavailable",
+            Self::InvalidInstitutionalLimit => "invalid_institutional_navigation",
             Self::Database(_) | Self::Corrupt { .. } => "navigation_unavailable",
         }
     }
@@ -757,6 +1135,66 @@ fn ticket_state_name(value: i16) -> Result<&'static str, NavigationError> {
             field: "ticket lifecycle",
         }),
     }
+}
+
+fn institutional_lifecycle_name(
+    kind: InstitutionalObjectKind,
+    value: i16,
+) -> Result<&'static str, NavigationError> {
+    let name = match kind {
+        InstitutionalObjectKind::Project => {
+            ["proposed", "active", "paused", "completed", "archived"]
+                .get(usize::try_from(value).unwrap_or(usize::MAX))
+        }
+        InstitutionalObjectKind::Rfc => [
+            "draft",
+            "proposed",
+            "accepted",
+            "rejected",
+            "superseded",
+            "archived",
+        ]
+        .get(usize::try_from(value).unwrap_or(usize::MAX)),
+        InstitutionalObjectKind::RfcRevision => ["draft", "accepted", "superseded", "archived"]
+            .get(usize::try_from(value).unwrap_or(usize::MAX)),
+        InstitutionalObjectKind::Ticket | InstitutionalObjectKind::TicketRevision => [
+            "proposed",
+            "sponsored",
+            "in_flight",
+            "delivered",
+            "blocked",
+            "resolved",
+            "superseded",
+            "rejected",
+        ]
+        .get(usize::try_from(value).unwrap_or(usize::MAX)),
+        InstitutionalObjectKind::Experiment => [
+            "proposed",
+            "ready",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "archived",
+        ]
+        .get(usize::try_from(value).unwrap_or(usize::MAX)),
+        InstitutionalObjectKind::ExperimentRun => {
+            ["prepared", "running", "succeeded", "failed", "cancelled"]
+                .get(usize::try_from(value).unwrap_or(usize::MAX))
+        }
+        InstitutionalObjectKind::Claim => ["proposed", "supported", "challenged", "retracted"]
+            .get(usize::try_from(value).unwrap_or(usize::MAX)),
+        InstitutionalObjectKind::Decision => {
+            ["proposed", "final", "superseded"].get(usize::try_from(value).unwrap_or(usize::MAX))
+        }
+        InstitutionalObjectKind::Office => {
+            ["active", "paused", "archived"].get(usize::try_from(value).unwrap_or(usize::MAX))
+        }
+        InstitutionalObjectKind::Publication => None,
+    };
+    name.copied().ok_or(NavigationError::Corrupt {
+        field: "institutional lifecycle",
+    })
 }
 fn attempt_stage_name(value: i16) -> Result<&'static str, NavigationError> {
     match value {

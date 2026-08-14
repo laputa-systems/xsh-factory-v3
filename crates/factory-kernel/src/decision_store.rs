@@ -465,7 +465,8 @@ impl DecisionStore {
         let next_attempt = attempt.attempt_revision.next()?;
         let row = sqlx::query!(
             "INSERT INTO factory.candidates (
-                 ticket_attempt_id, base_commit, base_tree, regression_tree, candidate_tree,
+                 ticket_attempt_id, application_revision_id,
+                 base_commit, base_tree, regression_tree, candidate_tree,
                  changed_paths_artifact_id, regression_patch_artifact_id,
                  regression_command_set_artifact_id, regression_log_artifact_id,
                  patch_artifact_id, engineering_session_id,
@@ -473,10 +474,11 @@ impl DecisionStore {
                  regression_test_identity, risks_artifact_id, lifecycle, revision
              ) VALUES (
                  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                 $13, $14, $15, $16, 0, 0
+                 $13, $14, $15, $16, $17, 0, 0
              )
              RETURNING id",
             command.ticket_attempt_id.get(),
+            attempt.application_revision_id.get(),
             command.base_commit.as_str(),
             command.base_tree.as_str(),
             command.regression_tree.as_str(),
@@ -1603,6 +1605,7 @@ struct CandidateRow {
 struct AttemptRow {
     id: TicketAttemptId,
     campaign_id: factory_protocol::CampaignId,
+    application_revision_id: factory_protocol::ApplicationRevisionId,
     kernel_build_database_id: i64,
     ticket_id: i64,
     ticket_revision_id: TicketRevisionId,
@@ -1803,7 +1806,8 @@ async fn lock_candidate_attempt(
     attempt_id: TicketAttemptId,
 ) -> Result<AttemptRow, DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT ta.id, ta.campaign_id, c.kernel_build_id AS kernel_build_database_id,
+        "SELECT ta.id, ta.campaign_id, c.application_revision_id,
+                c.kernel_build_id AS kernel_build_database_id,
                 ta.ticket_revision_id, ta.stage, ta.candidate_ordinal, ta.rework_ordinal,
                 ta.released_at IS NOT NULL AS \"released!\", ta.revision AS attempt_revision,
                 ta.claimed_commit, ta.claimed_tree,
@@ -1837,6 +1841,9 @@ async fn lock_candidate_attempt(
     Ok(AttemptRow {
         id: TicketAttemptId::new(row.id)?,
         campaign_id: factory_protocol::CampaignId::new(row.campaign_id)?,
+        application_revision_id: factory_protocol::ApplicationRevisionId::new(
+            row.application_revision_id,
+        )?,
         kernel_build_database_id: row.kernel_build_database_id,
         ticket_id: row.ticket_id,
         ticket_revision_id,
@@ -2967,7 +2974,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
-    fn postgres_final_authority_schema_has_exactly_twenty_named_tables() {
+    fn postgres_authority_schema_has_exactly_thirty_two_named_tables() {
         smol::block_on(async {
             let database_url = std::env::var("FACTORY_TEST_DATABASE_URL")
                 .expect("FACTORY_TEST_DATABASE_URL must name a disposable PostgreSQL 18 database");
@@ -2990,7 +2997,7 @@ mod tests {
             store
                 .migrate_and_verify()
                 .await
-                .expect("migrate through T8");
+                .expect("migrate through institutional records");
             let pool = store.pool_for_authority();
             let table_count = sqlx::query_scalar::<_, i64>(
                 "SELECT count(*)::BIGINT
@@ -3001,8 +3008,8 @@ mod tests {
             .await
             .expect("count Factory tables");
             assert_eq!(
-                table_count, 20,
-                "T8 consumes the fixed MVP table budget exactly"
+                table_count, 32,
+                "institutional records use a fixed, concrete table budget"
             );
             for relation in [
                 "candidates",
@@ -3010,6 +3017,13 @@ mod tests {
                 "reviews",
                 "architect_decisions",
                 "deliveries",
+                "projects",
+                "rfcs",
+                "rfc_revisions",
+                "experiments",
+                "experiment_runs",
+                "claims",
+                "decisions",
             ] {
                 let exists = sqlx::query_scalar::<_, bool>(
                     "SELECT to_regclass(format('factory.%s', $1)) IS NOT NULL",

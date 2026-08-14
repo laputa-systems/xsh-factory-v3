@@ -19,6 +19,8 @@ import {
   LocalProtocolClient,
   OPERATION,
   RESPONSE_FRAME_MAX_BYTES,
+  validateInstitutionalSearchInputV1,
+  validateInstitutionalReference,
   validateProtocolResponse,
 } from "../packages/factory-sdk/protocol.ts";
 import { decodeAssignmentPacketV1 } from "../packages/factory-pi-host/entrypoint.ts";
@@ -99,6 +101,10 @@ Deno.test("every closed operation has request, success, conflict, and error gold
       ? "candidate_show"
       : operation === OPERATION.operatorAuditShow
       ? "audit_show"
+      : operation === OPERATION.operatorInstitutionalSearch
+      ? "institutional_search"
+      : operation === OPERATION.operatorInstitutionalShow
+      ? "institutional_show"
       : operation.startsWith("forum.") &&
           (operation === OPERATION.forumListTopics ||
             operation === OPERATION.forumListThreads ||
@@ -194,6 +200,34 @@ Deno.test("TypeScript frame boundary rejects malformed and oversized input", () 
   );
   assert(isKnownOperation(OPERATION.workComplete));
   assert(!isKnownOperation("not.an.operation"));
+});
+
+Deno.test("institutional navigation requires one closed kind and a matching cursor", () => {
+  const search = {
+    query: "typed records",
+    kind: "rfc",
+    project_id: 7,
+    owner_office_id: 3,
+    limit: 20,
+    cursor: { kind: "rfc", id: 9 },
+  };
+  validateInstitutionalSearchInputV1(search);
+  validateInstitutionalReference(search.cursor);
+  assertThrows(
+    () => validateInstitutionalSearchInputV1({ ...search, kind: "publication" }),
+    TypeError,
+    "kind",
+  );
+  assertThrows(
+    () => validateInstitutionalSearchInputV1({ ...search, cursor: { kind: "experiment", id: 9 } }),
+    TypeError,
+    "cursor",
+  );
+  assertThrows(
+    () => validateInstitutionalSearchInputV1({ ...search, unexpected: true }),
+    TypeError,
+    "closed",
+  );
 });
 
 Deno.test("dropped response retry preserves command identity and payload exactly", async () => {
