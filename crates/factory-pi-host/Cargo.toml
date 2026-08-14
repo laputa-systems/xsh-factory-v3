@@ -12,7 +12,6 @@ miniserde.workspace = true
 pi-agent-core = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-core", features = ["provider-openrouter"] }
 pi-agent-luau = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-luau" }
 pi-agent-protocol = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-protocol" }
-pi-agent-trace = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-trace" }
 smol.workspace = true
 thiserror.workspace = true
 

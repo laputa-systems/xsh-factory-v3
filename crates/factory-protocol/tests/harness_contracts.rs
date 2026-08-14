@@ -1,19 +1,19 @@
 use factory_protocol::{
-    ActorToolV2, ApplicationRevisionId, ArtifactId, AssignmentRole, ContextInclusionClassV1,
-    ContextItemV1, ContextReferenceV1, HARNESS_COMPILER_VERSION_V1, HarnessSpecV1, MicroUsd,
+    ActorToolV2, ApplicationRevisionId, ArtifactId, AssignmentRole, ContextInclusionClassV2,
+    ContextItemV2, ContextReferenceV2, HARNESS_COMPILER_VERSION_V2, HarnessSpecV2, MicroUsd,
     OfficeId,
 };
 
-fn spec() -> HarnessSpecV1 {
-    HarnessSpecV1 {
-        compiler_version: HARNESS_COMPILER_VERSION_V1,
+fn spec() -> HarnessSpecV2 {
+    HarnessSpecV2 {
+        compiler_version: HARNESS_COMPILER_VERSION_V2,
         application_revision_id: ApplicationRevisionId::new(1).expect("application revision"),
         office_id: OfficeId::new(2).expect("office"),
         assignment_role: AssignmentRole::Engineering,
         objective: "ticket-3-revision-4-attempt-5".to_owned(),
-        context_items: vec![ContextItemV1 {
-            reference: ContextReferenceV1::Artifact(ArtifactId::new(6).expect("artifact")),
-            inclusion: ContextInclusionClassV1::DirectEvidence,
+        context_items: vec![ContextItemV2 {
+            reference: ContextReferenceV2::Artifact(ArtifactId::new(6).expect("artifact")),
+            inclusion: ContextInclusionClassV2::DirectEvidence,
             reason: "direct ticket evidence".to_owned(),
         }],
         capabilities: vec![ActorToolV2::WorkspaceRead, ActorToolV2::ArtifactRead],
@@ -43,6 +43,6 @@ fn harness_context_reasons_are_one_bounded_explanatory_line() {
     assert!(malformed.validate().is_err());
 
     let mut unsupported_compiler = spec();
-    unsupported_compiler.compiler_version = HARNESS_COMPILER_VERSION_V1 + 1;
+    unsupported_compiler.compiler_version = HARNESS_COMPILER_VERSION_V2 + 1;
     assert!(unsupported_compiler.validate().is_err());
 }

@@ -12,8 +12,8 @@
 
 use crate::{
     AggregateRevision, ApplicationRevisionId, CandidateId, ClaimId, ContractError, DecisionId,
-    ExperimentId, ExperimentRunId, OfficeId, ProjectId, PublicationId, RepositoryObjectIdV1, RfcId,
-    RfcRevisionId, SealedArtifactReferenceV1, SessionId, TicketId, TicketRevisionId,
+    ExperimentId, ExperimentRunId, OfficeId, ProjectId, PublicationId, RepositoryObjectIdV2, RfcId,
+    RfcRevisionId, SealedArtifactReferenceV2, SessionId, TicketId, TicketRevisionId,
 };
 
 /// Inline fields are searchable projections, not substitutes for the sealed
@@ -39,7 +39,7 @@ pub struct Project {
     pub owner_office_id: OfficeId,
     pub title: String,
     pub summary: String,
-    pub body: SealedArtifactReferenceV1,
+    pub body: SealedArtifactReferenceV2,
     pub state: ProjectState,
     pub aggregate_revision: AggregateRevision,
 }
@@ -126,7 +126,7 @@ pub struct RfcRevision {
     pub author_office_id: OfficeId,
     pub revision_number: u64,
     pub summary: String,
-    pub body: SealedArtifactReferenceV1,
+    pub body: SealedArtifactReferenceV2,
 }
 
 impl RfcRevision {
@@ -157,9 +157,9 @@ pub struct Experiment {
     pub project_id: Option<ProjectId>,
     pub question: String,
     pub summary: String,
-    pub intended_base: Option<RepositoryObjectIdV1>,
+    pub intended_base: Option<RepositoryObjectIdV2>,
     pub intended_target: InstitutionalReference,
-    pub evaluation_plan: SealedArtifactReferenceV1,
+    pub evaluation_plan: SealedArtifactReferenceV2,
     pub budget_micro_usd: u64,
     pub state: ExperimentState,
     pub aggregate_revision: AggregateRevision,
@@ -222,12 +222,12 @@ pub struct ExperimentRun {
     pub experiment_id: ExperimentId,
     pub application_revision_id: ApplicationRevisionId,
     pub owner_office_id: OfficeId,
-    pub base_commit: RepositoryObjectIdV1,
-    pub base_tree: RepositoryObjectIdV1,
-    pub invocation: SealedArtifactReferenceV1,
+    pub base_commit: RepositoryObjectIdV2,
+    pub base_tree: RepositoryObjectIdV2,
+    pub invocation: SealedArtifactReferenceV2,
     pub candidate_id: Option<CandidateId>,
-    pub result_artifact: Option<SealedArtifactReferenceV1>,
-    pub evaluator_receipt: Option<SealedArtifactReferenceV1>,
+    pub result_artifact: Option<SealedArtifactReferenceV2>,
+    pub evaluator_receipt: Option<SealedArtifactReferenceV2>,
     pub state: ExperimentRunState,
     pub aggregate_revision: AggregateRevision,
 }
@@ -271,7 +271,7 @@ pub struct Claim {
     pub application_revision_id: ApplicationRevisionId,
     pub owner_office_id: OfficeId,
     pub proposition: String,
-    pub body: SealedArtifactReferenceV1,
+    pub body: SealedArtifactReferenceV2,
     pub state: ClaimState,
     pub aggregate_revision: AggregateRevision,
 }
@@ -327,7 +327,7 @@ pub struct Decision {
     pub target: InstitutionalReference,
     pub kind: DecisionKind,
     pub state: DecisionState,
-    pub rationale: SealedArtifactReferenceV1,
+    pub rationale: SealedArtifactReferenceV2,
     pub aggregate_revision: AggregateRevision,
 }
 
@@ -405,7 +405,7 @@ impl PublicationKind {
 /// explicit evidence links, not a generic metadata bag.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicationAttachment {
-    pub artifact: SealedArtifactReferenceV1,
+    pub artifact: SealedArtifactReferenceV2,
     pub label: String,
 }
 
@@ -433,7 +433,7 @@ pub struct Publication {
     pub anchor: InstitutionalReference,
     pub kind: PublicationKind,
     pub summary: String,
-    pub body: SealedArtifactReferenceV1,
+    pub body: SealedArtifactReferenceV2,
     pub attachments: Vec<PublicationAttachment>,
     pub reply_to: Option<PublicationId>,
     pub supersedes: Option<PublicationId>,
@@ -619,7 +619,7 @@ impl InstitutionalReference {
 }
 
 fn validate_body(
-    artifact: &SealedArtifactReferenceV1,
+    artifact: &SealedArtifactReferenceV2,
     field: &'static str,
 ) -> Result<(), ContractError> {
     artifact.validate(field, INSTITUTIONAL_BODY_MAX_BYTES, false)

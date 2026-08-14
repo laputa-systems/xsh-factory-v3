@@ -17,7 +17,7 @@ struct GoldenRequest {
 #[test]
 fn request_frame_matches_checked_in_wire_shape() {
     let request = GoldenRequest {
-        protocol_version: 1,
+        protocol_version: 2,
         request_id: "req-1".to_owned(),
         operation: wire::OP_ARTIFACT_SEAL_WORKSPACE_FILE.to_owned(),
         client_command_id: "cmd-1".to_owned(),
@@ -65,16 +65,16 @@ fn malformed_truncated_oversized_and_trailing_frames_are_rejected() {
         Err(wire::FrameError::InvalidJson { .. })
     ));
     let wrong_version = wire::encode_frame(
-        br#"{"protocol_version":2,"request_id":"r","operation":"work.complete"}"#,
+        br#"{"protocol_version":1,"request_id":"r","operation":"work.complete"}"#,
         wire::REQUEST_FRAME_MAX_BYTES,
     )
     .unwrap();
     assert_eq!(
         wire::decode_routing_envelope(&wrong_version, wire::REQUEST_FRAME_MAX_BYTES),
-        Err(wire::FrameError::UnsupportedProtocol(2))
+        Err(wire::FrameError::UnsupportedProtocol(1))
     );
     let unknown = wire::encode_frame(
-        br#"{"protocol_version":1,"request_id":"r","operation":"unknown"}"#,
+        br#"{"protocol_version":2,"request_id":"r","operation":"unknown"}"#,
         wire::REQUEST_FRAME_MAX_BYTES,
     )
     .unwrap();
@@ -87,7 +87,7 @@ fn malformed_truncated_oversized_and_trailing_frames_are_rejected() {
 #[test]
 fn campaign_operator_frames_are_closed_and_exclude_daemon_resolved_pins() {
     let start = wire::OperatorStartCampaignRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "campaign-start-1".to_owned(),
         operation: wire::OP_OPERATOR_START_CAMPAIGN.to_owned(),
         client_command_id: "campaign-command-1".to_owned(),
@@ -119,7 +119,7 @@ fn campaign_operator_frames_are_closed_and_exclude_daemon_resolved_pins() {
     assert!(!start_json.contains("repository_id"));
 
     let status = wire::OperatorCampaignStatusRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "campaign-status-1".to_owned(),
         operation: wire::OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
         campaign_id: 9,
@@ -131,7 +131,7 @@ fn campaign_operator_frames_are_closed_and_exclude_daemon_resolved_pins() {
 #[test]
 fn operation_frames_reject_unknown_or_noncanonical_fields_before_dispatch() {
     let request = wire::OperatorCampaignStatusRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "campaign-status-closed".to_owned(),
         operation: wire::OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
         campaign_id: 9,
@@ -149,7 +149,7 @@ fn operation_frames_reject_unknown_or_noncanonical_fields_before_dispatch() {
     ));
 
     let reordered = format!(
-        "{{\"campaign_id\":9,\"protocol_version\":1,\"request_id\":\"campaign-status-closed\",\"operation\":\"{}\"}}",
+        "{{\"campaign_id\":9,\"protocol_version\":2,\"request_id\":\"campaign-status-closed\",\"operation\":\"{}\"}}",
         wire::OP_OPERATOR_CAMPAIGN_STATUS
     );
     let frame = wire::encode_frame(reordered.as_bytes(), wire::REQUEST_FRAME_MAX_BYTES).unwrap();
@@ -166,7 +166,7 @@ fn operation_frames_reject_unknown_or_noncanonical_fields_before_dispatch() {
 #[test]
 fn operator_navigation_requests_are_closed_and_known() {
     let request = wire::OperatorTicketListRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "ticket-list-1".to_owned(),
         operation: wire::OP_OPERATOR_LIST_TICKETS.to_owned(),
         state: Some("sponsored".to_owned()),
@@ -179,7 +179,7 @@ fn operator_navigation_requests_are_closed_and_known() {
         wire::OP_OPERATOR_LIST_TICKETS
     );
     let audit = wire::OperatorAuditShowRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "audit-show-1".to_owned(),
         operation: wire::OP_OPERATOR_SHOW_AUDIT.to_owned(),
         selector: "ticket:9".to_owned(),
@@ -192,7 +192,7 @@ fn operator_navigation_requests_are_closed_and_known() {
 #[test]
 fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
     let request = wire::OperatorInstitutionalSearchRequest {
-        protocol_version: wire::PROTOCOL_VERSION_V1,
+        protocol_version: wire::PROTOCOL_VERSION_V2,
         request_id: "institutional-search-1".to_owned(),
         operation: wire::OP_OPERATOR_INSTITUTIONAL_SEARCH.to_owned(),
         query: "typed records".to_owned(),
@@ -201,7 +201,7 @@ fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
         owner_office_id: Some(3),
         anchor: None,
         limit: 20,
-        cursor: Some(wire::InstitutionalReferenceWireV1 {
+        cursor: Some(wire::InstitutionalReferenceWireV2 {
             kind: "rfc".to_owned(),
             id: 9,
         }),
@@ -219,7 +219,7 @@ fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
     );
 
     let mismatched_cursor = wire::OperatorInstitutionalSearchRequest {
-        cursor: Some(wire::InstitutionalReferenceWireV1 {
+        cursor: Some(wire::InstitutionalReferenceWireV2 {
             kind: "experiment".to_owned(),
             id: 9,
         }),
@@ -461,10 +461,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionVerifyPacketRequest>(request),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<SessionSealArtifactRequest>(request),
             OP_SESSION_SUBMIT_TERMINAL => round_trip::<SessionSubmitTerminalRequest>(request),
-            OP_FORUM_LIST_TOPICS => round_trip::<ForumListTopicsRequestV1>(request),
-            OP_FORUM_LIST_THREADS => round_trip::<ForumListThreadsRequestV1>(request),
-            OP_FORUM_SEARCH => round_trip::<ForumSearchRequestV1>(request),
-            OP_FORUM_READ_THREAD => round_trip::<ForumReadThreadRequestV1>(request),
+            OP_FORUM_LIST_TOPICS => round_trip::<ForumListTopicsRequestV2>(request),
+            OP_FORUM_LIST_THREADS => round_trip::<ForumListThreadsRequestV2>(request),
+            OP_FORUM_SEARCH => round_trip::<ForumSearchRequestV2>(request),
+            OP_FORUM_READ_THREAD => round_trip::<ForumReadThreadRequestV2>(request),
             other => panic!("unknown fixture operation {other}"),
         }
 
@@ -507,10 +507,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             }
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionPacketVerificationResponse>(success),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<ArtifactReceiptResponse>(success),
-            OP_FORUM_LIST_TOPICS => round_trip::<ForumTopicsResponseV1>(success),
-            OP_FORUM_LIST_THREADS => round_trip::<ForumThreadsResponseV1>(success),
-            OP_FORUM_SEARCH => round_trip::<ForumSearchResponseV1>(success),
-            OP_FORUM_READ_THREAD => round_trip::<ForumPostsResponseV1>(success),
+            OP_FORUM_LIST_TOPICS => round_trip::<ForumTopicsResponseV2>(success),
+            OP_FORUM_LIST_THREADS => round_trip::<ForumThreadsResponseV2>(success),
+            OP_FORUM_SEARCH => round_trip::<ForumSearchResponseV2>(success),
+            OP_FORUM_READ_THREAD => round_trip::<ForumPostsResponseV2>(success),
             _ => round_trip::<OperationReceiptResponse>(success),
         }
         round_trip::<ConflictResponse>(fixture_field(&root, "conflict", operation));
@@ -539,7 +539,7 @@ fn quality_and_architect_goldens_convert_to_closed_contracts() {
     .expect("Architect request");
     assert_eq!(
         architect.decision().unwrap().decision,
-        CandidateDecisionV1::Deliver
+        CandidateDecisionV2::Deliver
     );
 }
 

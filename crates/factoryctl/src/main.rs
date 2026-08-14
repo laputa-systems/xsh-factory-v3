@@ -24,14 +24,14 @@ use factory_protocol::{
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, AuditShowResponse, CampaignReceiptResponse,
     CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV2,
-    ForumListThreadsRequestV1, ForumListTopicsRequestV1, ForumPostsResponseV1,
-    ForumReadThreadRequestV1, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1,
-    ForumTopicsResponseV1, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
+    ForumListThreadsRequestV2, ForumListTopicsRequestV2, ForumPostsResponseV2,
+    ForumReadThreadRequestV2, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadsResponseV2,
+    ForumTopicsResponseV2, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorStartCampaignRequest,
-    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1, RuntimeRelativePath,
-    SealedArtifactReferenceWireV1, TicketListResponse, TicketShowResponse,
+    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2, RuntimeRelativePath,
+    SealedArtifactReferenceWireV2, TicketListResponse, TicketShowResponse,
 };
 
 fn main() -> ExitCode {
@@ -72,7 +72,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = base.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .sponsor_ticket_revision(ArchitectSponsorTicketRevisionRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: architect_request_id("sponsor"),
                     operation: "architect.sponsor_ticket_revision".to_owned(),
                     client_command_id: base.client_command_id,
@@ -91,7 +91,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = base.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .release_ticket_attempt(ArchitectReleaseTicketAttemptRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: architect_request_id("release"),
                     operation: "architect.release_ticket_attempt".to_owned(),
                     client_command_id: base.client_command_id,
@@ -113,7 +113,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = base.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .decide_candidate(ArchitectDecideCandidateRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: architect_request_id("decide"),
                     operation: "architect.decide_candidate".to_owned(),
                     client_command_id: base.client_command_id,
@@ -132,7 +132,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .start_campaign(OperatorStartCampaignRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: campaign_request_id("start"),
                     operation: "operator.campaign.start".to_owned(),
                     client_command_id: command.client_command_id,
@@ -152,7 +152,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let status = OperatorClient::new(connection.socket_path)
                 .campaign_status(OperatorCampaignStatusRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: campaign_request_id("status"),
                     operation: "operator.campaign.status".to_owned(),
                     campaign_id,
@@ -164,7 +164,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .cancel_campaign(OperatorCancelCampaignRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: campaign_request_id("cancel"),
                     operation: "operator.campaign.cancel".to_owned(),
                     client_command_id: command.client_command_id,
@@ -179,7 +179,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let status = OperatorClient::new(connection.socket_path)
                 .show_application(OperatorApplicationShowRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: application_request_id("show"),
                     operation: "operator.application.show".to_owned(),
                     application_key: command.application_key,
@@ -192,7 +192,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .register_application(OperatorApplicationRegisterRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: application_request_id("register"),
                     operation: "operator.application.register".to_owned(),
                     client_command_id: command.client_command_id,
@@ -210,7 +210,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.base.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .activate_application(OperatorApplicationActivateRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: application_request_id("activate"),
                     operation: "operator.application.activate".to_owned(),
                     client_command_id: command.base.client_command_id,
@@ -227,7 +227,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let receipt = OperatorClient::new(connection.socket_path)
                 .seal_operator_artifact(OperatorArtifactSealRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: operator_artifact_request_id(),
                     operation: "operator.artifact.seal".to_owned(),
                     client_command_id: command.client_command_id,
@@ -243,7 +243,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
             let connection = command.connection.clone();
             let response = OperatorClient::new(connection.socket_path)
                 .list_tickets(OperatorTicketListRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: navigation_request_id("ticket-list"),
                     operation: "operator.ticket.list".to_owned(),
                     state: command.state,
@@ -257,7 +257,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let response = OperatorClient::new(connection.socket_path.clone())
                 .show_ticket(OperatorTicketShowRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: navigation_request_id("ticket-show"),
                     operation: "operator.ticket.show".to_owned(),
                     ticket_id,
@@ -271,7 +271,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let response = OperatorClient::new(connection.socket_path.clone())
                 .show_candidate(OperatorCandidateShowRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: navigation_request_id("candidate-show"),
                     operation: "operator.candidate.show".to_owned(),
                     candidate_id,
@@ -285,7 +285,7 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let response = OperatorClient::new(connection.socket_path.clone())
                 .show_audit(OperatorAuditShowRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: navigation_request_id("audit-show"),
                     operation: "operator.audit.show".to_owned(),
                     selector,
@@ -296,8 +296,8 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::ForumTopics(base) => {
             let connection = base.connection.clone();
             let response = OperatorClient::new(connection.socket_path)
-                .forum_list_topics(ForumListTopicsRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                .forum_list_topics(ForumListTopicsRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: forum_request_id("topics"),
                     operation: "forum.list_topics".to_owned(),
                     cursor: base.cursor,
@@ -309,8 +309,8 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::ForumThreads { base, topic_id } => {
             let connection = base.connection.clone();
             let response = OperatorClient::new(connection.socket_path)
-                .forum_list_threads(ForumListThreadsRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                .forum_list_threads(ForumListThreadsRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: forum_request_id("threads"),
                     operation: "forum.list_threads".to_owned(),
                     topic_id,
@@ -327,8 +327,8 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let connection = base.connection.clone();
             let response = OperatorClient::new(connection.socket_path)
-                .forum_read_thread(ForumReadThreadRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                .forum_read_thread(ForumReadThreadRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: forum_request_id("read"),
                     operation: "forum.read_thread".to_owned(),
                     thread_id,
@@ -341,8 +341,8 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::ForumSearch { base, query } => {
             let connection = base.connection.clone();
             let response = OperatorClient::new(connection.socket_path)
-                .forum_search(ForumSearchRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                .forum_search(ForumSearchRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: forum_request_id("search"),
                     operation: "forum.search".to_owned(),
                     query,
@@ -1034,7 +1034,7 @@ fn print_audit_show(response: &AuditShowResponse, json: bool) {
     }
 }
 
-fn print_forum_topics(response: &ForumTopicsResponseV1, json: bool) {
+fn print_forum_topics(response: &ForumTopicsResponseV2, json: bool) {
     if json {
         print!(
             "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"items\":[",
@@ -1059,7 +1059,7 @@ fn print_forum_topics(response: &ForumTopicsResponseV1, json: bool) {
         }
     }
 }
-fn print_forum_threads(response: &ForumThreadsResponseV1, json: bool) {
+fn print_forum_threads(response: &ForumThreadsResponseV2, json: bool) {
     if json {
         print!(
             "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"items\":[",
@@ -1087,7 +1087,7 @@ fn print_forum_threads(response: &ForumThreadsResponseV1, json: bool) {
         }
     }
 }
-fn print_forum_posts(response: &ForumPostsResponseV1, json: bool) {
+fn print_forum_posts(response: &ForumPostsResponseV2, json: bool) {
     if json {
         print!(
             "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"items\":[",
@@ -1112,7 +1112,7 @@ fn print_forum_posts(response: &ForumPostsResponseV1, json: bool) {
         }
     }
 }
-fn print_forum_search(response: &ForumSearchResponseV1, json: bool) {
+fn print_forum_search(response: &ForumSearchResponseV2, json: bool) {
     if json {
         print!(
             "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"items\":[",
@@ -1167,7 +1167,7 @@ struct ArchitectBaseArgs {
     connection: ConnectionArgs,
     client_command_id: String,
     expected_revision: u64,
-    rationale: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
     principal: String,
 }
 
@@ -2439,7 +2439,7 @@ fn parse_architect_base(arguments: Vec<String>) -> Result<ArchitectBaseArgs, Str
             .ok_or_else(|| "--client-command-id is required".to_owned())?,
         expected_revision: expected_revision
             .ok_or_else(|| "--expected-revision is required".to_owned())?,
-        rationale: SealedArtifactReferenceWireV1 {
+        rationale: SealedArtifactReferenceWireV2 {
             artifact_id: rationale_artifact_id
                 .ok_or_else(|| "--rationale-artifact-id is required".to_owned())?,
             digest: rationale_digest.ok_or_else(|| "--rationale-digest is required".to_owned())?,
@@ -2624,7 +2624,7 @@ mod tests {
     #[test]
     fn daemon_status_output_exposes_bootstrap_guards() {
         let status = factory_protocol::OperatorStatusResponse {
-            protocol_version: 1,
+            protocol_version: 2,
             request_id: "status-1".to_owned(),
             operation: factory_protocol::OP_FACTORYD_STATUS.to_owned(),
             state: "ready".to_owned(),

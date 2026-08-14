@@ -8,7 +8,7 @@
 
 use factory_protocol::{
     ARCHITECT_RATIONALE_BYTE_LIMIT, AggregateRevision, ApplicationKey, ApplicationRevisionId,
-    ArchitectPrincipalV1, ContentDigest, ExpectedRevision, SealedArtifactReferenceV1,
+    ArchitectPrincipalV2, ContentDigest, ExpectedRevision, SealedArtifactReferenceV2,
 };
 use sqlx::{Postgres, Transaction};
 
@@ -30,12 +30,12 @@ const RUNNING_CAMPAIGN: i16 = 0;
 /// point.  The sealed rationale is provenance only and never contains code.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActivateApplicationRevision {
-    pub principal: ArchitectPrincipalV1,
+    pub principal: ArchitectPrincipalV2,
     pub command_id: String,
     pub expected_revision: ExpectedRevision,
     pub application_key: ApplicationKey,
     pub application_revision_id: ApplicationRevisionId,
-    pub rationale: SealedArtifactReferenceV1,
+    pub rationale: SealedArtifactReferenceV2,
 }
 
 impl ActivateApplicationRevision {
@@ -230,7 +230,7 @@ async fn selected_is_active(
 
 async fn require_sealed_rationale(
     transaction: &mut Transaction<'_, Postgres>,
-    rationale: &SealedArtifactReferenceV1,
+    rationale: &SealedArtifactReferenceV2,
 ) -> Result<(), StoreError> {
     let row = sqlx::query!(
         "SELECT digest, byte_length FROM factory.artifacts WHERE id = $1",

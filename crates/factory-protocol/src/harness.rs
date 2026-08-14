@@ -13,14 +13,14 @@ use crate::{
     TicketId, TicketRevisionId,
 };
 
-pub const HARNESS_COMPILER_VERSION_V1: u16 = 1;
+pub const HARNESS_COMPILER_VERSION_V2: u16 = 2;
 pub const HARNESS_CONTEXT_REASON_MAX_BYTES: usize = 512;
 pub const HARNESS_CONTEXT_MAX_ITEMS: usize = 32;
 
 /// Why the compiler selected a context reference. New inclusion behavior
 /// requires a closed protocol change rather than a retrieval score or map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ContextInclusionClassV1 {
+pub enum ContextInclusionClassV2 {
     DirectTarget,
     RequiredConstraint,
     DirectEvidence,
@@ -30,7 +30,7 @@ pub enum ContextInclusionClassV1 {
 /// A context reference is one immutable artifact or one typed institutional
 /// identity. There is no raw text and no generic `kind + id` pair here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ContextReferenceV1 {
+pub enum ContextReferenceV2 {
     Artifact(ArtifactId),
     Project(ProjectId),
     Rfc(RfcId),
@@ -44,13 +44,13 @@ pub enum ContextReferenceV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextItemV1 {
-    pub reference: ContextReferenceV1,
-    pub inclusion: ContextInclusionClassV1,
+pub struct ContextItemV2 {
+    pub reference: ContextReferenceV2,
+    pub inclusion: ContextInclusionClassV2,
     pub reason: String,
 }
 
-impl ContextItemV1 {
+impl ContextItemV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         if self.reason.is_empty()
             || self.reason.len() > HARNESS_CONTEXT_REASON_MAX_BYTES
@@ -70,20 +70,20 @@ impl ContextItemV1 {
 /// The complete, deterministic input contract for one compiled harness. The
 /// rendered prompts and packet are outputs, not fields actors can alter.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HarnessSpecV1 {
+pub struct HarnessSpecV2 {
     pub compiler_version: u16,
     pub application_revision_id: ApplicationRevisionId,
     pub office_id: OfficeId,
     pub assignment_role: AssignmentRole,
     pub objective: String,
-    pub context_items: Vec<ContextItemV1>,
+    pub context_items: Vec<ContextItemV2>,
     pub capabilities: Vec<crate::ActorToolV2>,
     pub remaining_campaign_allowance: MicroUsd,
 }
 
-impl HarnessSpecV1 {
+impl HarnessSpecV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.compiler_version != HARNESS_COMPILER_VERSION_V1 {
+        if self.compiler_version != HARNESS_COMPILER_VERSION_V2 {
             return Err(ContractError::InvalidValue {
                 field: "harness compiler version",
                 reason: "is not supported",
@@ -133,7 +133,7 @@ impl HarnessSpecV1 {
 /// to kernel-sealed canonical inputs/outputs and its digest identifies the
 /// resulting actor packet exactly.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HarnessCompilationV1 {
+pub struct HarnessCompilationV2 {
     pub id: crate::HarnessCompilationId,
     pub assignment_id: AssignmentId,
     pub application_revision_id: ApplicationRevisionId,
@@ -147,5 +147,5 @@ pub struct HarnessCompilationV1 {
     pub packet_digest: ContentDigest,
     /// Ordered operator-facing explanation of the durable references selected
     /// by this compiler invocation.
-    pub context_items: Vec<ContextItemV1>,
+    pub context_items: Vec<ContextItemV2>,
 }

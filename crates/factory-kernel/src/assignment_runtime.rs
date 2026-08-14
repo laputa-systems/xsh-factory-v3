@@ -20,10 +20,10 @@ use factory_protocol::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, AssignmentEvidenceRoleV2,
     AssignmentEvidenceV2, AssignmentEvidenceWireV2, AssignmentId, AssignmentLimitsWireV2,
     AssignmentModelWireV2, AssignmentPacketV2, AssignmentPacketWireV2, AssignmentReadWireV2,
-    AssignmentRole, AssignmentRuntimeWireV2, CampaignId, ContentDigest, ContextInclusionClassV1,
-    ContextItemV1, ContextReferenceV1, ExpectedRevision, HARNESS_COMPILER_VERSION_V1,
-    HarnessSpecV1, MicroUsd, OfficeId, ReadExactFileV2, RequiredReadV2, SealedArtifactReferenceV1,
-    TerminalOperationV1, TicketContractReadV1, canonical_assignment_packet_json_v2,
+    AssignmentRole, AssignmentRuntimeWireV2, CampaignId, ContentDigest, ContextInclusionClassV2,
+    ContextItemV2, ContextReferenceV2, ExpectedRevision, HARNESS_COMPILER_VERSION_V2,
+    HarnessSpecV2, MicroUsd, OfficeId, ReadExactFileV2, RequiredReadV2, SealedArtifactReferenceV2,
+    TerminalOperationV2, TicketContractReadV2, canonical_assignment_packet_json_v2,
     parse_application_bundle_v2, render_template_v2, unsigned_assignment_packet_digest_v2,
 };
 use miniserde::{Serialize, json};
@@ -38,7 +38,7 @@ use crate::{
     git::{GitCustody, GitCustodyError, OwnedWorktree, WorktreeKind, WorktreeName},
     harness_store::{HarnessStoreError, RecordHarnessCompilation},
     installed_runtime::{
-        InstalledKernelBuildReceiptV1, InstalledKernelExecutionTools, InstalledRuntimeError,
+        InstalledKernelBuildReceiptV2, InstalledKernelExecutionTools, InstalledRuntimeError,
     },
     local_transport::LocalDaemon,
     process::{CreateAssignment, ProcessStore, canonical_required_manifest},
@@ -188,7 +188,7 @@ pub async fn materialize_and_launch_assignment(
     store: &KernelStore,
     cas: &CasStore,
     daemon: &LocalDaemon,
-    installed: &InstalledKernelBuildReceiptV1,
+    installed: &InstalledKernelBuildReceiptV2,
     execution: &InstalledKernelExecutionTools,
     resolver: Arc<DurableAuthorityResolver>,
     request: AssignmentMaterializationRequest,
@@ -398,7 +398,7 @@ pub async fn materialize_and_launch_assignment(
                         application_revision_id: request.application_revision_id,
                         office_id,
                         assignment_role,
-                        compiler_version: HARNESS_COMPILER_VERSION_V1,
+                        compiler_version: HARNESS_COMPILER_VERSION_V2,
                         spec_artifact_id: harness_spec.artifact_id,
                         system_prompt_artifact_id: system.artifact_id,
                         assignment_prompt_artifact_id: assignment_prompt_artifact.artifact_id,
@@ -753,7 +753,7 @@ fn checked_template_bytes(
 
 fn exact_required_reads(
     application_required_reads: &[RequiredReadV2],
-    ticket_contract_reads: &[TicketContractReadV1],
+    ticket_contract_reads: &[TicketContractReadV2],
     workspace: &Path,
 ) -> Result<Vec<ReadExactFileV2>, AssignmentRuntimeError> {
     let mut values = Vec::new();
@@ -946,7 +946,7 @@ struct HarnessCompileInput<'a> {
 }
 
 struct CompiledHarness {
-    spec: HarnessSpecV1,
+    spec: HarnessSpecV2,
     canonical_spec_bytes: Vec<u8>,
     target: String,
     system_prompt: Vec<u8>,
@@ -964,9 +964,9 @@ fn compile_harness(
         input.assignment_evidence,
         input.required_reads,
     )?;
-    let mut context_items = vec![ContextItemV1 {
-        reference: ContextReferenceV1::Office(input.office_id),
-        inclusion: ContextInclusionClassV1::DirectTarget,
+    let mut context_items = vec![ContextItemV2 {
+        reference: ContextReferenceV2::Office(input.office_id),
+        inclusion: ContextInclusionClassV2::DirectTarget,
         reason: "the admitted office owns this invocation".to_owned(),
     }];
     match input.target_facts {
@@ -981,27 +981,27 @@ fn compile_harness(
             ticket_revision_id,
             ..
         } => {
-            context_items.push(ContextItemV1 {
-                reference: ContextReferenceV1::Ticket(*ticket_id),
-                inclusion: ContextInclusionClassV1::DirectTarget,
+            context_items.push(ContextItemV2 {
+                reference: ContextReferenceV2::Ticket(*ticket_id),
+                inclusion: ContextInclusionClassV2::DirectTarget,
                 reason: "the selected ticket is the direct assignment target".to_owned(),
             });
-            context_items.push(ContextItemV1 {
-                reference: ContextReferenceV1::TicketRevision(*ticket_revision_id),
-                inclusion: ContextInclusionClassV1::DirectTarget,
+            context_items.push(ContextItemV2 {
+                reference: ContextReferenceV2::TicketRevision(*ticket_revision_id),
+                inclusion: ContextInclusionClassV2::DirectTarget,
                 reason: "the selected ticket revision is the direct assignment target".to_owned(),
             });
         }
     }
-    context_items.push(ContextItemV1 {
-        reference: ContextReferenceV1::Artifact(input.required_manifest_artifact_id),
-        inclusion: ContextInclusionClassV1::RequiredConstraint,
+    context_items.push(ContextItemV2 {
+        reference: ContextReferenceV2::Artifact(input.required_manifest_artifact_id),
+        inclusion: ContextInclusionClassV2::RequiredConstraint,
         reason: "exact workspace reads are required before mutation".to_owned(),
     });
     for evidence in input.assignment_evidence {
-        context_items.push(ContextItemV1 {
-            reference: ContextReferenceV1::Artifact(evidence.artifact_id),
-            inclusion: ContextInclusionClassV1::DirectEvidence,
+        context_items.push(ContextItemV2 {
+            reference: ContextReferenceV2::Artifact(evidence.artifact_id),
+            inclusion: ContextInclusionClassV2::DirectEvidence,
             reason: format!("direct {} evidence", evidence.role.wire_name()),
         });
     }
@@ -1011,8 +1011,8 @@ fn compile_harness(
     // evidence), while the sealed packet retains every role-specific proof.
     let mut selected_references = BTreeSet::new();
     context_items.retain(|item| selected_references.insert(item.reference));
-    let spec = HarnessSpecV1 {
-        compiler_version: HARNESS_COMPILER_VERSION_V1,
+    let spec = HarnessSpecV2 {
+        compiler_version: HARNESS_COMPILER_VERSION_V2,
         application_revision_id: input.application_revision_id,
         office_id: input.office_id,
         assignment_role: input.assignment_role,
@@ -1069,7 +1069,7 @@ struct HarnessContextItemWire<'a> {
 
 /// A fixed-field, ordered DTO makes the sealed spec stable across retries.
 /// This is an artifact format, not an extensible external API.
-fn canonical_harness_spec_json(spec: &HarnessSpecV1) -> String {
+fn canonical_harness_spec_json(spec: &HarnessSpecV2) -> String {
     let context_items = spec
         .context_items
         .iter()
@@ -1100,27 +1100,27 @@ fn canonical_harness_spec_json(spec: &HarnessSpecV1) -> String {
     })
 }
 
-fn harness_reference_parts(reference: ContextReferenceV1) -> (&'static str, i64) {
+fn harness_reference_parts(reference: ContextReferenceV2) -> (&'static str, i64) {
     match reference {
-        ContextReferenceV1::Artifact(id) => ("artifact", id.get()),
-        ContextReferenceV1::Project(id) => ("project", id.get()),
-        ContextReferenceV1::Rfc(id) => ("rfc", id.get()),
-        ContextReferenceV1::RfcRevision(id) => ("rfc_revision", id.get()),
-        ContextReferenceV1::Ticket(id) => ("ticket", id.get()),
-        ContextReferenceV1::TicketRevision(id) => ("ticket_revision", id.get()),
-        ContextReferenceV1::Experiment(id) => ("experiment", id.get()),
-        ContextReferenceV1::Claim(id) => ("claim", id.get()),
-        ContextReferenceV1::Decision(id) => ("decision", id.get()),
-        ContextReferenceV1::Office(id) => ("office", id.get()),
+        ContextReferenceV2::Artifact(id) => ("artifact", id.get()),
+        ContextReferenceV2::Project(id) => ("project", id.get()),
+        ContextReferenceV2::Rfc(id) => ("rfc", id.get()),
+        ContextReferenceV2::RfcRevision(id) => ("rfc_revision", id.get()),
+        ContextReferenceV2::Ticket(id) => ("ticket", id.get()),
+        ContextReferenceV2::TicketRevision(id) => ("ticket_revision", id.get()),
+        ContextReferenceV2::Experiment(id) => ("experiment", id.get()),
+        ContextReferenceV2::Claim(id) => ("claim", id.get()),
+        ContextReferenceV2::Decision(id) => ("decision", id.get()),
+        ContextReferenceV2::Office(id) => ("office", id.get()),
     }
 }
 
-const fn harness_inclusion_name(value: ContextInclusionClassV1) -> &'static str {
+const fn harness_inclusion_name(value: ContextInclusionClassV2) -> &'static str {
     match value {
-        ContextInclusionClassV1::DirectTarget => "direct_target",
-        ContextInclusionClassV1::RequiredConstraint => "required_constraint",
-        ContextInclusionClassV1::DirectEvidence => "direct_evidence",
-        ContextInclusionClassV1::CurrentDecision => "current_decision",
+        ContextInclusionClassV2::DirectTarget => "direct_target",
+        ContextInclusionClassV2::RequiredConstraint => "required_constraint",
+        ContextInclusionClassV2::DirectEvidence => "direct_evidence",
+        ContextInclusionClassV2::CurrentDecision => "current_decision",
     }
 }
 
@@ -1393,11 +1393,11 @@ fn candidate(target: DurableAssignmentTarget) -> Option<factory_protocol::Candid
         _ => None,
     }
 }
-fn terminal_operations(target: DurableAssignmentTarget) -> Vec<TerminalOperationV1> {
+fn terminal_operations(target: DurableAssignmentTarget) -> Vec<TerminalOperationV2> {
     match target {
-        DurableAssignmentTarget::Product => vec![TerminalOperationV1::WorkComplete],
-        DurableAssignmentTarget::Engineering { .. } => vec![TerminalOperationV1::CandidateSubmit],
-        DurableAssignmentTarget::Quality { .. } => vec![TerminalOperationV1::QualitySubmitReview],
+        DurableAssignmentTarget::Product => vec![TerminalOperationV2::WorkComplete],
+        DurableAssignmentTarget::Engineering { .. } => vec![TerminalOperationV2::CandidateSubmit],
+        DurableAssignmentTarget::Quality { .. } => vec![TerminalOperationV2::QualitySubmitReview],
     }
 }
 /// Flattens the resolver's exact named evidence closure into the same closed
@@ -1409,7 +1409,7 @@ fn exact_assignment_evidence(
     context: &DurableAssignmentLaunchContext,
 ) -> Result<Vec<AssignmentEvidenceV2>, AssignmentRuntimeError> {
     let mut values = Vec::new();
-    let mut push = |role: AssignmentEvidenceRoleV2, reference: SealedArtifactReferenceV1| {
+    let mut push = |role: AssignmentEvidenceRoleV2, reference: SealedArtifactReferenceV2| {
         values.push(AssignmentEvidenceV2 {
             role,
             artifact_id: reference.artifact_id,
@@ -1689,11 +1689,11 @@ fn thinking_name(value: factory_protocol::ThinkingLevelV2) -> &'static str {
         factory_protocol::ThinkingLevelV2::XHigh => "xhigh",
     }
 }
-fn terminal_name(value: TerminalOperationV1) -> &'static str {
+fn terminal_name(value: TerminalOperationV2) -> &'static str {
     match value {
-        TerminalOperationV1::WorkComplete => "work_complete",
-        TerminalOperationV1::CandidateSubmit => "candidate_submit",
-        TerminalOperationV1::QualitySubmitReview => "quality_submit_review",
+        TerminalOperationV2::WorkComplete => "work_complete",
+        TerminalOperationV2::CandidateSubmit => "candidate_submit",
+        TerminalOperationV2::QualitySubmitReview => "quality_submit_review",
     }
 }
 fn tool_name(value: factory_protocol::ActorToolV2) -> &'static str {
@@ -1810,7 +1810,7 @@ mod tests {
                 path: path.clone(),
                 reason: "application orientation".to_owned(),
             }],
-            &[TicketContractReadV1 {
+            &[TicketContractReadV2 {
                 path,
                 reason: "ticket acceptance contract".to_owned(),
             }],
@@ -1875,23 +1875,23 @@ mod tests {
 
     #[test]
     fn harness_spec_artifact_spelling_is_stable_and_keeps_context_typed() {
-        let spec = HarnessSpecV1 {
-            compiler_version: HARNESS_COMPILER_VERSION_V1,
+        let spec = HarnessSpecV2 {
+            compiler_version: HARNESS_COMPILER_VERSION_V2,
             application_revision_id: ApplicationRevisionId::new(1).unwrap(),
             office_id: OfficeId::new(2).unwrap(),
             assignment_role: AssignmentRole::Engineering,
             objective: "ticket-3-revision-4-attempt-5".to_owned(),
             context_items: vec![
-                ContextItemV1 {
-                    reference: ContextReferenceV1::Office(OfficeId::new(2).unwrap()),
-                    inclusion: ContextInclusionClassV1::DirectTarget,
+                ContextItemV2 {
+                    reference: ContextReferenceV2::Office(OfficeId::new(2).unwrap()),
+                    inclusion: ContextInclusionClassV2::DirectTarget,
                     reason: "the admitted office owns this invocation".to_owned(),
                 },
-                ContextItemV1 {
-                    reference: ContextReferenceV1::Ticket(
+                ContextItemV2 {
+                    reference: ContextReferenceV2::Ticket(
                         factory_protocol::TicketId::new(3).unwrap(),
                     ),
-                    inclusion: ContextInclusionClassV1::DirectTarget,
+                    inclusion: ContextInclusionClassV2::DirectTarget,
                     reason: "the selected ticket is the direct assignment target".to_owned(),
                 },
             ],

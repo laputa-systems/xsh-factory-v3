@@ -133,16 +133,16 @@ pub struct ForumPostCommand {
 /// the daemon's inherited actor connection.  The existing generic wire module
 /// can route these operation-specific values without introducing a dynamic
 /// payload map.
-pub const OP_FORUM_LIST_TOPICS_V1: &str = "forum.list_topics";
-pub const OP_FORUM_LIST_THREADS_V1: &str = "forum.list_threads";
-pub const OP_FORUM_SEARCH_V1: &str = "forum.search";
-pub const OP_FORUM_READ_THREAD_V1: &str = "forum.read_thread";
-pub const OP_FORUM_CREATE_TOPIC_V1: &str = "forum.create_topic";
-pub const OP_FORUM_CREATE_THREAD_V1: &str = "forum.create_thread";
-pub const OP_FORUM_POST_V1: &str = "forum.post";
+pub const OP_FORUM_LIST_TOPICS_V2: &str = "forum.list_topics";
+pub const OP_FORUM_LIST_THREADS_V2: &str = "forum.list_threads";
+pub const OP_FORUM_SEARCH_V2: &str = "forum.search";
+pub const OP_FORUM_READ_THREAD_V2: &str = "forum.read_thread";
+pub const OP_FORUM_CREATE_TOPIC_V2: &str = "forum.create_topic";
+pub const OP_FORUM_CREATE_THREAD_V2: &str = "forum.create_thread";
+pub const OP_FORUM_POST_V2: &str = "forum.post";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumListTopicsRequestV1 {
+pub struct ForumListTopicsRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -151,7 +151,7 @@ pub struct ForumListTopicsRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumListThreadsRequestV1 {
+pub struct ForumListThreadsRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -161,7 +161,7 @@ pub struct ForumListThreadsRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumSearchRequestV1 {
+pub struct ForumSearchRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -177,7 +177,7 @@ pub struct ForumSearchRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumReadThreadRequestV1 {
+pub struct ForumReadThreadRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -187,7 +187,7 @@ pub struct ForumReadThreadRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumCreateTopicRequestV1 {
+pub struct ForumCreateTopicRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -198,7 +198,7 @@ pub struct ForumCreateTopicRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumCreateThreadRequestV1 {
+pub struct ForumCreateThreadRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -209,13 +209,13 @@ pub struct ForumCreateThreadRequestV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumAttachmentWireV1 {
+pub struct ForumAttachmentWireV2 {
     pub artifact_id: i64,
     pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumPostRequestV1 {
+pub struct ForumPostRequestV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
@@ -226,11 +226,11 @@ pub struct ForumPostRequestV1 {
     pub body: String,
     pub reply_to: Option<i64>,
     pub supersedes: Option<i64>,
-    pub attachments: Vec<ForumAttachmentWireV1>,
+    pub attachments: Vec<ForumAttachmentWireV2>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumTopicViewV1 {
+pub struct ForumTopicViewV2 {
     pub id: i64,
     pub name: String,
     pub description: String,
@@ -241,7 +241,7 @@ pub struct ForumTopicViewV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumThreadViewV1 {
+pub struct ForumThreadViewV2 {
     pub id: i64,
     pub topic_id: i64,
     pub title: String,
@@ -252,13 +252,13 @@ pub struct ForumThreadViewV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumAttachmentViewV1 {
+pub struct ForumAttachmentViewV2 {
     pub artifact_id: i64,
     pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumPostViewV1 {
+pub struct ForumPostViewV2 {
     pub id: i64,
     pub thread_id: i64,
     pub kind: u8,
@@ -268,12 +268,12 @@ pub struct ForumPostViewV1 {
     pub author_office: Option<u8>,
     pub reply_to: Option<i64>,
     pub supersedes: Option<i64>,
-    pub attachments: Vec<ForumAttachmentViewV1>,
+    pub attachments: Vec<ForumAttachmentViewV2>,
     pub created_at_micros: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumSearchHitV1 {
+pub struct ForumSearchHitV2 {
     pub topic_id: i64,
     pub thread_id: i64,
     pub post_id: i64,
@@ -286,38 +286,38 @@ pub struct ForumSearchHitV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumTopicsResponseV1 {
+pub struct ForumTopicsResponseV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
-    pub items: Vec<ForumTopicViewV1>,
+    pub items: Vec<ForumTopicViewV2>,
     pub next_cursor: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumThreadsResponseV1 {
+pub struct ForumThreadsResponseV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
-    pub items: Vec<ForumThreadViewV1>,
+    pub items: Vec<ForumThreadViewV2>,
     pub next_cursor: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumPostsResponseV1 {
+pub struct ForumPostsResponseV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
-    pub items: Vec<ForumPostViewV1>,
+    pub items: Vec<ForumPostViewV2>,
     pub next_cursor: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForumSearchResponseV1 {
+pub struct ForumSearchResponseV2 {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
-    pub items: Vec<ForumSearchHitV1>,
+    pub items: Vec<ForumSearchHitV2>,
     pub next_cursor: String,
 }
 

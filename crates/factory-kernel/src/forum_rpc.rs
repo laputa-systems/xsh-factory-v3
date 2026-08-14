@@ -6,12 +6,12 @@
 //! compatibility only.
 
 use factory_protocol::{
-    AssignmentRole, ForumAttachmentViewV1, ForumAuthor, ForumListThreadsRequestV1,
-    ForumListTopicsRequestV1, ForumPageLimit, ForumPostId, ForumPostKind, ForumPostViewV1,
-    ForumPostsResponseV1, ForumReadThreadRequestV1, ForumSearchCursor, ForumSearchHitV1,
-    ForumSearchInput, ForumSearchQuery, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadId,
-    ForumThreadPage, ForumThreadViewV1, ForumThreadsResponseV1, ForumTopicId, ForumTopicViewV1,
-    ForumTopicsResponseV1, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
+    AssignmentRole, ForumAttachmentViewV2, ForumAuthor, ForumListThreadsRequestV2,
+    ForumListTopicsRequestV2, ForumPageLimit, ForumPostId, ForumPostKind, ForumPostViewV2,
+    ForumPostsResponseV2, ForumReadThreadRequestV2, ForumSearchCursor, ForumSearchHitV2,
+    ForumSearchInput, ForumSearchQuery, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadId,
+    ForumThreadPage, ForumThreadViewV2, ForumThreadsResponseV2, ForumTopicId, ForumTopicViewV2,
+    ForumTopicsResponseV2, PROTOCOL_VERSION_V2, REQUEST_FRAME_MAX_BYTES,
 };
 use miniserde::json;
 
@@ -32,7 +32,7 @@ pub(crate) async fn dispatch_actor_forum(
     Ok(match result {
         Ok(bytes) => bytes,
         Err(error) => json::to_string(&factory_protocol::ErrorResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation,
             error_code: forum_error_code(&error).to_owned(),
@@ -45,7 +45,7 @@ pub(crate) async fn dispatch_actor_forum(
 async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>, ForumRpcError> {
     Ok(match frame.envelope().operation.as_str() {
         factory_protocol::OP_FORUM_LIST_TOPICS => {
-            let request: ForumListTopicsRequestV1 = decode(frame)?;
+            let request: ForumListTopicsRequestV2 = decode(frame)?;
             let limit = ForumPageLimit::new(request.limit)?;
             let items = store
                 .list_topics(
@@ -58,8 +58,8 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
                 limit,
                 items.last().map(|item| item.topic_id.get()),
             );
-            json::to_string(&ForumTopicsResponseV1 {
-                protocol_version: PROTOCOL_VERSION_V1,
+            json::to_string(&ForumTopicsResponseV2 {
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_FORUM_LIST_TOPICS.to_owned(),
                 items: items.into_iter().map(topic_wire).collect(),
@@ -68,7 +68,7 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
             .into_bytes()
         }
         factory_protocol::OP_FORUM_LIST_THREADS => {
-            let request: ForumListThreadsRequestV1 = decode(frame)?;
+            let request: ForumListThreadsRequestV2 = decode(frame)?;
             let limit = ForumPageLimit::new(request.limit)?;
             let topic_id = ForumTopicId::new(request.topic_id)?;
             let items = store
@@ -83,8 +83,8 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
                 limit,
                 items.last().map(|item| item.thread_id.get()),
             );
-            json::to_string(&ForumThreadsResponseV1 {
-                protocol_version: PROTOCOL_VERSION_V1,
+            json::to_string(&ForumThreadsResponseV2 {
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_FORUM_LIST_THREADS.to_owned(),
                 items: items.into_iter().map(thread_wire).collect(),
@@ -93,7 +93,7 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
             .into_bytes()
         }
         factory_protocol::OP_FORUM_READ_THREAD => {
-            let request: ForumReadThreadRequestV1 = decode(frame)?;
+            let request: ForumReadThreadRequestV2 = decode(frame)?;
             let limit = ForumPageLimit::new(request.limit)?;
             let items = store
                 .read_thread(ForumThreadPage::new(
@@ -107,8 +107,8 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
                 limit,
                 items.last().map(|item| item.post_id.get()),
             );
-            json::to_string(&ForumPostsResponseV1 {
-                protocol_version: PROTOCOL_VERSION_V1,
+            json::to_string(&ForumPostsResponseV2 {
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_FORUM_READ_THREAD.to_owned(),
                 items: items.into_iter().map(post_wire).collect(),
@@ -117,7 +117,7 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
             .into_bytes()
         }
         factory_protocol::OP_FORUM_SEARCH => {
-            let request: ForumSearchRequestV1 = decode(frame)?;
+            let request: ForumSearchRequestV2 = decode(frame)?;
             let limit = ForumPageLimit::new(request.limit)?;
             let input = ForumSearchInput {
                 query: ForumSearchQuery::new(request.query)?,
@@ -143,8 +143,8 @@ async fn dispatch(store: &ForumStore, frame: &BoundActorFrame) -> Result<Vec<u8>
             } else {
                 String::new()
             };
-            json::to_string(&ForumSearchResponseV1 {
-                protocol_version: PROTOCOL_VERSION_V1,
+            json::to_string(&ForumSearchResponseV2 {
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_FORUM_SEARCH.to_owned(),
                 items: items.into_iter().map(search_wire).collect(),
@@ -209,9 +209,9 @@ fn optional_positive_id<T>(
     }
 }
 
-fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV1 {
+fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumTopicViewV1 {
+    ForumTopicViewV2 {
         id: item.topic_id.get(),
         name: item.name,
         description: item.description,
@@ -222,9 +222,9 @@ fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV1 {
     }
 }
 
-fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV1 {
+fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumThreadViewV1 {
+    ForumThreadViewV2 {
         id: item.thread_id.get(),
         topic_id: item.topic_id.get(),
         title: item.title,
@@ -235,9 +235,9 @@ fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV1 {
     }
 }
 
-fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
+fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumPostViewV1 {
+    ForumPostViewV2 {
         id: item.post_id.get(),
         thread_id: item.thread_id.get(),
         kind: post_kind_code(item.kind),
@@ -250,7 +250,7 @@ fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
         attachments: item
             .attachments
             .into_iter()
-            .map(|attachment| ForumAttachmentViewV1 {
+            .map(|attachment| ForumAttachmentViewV2 {
                 artifact_id: attachment.artifact_id.get(),
                 label: attachment.label,
             })
@@ -259,8 +259,8 @@ fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
     }
 }
 
-fn search_wire(item: crate::forum_store::ForumSearchHit) -> ForumSearchHitV1 {
-    ForumSearchHitV1 {
+fn search_wire(item: crate::forum_store::ForumSearchHit) -> ForumSearchHitV2 {
+    ForumSearchHitV2 {
         topic_id: item.topic_id.get(),
         thread_id: item.thread_id.get(),
         post_id: item.post_id.get(),

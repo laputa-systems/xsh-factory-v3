@@ -6,7 +6,7 @@
 //! [`PublicationStore`].
 
 use factory_protocol::{
-    ArtifactId, ErrorResponse, PROTOCOL_VERSION_V1, PublicationAttachmentWireV1,
+    ArtifactId, ErrorResponse, PROTOCOL_VERSION_V2, PublicationAttachmentWireV2,
     PublicationCreateRequest, PublicationId, PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES,
 };
 use miniserde::json;
@@ -32,7 +32,7 @@ pub(crate) async fn dispatch_actor_publication(
     Ok(match result {
         Ok(response) => response,
         Err(error) => json::to_string(&ErrorResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation,
             error_code: publication_error_code(&error).to_owned(),
@@ -56,7 +56,7 @@ async fn dispatch(
         .create_from_actor(*frame.binding(), &command_from_request(&request)?)
         .await?;
     Ok(json::to_string(&PublicationReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id: request.request_id,
         operation: factory_protocol::OP_PUBLICATION_CREATE.to_owned(),
         audit_id: receipt.audit_log_id.get(),
@@ -87,7 +87,7 @@ pub(crate) fn command_from_request(
 }
 
 fn attachment(
-    value: &PublicationAttachmentWireV1,
+    value: &PublicationAttachmentWireV2,
 ) -> Result<PublicationAttachmentInput, factory_protocol::ContractError> {
     Ok(PublicationAttachmentInput {
         artifact_id: ArtifactId::new(value.artifact_id)?,

@@ -21,8 +21,8 @@ use std::{
 
 use factory_protocol::{
     ArtifactId, AssignmentId, AssignmentPacketV2, ContentDigest, ExpectedRevision, MicroUsd,
-    ReadExactFileV2, RepositoryRelativePath, RuntimeRelativePath, SessionId, StopReasonV1,
-    TerminalOperationV1, TerminalReportV1, UsageTotalsV1,
+    ReadExactFileV2, RepositoryRelativePath, RuntimeRelativePath, SessionId, StopReasonV2,
+    TerminalOperationV2, TerminalReportV2, UsageTotalsV2,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -56,7 +56,7 @@ use crate::{
     workspace_read::{WorkspaceReadAuthority, WorkspaceReadError},
 };
 
-const ADMISSION_PROTOCOL_VERSION: u16 = 1;
+const ADMISSION_PROTOCOL_VERSION: u16 = 2;
 const ADMISSION_MAX_BYTES: usize = factory_protocol::RESPONSE_FRAME_MAX_BYTES - 1;
 /// The framed response includes base64, so keep raw evidence decisively below
 /// the transport cap. Large evidence remains sealed/navigable but is not a
@@ -437,7 +437,7 @@ pub enum SessionRuntimeError {
     #[error("terminal response channel closed before durable reconciliation")]
     TerminalResponseChannelClosed,
 
-    #[error("terminal operation or stop reason is not in the closed V1 contract")]
+    #[error("terminal operation or stop reason is not in the closed V2 contract")]
     InvalidTerminalContract,
 
     #[error("terminal transcript identity does not match the daemon-sealed artifact")]
@@ -667,7 +667,7 @@ impl KernelSessionRpc {
                 // remain fatal and are never disclosed as actor prose.
                 Err(LocalTransportError::Frame(error)) => {
                     Ok(json::to_string(&factory_protocol::ErrorResponse {
-                        protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                        protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                         request_id,
                         operation,
                         error_code: "session_rejected".to_owned(),
@@ -695,7 +695,7 @@ impl KernelSessionRpc {
                 LocalTransportError::WorkspaceRead(WorkspaceReadError::ConnectionIdentityMismatch),
             ),
             Err(error) => Ok(json::to_string(&factory_protocol::ErrorResponse {
-                protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                 request_id,
                 operation,
                 error_code: "workspace_read_rejected".to_owned(),
@@ -820,7 +820,7 @@ impl KernelSessionRpc {
             .packet_verified = true;
         Ok(
             json::to_string(&factory_protocol::SessionPacketVerificationResponse {
-                protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_SESSION_VERIFY_PACKET.to_owned(),
                 packet_digest: digest.to_hex(),
@@ -882,7 +882,7 @@ impl KernelSessionRpc {
         state.transcript = Some(registered);
         drop(state);
         Ok(json::to_string(&factory_protocol::ArtifactReceiptResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_SESSION_SEAL_ARTIFACT.to_owned(),
             artifact_id: receipt.artifact_id.get(),
@@ -933,7 +933,7 @@ impl KernelSessionRpc {
             )
             .await?;
         Ok(json::to_string(&factory_protocol::ArtifactReceiptResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_ARTIFACT_SEAL_WORKSPACE_FILE.to_owned(),
             artifact_id: receipt.artifact_id.get(),
@@ -994,7 +994,7 @@ impl KernelSessionRpc {
             .read_verified(sealed.digest())
             .map_err(|error| artifact_read_error(format!("CAS verification failed: {error}")))?;
         Ok(json::to_string(&factory_protocol::ArtifactReadResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_ARTIFACT_READ.to_owned(),
             artifact_id: artifact_id.get(),
@@ -1231,7 +1231,7 @@ impl KernelSessionRpc {
             .read_verified(sealed.digest())
             .map_err(|error| artifact_read_error(format!("CAS verification failed: {error}")))?;
         let proposal =
-            factory_protocol::parse_product_ticket_proposal_v1(&bytes, &context.ticket_bounds)
+            factory_protocol::parse_product_ticket_proposal_v2(&bytes, &context.ticket_bounds)
                 .map_err(|error| {
                     artifact_read_error(format!("stored ticket proposal is invalid: {error}"))
                 })?;
@@ -1252,7 +1252,7 @@ impl KernelSessionRpc {
         }
         self.require_packet_verified()?;
         self.require_required_reads_before_mutation("product.submit_ticket")?;
-        let request = factory_protocol::decode_product_submit_ticket_request_v1(frame)?;
+        let request = factory_protocol::decode_product_submit_ticket_request_v2(frame)?;
         if request.expected_revision != self.session.resulting_revision.get() {
             return Err(invalid_rpc(
                 "product.submit_ticket",
@@ -1276,7 +1276,7 @@ impl KernelSessionRpc {
         .map_err(|error| product_rpc_error(error.to_string()))?;
         Ok(
             json::to_string(&factory_protocol::OperationReceiptResponse {
-                protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_PRODUCT_SUBMIT_TICKET.to_owned(),
                 audit_id: receipt.audit_log_id,
@@ -1351,7 +1351,7 @@ impl KernelSessionRpc {
             }
         };
         let response = factory_protocol::RegressionCheckpointReceiptResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_CANDIDATE_CHECKPOINT_REGRESSION.to_owned(),
             regression_tree: checkpoint.regression_tree().as_str().to_owned(),
@@ -1433,7 +1433,7 @@ impl KernelSessionRpc {
                 candidate_tree,
             } => Ok(
                 json::to_string(&factory_protocol::CandidateReceiptResponse {
-                    protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                    protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                     request_id: request.request_id,
                     operation: factory_protocol::OP_CANDIDATE_SUBMIT.to_owned(),
                     audit_id: candidate.audit_log_id,
@@ -1522,7 +1522,7 @@ impl KernelSessionRpc {
             }
         };
         let response = factory_protocol::QualityValidationReceiptResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_QUALITY_RUN_FULL_SUITE.to_owned(),
             audit_id: full_suite.audit_log_id,
@@ -1612,7 +1612,7 @@ impl KernelSessionRpc {
         drop(state);
         Ok(
             json::to_string(&factory_protocol::QualityReviewReceiptResponse {
-                protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: factory_protocol::OP_QUALITY_SUBMIT_REVIEW.to_owned(),
                 audit_id: review.audit_log_id,
@@ -1708,7 +1708,7 @@ impl KernelSessionRpc {
             .map(parse_terminal_operation)
             .transpose()
             .map_err(|()| invalid_rpc("session.submit_terminal", "operation is unknown"))?;
-        if (stop == StopReasonV1::Completed) != operation.is_some() {
+        if (stop == StopReasonV2::Completed) != operation.is_some() {
             return Err(invalid_rpc(
                 "session.submit_terminal",
                 "operation and stop reason disagree",
@@ -1719,13 +1719,13 @@ impl KernelSessionRpc {
                 invalid_rpc("session.submit_terminal", "session RPC state is poisoned")
             })?;
             match operation {
-                Some(TerminalOperationV1::CandidateSubmit) if !state.engineering.submitted => {
+                Some(TerminalOperationV2::CandidateSubmit) if !state.engineering.submitted => {
                     return Err(invalid_rpc(
                         "session.submit_terminal",
                         "candidate terminal completion requires this session's candidate submission",
                     ));
                 }
-                Some(TerminalOperationV1::QualitySubmitReview)
+                Some(TerminalOperationV2::QualitySubmitReview)
                     if !state.quality.review_submitted =>
                 {
                     return Err(invalid_rpc(
@@ -2078,7 +2078,7 @@ where
         .await;
     if let Some(proposal) = terminal_proposal {
         let response = json::to_string(&factory_protocol::OperationReceiptResponse {
-            protocol_version: factory_protocol::PROTOCOL_VERSION_V1,
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
             request_id: proposal.request.request_id,
             operation: factory_protocol::OP_SESSION_SUBMIT_TERMINAL.to_owned(),
             audit_id: terminal.audit_log_id,
@@ -2182,7 +2182,7 @@ async fn reconcile_terminal(
         ));
     }
 
-    let usage = terminal_request.map(|terminal| UsageTotalsV1 {
+    let usage = terminal_request.map(|terminal| UsageTotalsV2 {
         input_tokens: terminal.input_tokens,
         output_tokens: terminal.output_tokens,
         cache_read_tokens: terminal.cache_read_tokens,
@@ -2217,7 +2217,7 @@ async fn reconcile_terminal(
             .map_err(|()| SessionRuntimeError::InvalidTerminalContract)?;
         let stop_reason = parse_stop_reason(&actor.stop_reason)
             .ok_or(SessionRuntimeError::InvalidTerminalContract)?;
-        let report = TerminalReportV1 {
+        let report = TerminalReportV2 {
             packet_digest: request.packet_digest,
             expected_session_revision: ExpectedRevision::new(session.resulting_revision),
             operation,
@@ -2245,7 +2245,7 @@ async fn reconcile_terminal(
     }
 
     let stop_reason = infrastructure_stop_reason(process_outcome.reason, transport);
-    let report = TerminalReportV1 {
+    let report = TerminalReportV2 {
         packet_digest: request.packet_digest,
         expected_session_revision: ExpectedRevision::new(session.resulting_revision),
         operation: None,
@@ -2387,27 +2387,27 @@ fn bounded_partial_transcript_path(
 fn infrastructure_stop_reason(
     process: ProcessStopReason,
     transport: SessionTransportStop,
-) -> StopReasonV1 {
+) -> StopReasonV2 {
     // An operator cancellation closes the actor descriptor as a consequence
     // of terminating the exact owned group. Preserve the initiating custody
     // reason instead of misclassifying that expected peer close as a daemon
     // disconnect.
     if transport == SessionTransportStop::TransportFailed {
-        return StopReasonV1::ProtocolError;
+        return StopReasonV2::ProtocolError;
     }
     if process == ProcessStopReason::Cancelled {
-        return StopReasonV1::Cancelled;
+        return StopReasonV2::Cancelled;
     }
     if transport == SessionTransportStop::PeerDisconnected {
-        return StopReasonV1::DaemonDisconnected;
+        return StopReasonV2::DaemonDisconnected;
     }
     match process {
-        ProcessStopReason::Exited => StopReasonV1::ProtocolError,
-        ProcessStopReason::NonZeroExit => StopReasonV1::NonZeroExit,
-        ProcessStopReason::Cancelled => StopReasonV1::Cancelled,
-        ProcessStopReason::Deadline => StopReasonV1::Deadline,
+        ProcessStopReason::Exited => StopReasonV2::ProtocolError,
+        ProcessStopReason::NonZeroExit => StopReasonV2::NonZeroExit,
+        ProcessStopReason::Cancelled => StopReasonV2::Cancelled,
+        ProcessStopReason::Deadline => StopReasonV2::Deadline,
         ProcessStopReason::StdoutLimit | ProcessStopReason::StderrLimit => {
-            StopReasonV1::OutputLimit
+            StopReasonV2::OutputLimit
         }
     }
 }
@@ -2427,11 +2427,11 @@ fn infrastructure_report_digest(
     ContentDigest::from_bytes(*hasher.finalize().as_bytes())
 }
 
-fn parse_terminal_operation(value: &str) -> Result<TerminalOperationV1, ()> {
+fn parse_terminal_operation(value: &str) -> Result<TerminalOperationV2, ()> {
     Ok(match value {
-        "work_complete" => TerminalOperationV1::WorkComplete,
-        "candidate_submit" => TerminalOperationV1::CandidateSubmit,
-        "quality_submit_review" => TerminalOperationV1::QualitySubmitReview,
+        "work_complete" => TerminalOperationV2::WorkComplete,
+        "candidate_submit" => TerminalOperationV2::CandidateSubmit,
+        "quality_submit_review" => TerminalOperationV2::QualitySubmitReview,
         _ => return Err(()),
     })
 }
@@ -2446,16 +2446,16 @@ fn forum_tool_name(operation: &str) -> Option<&'static str> {
     })
 }
 
-fn parse_stop_reason(value: &str) -> Option<StopReasonV1> {
+fn parse_stop_reason(value: &str) -> Option<StopReasonV2> {
     Some(match value {
-        "completed" => StopReasonV1::Completed,
-        "cancelled" => StopReasonV1::Cancelled,
-        "deadline" => StopReasonV1::Deadline,
-        "daemon_disconnected" => StopReasonV1::DaemonDisconnected,
-        "nonzero_exit" => StopReasonV1::NonZeroExit,
-        "output_limit" => StopReasonV1::OutputLimit,
-        "protocol_error" => StopReasonV1::ProtocolError,
-        "unknown_cost" => StopReasonV1::UnknownCost,
+        "completed" => StopReasonV2::Completed,
+        "cancelled" => StopReasonV2::Cancelled,
+        "deadline" => StopReasonV2::Deadline,
+        "daemon_disconnected" => StopReasonV2::DaemonDisconnected,
+        "nonzero_exit" => StopReasonV2::NonZeroExit,
+        "output_limit" => StopReasonV2::OutputLimit,
+        "protocol_error" => StopReasonV2::ProtocolError,
+        "unknown_cost" => StopReasonV2::UnknownCost,
         _ => return None,
     })
 }
@@ -2556,8 +2556,8 @@ fn require_current_assignment_evidence_closure(
 }
 
 fn proposal_artifact_references(
-    proposal: &factory_protocol::ProductTicketProposalV1,
-) -> Vec<&factory_protocol::SealedArtifactReferenceV1> {
+    proposal: &factory_protocol::ProductTicketProposalV2,
+) -> Vec<&factory_protocol::SealedArtifactReferenceV2> {
     let mut references = vec![
         &proposal.narrative,
         &proposal.evidence,
@@ -2752,7 +2752,7 @@ mod tests {
                 digest: ContentDigest::of_bytes(b"proposal"),
                 byte_length: 8,
             }],
-            terminal_operations: vec![factory_protocol::TerminalOperationV1::WorkComplete],
+            terminal_operations: vec![factory_protocol::TerminalOperationV2::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(1),
             revision: AggregateRevision::initial(),
             packet_digest: ContentDigest::of_bytes(b"fixture packet"),
@@ -2931,14 +2931,14 @@ mod tests {
                 ProcessStopReason::Cancelled,
                 SessionTransportStop::TransportFailed,
             ),
-            StopReasonV1::ProtocolError,
+            StopReasonV2::ProtocolError,
         );
         assert_eq!(
             infrastructure_stop_reason(
                 ProcessStopReason::Cancelled,
                 SessionTransportStop::PeerDisconnected,
             ),
-            StopReasonV1::Cancelled,
+            StopReasonV2::Cancelled,
         );
     }
 }

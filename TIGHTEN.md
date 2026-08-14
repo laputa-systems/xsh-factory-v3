@@ -306,7 +306,7 @@ read tests remain valid until deliberately replaced.
 
 1. Add `HarnessSpec`, `ContextItem`, `HarnessCompilation`, and the minimal
    closed context inclusion classes to `factory-protocol`. Reuse existing
-   application templates and `AssignmentPacketV1`; do not redesign model,
+   application templates and `AssignmentPacketV2`; do not redesign model,
    cost, process, or Git custody at the same time.
 2. Replace ad-hoc assembly of assignment target/evidence/prompt substitutions
    in `assignment_runtime` and `durable_authority` with one compiler entry

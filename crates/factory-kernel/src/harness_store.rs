@@ -6,8 +6,8 @@
 
 use factory_protocol::{
     ApplicationRevisionId, ArtifactId, AssignmentId, AssignmentRole, ContentDigest,
-    ContextInclusionClassV1, ContextItemV1, ContextReferenceV1, HARNESS_COMPILER_VERSION_V1,
-    HarnessCompilationId, HarnessCompilationV1, OfficeId,
+    ContextInclusionClassV2, ContextItemV2, ContextReferenceV2, HARNESS_COMPILER_VERSION_V2,
+    HarnessCompilationId, HarnessCompilationV2, OfficeId,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
@@ -60,7 +60,7 @@ impl HarnessStore {
     pub async fn compilation_for_assignment(
         &self,
         assignment_id: AssignmentId,
-    ) -> Result<Option<HarnessCompilationV1>, HarnessStoreError> {
+    ) -> Result<Option<HarnessCompilationV2>, HarnessStoreError> {
         let row = sqlx::query(
             "SELECT id, application_revision_id, office_id, assignment_role,
                             compiler_version, spec_artifact_id, system_prompt_artifact_id,
@@ -81,7 +81,7 @@ impl HarnessStore {
                 .map_err(|_| HarnessStoreError::CorruptStoredPacketDigest)?,
         );
         let id = HarnessCompilationId::new(row.try_get("id")?)?;
-        Ok(Some(HarnessCompilationV1 {
+        Ok(Some(HarnessCompilationV2 {
             id,
             assignment_id,
             application_revision_id: ApplicationRevisionId::new(
@@ -108,7 +108,7 @@ impl HarnessStore {
     pub async fn record(
         &self,
         command: &RecordHarnessCompilation,
-    ) -> Result<HarnessCompilationV1, HarnessStoreError> {
+    ) -> Result<HarnessCompilationV2, HarnessStoreError> {
         command.validate()?;
         let mut tx = self.pool.begin().await?;
         let assignment = sqlx::query(
@@ -142,7 +142,7 @@ impl HarnessStore {
 pub(crate) async fn persist_harness_compilation(
     tx: &mut Transaction<'_, Postgres>,
     command: &RecordHarnessCompilation,
-) -> Result<HarnessCompilationV1, HarnessStoreError> {
+) -> Result<HarnessCompilationV2, HarnessStoreError> {
     command.validate()?;
     let inserted: Option<i64> = sqlx::query_scalar(
         "INSERT INTO factory.harness_compilations (
@@ -234,7 +234,7 @@ pub(crate) async fn persist_harness_compilation(
             .await?;
         }
     }
-    Ok(HarnessCompilationV1 {
+    Ok(HarnessCompilationV2 {
         id,
         assignment_id: command.assignment_id,
         application_revision_id: command.application_revision_id,
@@ -262,12 +262,12 @@ pub struct RecordHarnessCompilation {
     pub assignment_prompt_artifact_id: ArtifactId,
     pub packet_artifact_id: ArtifactId,
     pub packet_digest: ContentDigest,
-    pub context_items: Vec<ContextItemV1>,
+    pub context_items: Vec<ContextItemV2>,
 }
 
 impl RecordHarnessCompilation {
     pub(crate) fn validate(&self) -> Result<(), HarnessStoreError> {
-        if self.compiler_version != HARNESS_COMPILER_VERSION_V1 {
+        if self.compiler_version != HARNESS_COMPILER_VERSION_V2 {
             return Err(HarnessStoreError::UnsupportedCompilerVersion);
         }
         if self.context_items.len() > factory_protocol::HARNESS_CONTEXT_MAX_ITEMS {
@@ -294,45 +294,45 @@ struct ContextColumns {
     office_id: Option<i64>,
 }
 
-fn context_columns(reference: ContextReferenceV1) -> ContextColumns {
+fn context_columns(reference: ContextReferenceV2) -> ContextColumns {
     match reference {
-        ContextReferenceV1::Artifact(id) => ContextColumns {
+        ContextReferenceV2::Artifact(id) => ContextColumns {
             artifact_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Project(id) => ContextColumns {
+        ContextReferenceV2::Project(id) => ContextColumns {
             project_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Rfc(id) => ContextColumns {
+        ContextReferenceV2::Rfc(id) => ContextColumns {
             rfc_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::RfcRevision(id) => ContextColumns {
+        ContextReferenceV2::RfcRevision(id) => ContextColumns {
             rfc_revision_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Ticket(id) => ContextColumns {
+        ContextReferenceV2::Ticket(id) => ContextColumns {
             ticket_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::TicketRevision(id) => ContextColumns {
+        ContextReferenceV2::TicketRevision(id) => ContextColumns {
             ticket_revision_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Experiment(id) => ContextColumns {
+        ContextReferenceV2::Experiment(id) => ContextColumns {
             experiment_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Claim(id) => ContextColumns {
+        ContextReferenceV2::Claim(id) => ContextColumns {
             claim_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Decision(id) => ContextColumns {
+        ContextReferenceV2::Decision(id) => ContextColumns {
             decision_id: Some(id.get()),
             ..ContextColumns::default()
         },
-        ContextReferenceV1::Office(id) => ContextColumns {
+        ContextReferenceV2::Office(id) => ContextColumns {
             office_id: Some(id.get()),
             ..ContextColumns::default()
         },
@@ -342,7 +342,7 @@ fn context_columns(reference: ContextReferenceV1) -> ContextColumns {
 async fn context_items_for_compilation(
     pool: &PgPool,
     compilation_id: HarnessCompilationId,
-) -> Result<Vec<ContextItemV1>, HarnessStoreError> {
+) -> Result<Vec<ContextItemV2>, HarnessStoreError> {
     let rows = sqlx::query(
         "SELECT inclusion_class, reason, artifact_id, project_id, rfc_id, rfc_revision_id,
                 ticket_id, ticket_revision_id, experiment_id, claim_id, decision_id, office_id
@@ -355,29 +355,29 @@ async fn context_items_for_compilation(
     rows.into_iter()
         .map(|row| {
             let reference = if let Some(id) = row.try_get::<Option<i64>, _>("artifact_id")? {
-                ContextReferenceV1::Artifact(ArtifactId::new(id)?)
+                ContextReferenceV2::Artifact(ArtifactId::new(id)?)
             } else if let Some(id) = row.try_get("project_id")? {
-                ContextReferenceV1::Project(factory_protocol::ProjectId::new(id)?)
+                ContextReferenceV2::Project(factory_protocol::ProjectId::new(id)?)
             } else if let Some(id) = row.try_get("rfc_id")? {
-                ContextReferenceV1::Rfc(factory_protocol::RfcId::new(id)?)
+                ContextReferenceV2::Rfc(factory_protocol::RfcId::new(id)?)
             } else if let Some(id) = row.try_get("rfc_revision_id")? {
-                ContextReferenceV1::RfcRevision(factory_protocol::RfcRevisionId::new(id)?)
+                ContextReferenceV2::RfcRevision(factory_protocol::RfcRevisionId::new(id)?)
             } else if let Some(id) = row.try_get("ticket_id")? {
-                ContextReferenceV1::Ticket(factory_protocol::TicketId::new(id)?)
+                ContextReferenceV2::Ticket(factory_protocol::TicketId::new(id)?)
             } else if let Some(id) = row.try_get("ticket_revision_id")? {
-                ContextReferenceV1::TicketRevision(factory_protocol::TicketRevisionId::new(id)?)
+                ContextReferenceV2::TicketRevision(factory_protocol::TicketRevisionId::new(id)?)
             } else if let Some(id) = row.try_get("experiment_id")? {
-                ContextReferenceV1::Experiment(factory_protocol::ExperimentId::new(id)?)
+                ContextReferenceV2::Experiment(factory_protocol::ExperimentId::new(id)?)
             } else if let Some(id) = row.try_get("claim_id")? {
-                ContextReferenceV1::Claim(factory_protocol::ClaimId::new(id)?)
+                ContextReferenceV2::Claim(factory_protocol::ClaimId::new(id)?)
             } else if let Some(id) = row.try_get("decision_id")? {
-                ContextReferenceV1::Decision(factory_protocol::DecisionId::new(id)?)
+                ContextReferenceV2::Decision(factory_protocol::DecisionId::new(id)?)
             } else if let Some(id) = row.try_get("office_id")? {
-                ContextReferenceV1::Office(OfficeId::new(id)?)
+                ContextReferenceV2::Office(OfficeId::new(id)?)
             } else {
                 return Err(HarnessStoreError::ContextReferenceMissing);
             };
-            Ok(ContextItemV1 {
+            Ok(ContextItemV2 {
                 reference,
                 inclusion: inclusion_class_from_code(row.try_get("inclusion_class")?)?,
                 reason: row.try_get("reason")?,
@@ -395,12 +395,12 @@ fn assignment_role_from_code(value: i16) -> Result<AssignmentRole, HarnessStoreE
     }
 }
 
-fn inclusion_class_from_code(value: i16) -> Result<ContextInclusionClassV1, HarnessStoreError> {
+fn inclusion_class_from_code(value: i16) -> Result<ContextInclusionClassV2, HarnessStoreError> {
     match value {
-        0 => Ok(ContextInclusionClassV1::DirectTarget),
-        1 => Ok(ContextInclusionClassV1::RequiredConstraint),
-        2 => Ok(ContextInclusionClassV1::DirectEvidence),
-        3 => Ok(ContextInclusionClassV1::CurrentDecision),
+        0 => Ok(ContextInclusionClassV2::DirectTarget),
+        1 => Ok(ContextInclusionClassV2::RequiredConstraint),
+        2 => Ok(ContextInclusionClassV2::DirectEvidence),
+        3 => Ok(ContextInclusionClassV2::CurrentDecision),
         _ => Err(HarnessStoreError::CorruptStoredInclusionClass),
     }
 }
@@ -413,12 +413,12 @@ const fn assignment_role_code(role: AssignmentRole) -> i16 {
     }
 }
 
-const fn inclusion_class_code(class: ContextInclusionClassV1) -> i16 {
+const fn inclusion_class_code(class: ContextInclusionClassV2) -> i16 {
     match class {
-        ContextInclusionClassV1::DirectTarget => 0,
-        ContextInclusionClassV1::RequiredConstraint => 1,
-        ContextInclusionClassV1::DirectEvidence => 2,
-        ContextInclusionClassV1::CurrentDecision => 3,
+        ContextInclusionClassV2::DirectTarget => 0,
+        ContextInclusionClassV2::RequiredConstraint => 1,
+        ContextInclusionClassV2::DirectEvidence => 2,
+        ContextInclusionClassV2::CurrentDecision => 3,
     }
 }
 

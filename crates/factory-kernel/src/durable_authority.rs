@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use factory_protocol::{
     AggregateRevision, ApplicationBundleV2, ApplicationRevisionId, ArtifactId, AssignmentPacketV2,
-    AssignmentRole, CandidateId, CandidatePacketV1, ContentDigest, ExpectedRevision, KernelBuildId,
-    RepositoryObjectIdV1, RequiredReadV2, ReviewId, SealedArtifactReferenceV1, SessionId,
-    TicketAttemptId, TicketContractReadV1, TicketId, TicketRevisionId, parse_application_bundle_v2,
-    parse_command_profile_v2, parse_product_ticket_proposal_v1,
+    AssignmentRole, CandidateId, CandidatePacketV2, ContentDigest, ExpectedRevision, KernelBuildId,
+    RepositoryObjectIdV2, RequiredReadV2, ReviewId, SealedArtifactReferenceV2, SessionId,
+    TicketAttemptId, TicketContractReadV2, TicketId, TicketRevisionId, parse_application_bundle_v2,
+    parse_command_profile_v2, parse_product_ticket_proposal_v2,
 };
 use miniserde::{Serialize, json};
 
@@ -313,7 +313,7 @@ impl DurableAuthorityResolver {
                 ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?,
             )
             .await?;
-        let proposal = parse_product_ticket_proposal_v1(
+        let proposal = parse_product_ticket_proposal_v2(
             &proposal_bytes,
             &application.bundle.ticket_policy.ticket_bounds,
         )
@@ -436,12 +436,12 @@ impl DurableAuthorityResolver {
                 .ok_or_else(|| "accepted candidate is missing its local commit".to_owned())?,
         )
         .map_err(|error| format!("stored candidate commit is invalid: {error}"))?;
-        let candidate_commit_object = RepositoryObjectIdV1::parse(candidate_commit.to_string())
+        let candidate_commit_object = RepositoryObjectIdV2::parse(candidate_commit.to_string())
             .map_err(|error| error.to_string())?;
         let candidate_tree = GitTreeId::parse(row.candidate_tree)
             .map_err(|error| format!("stored candidate tree is invalid: {error}"))?;
         let candidate_ref = CandidateRefName::new(ticket_id, command.candidate_id);
-        let expected_old_commit_object = RepositoryObjectIdV1::parse(row.base_commit.clone())
+        let expected_old_commit_object = RepositoryObjectIdV2::parse(row.base_commit.clone())
             .map_err(|error| format!("stored candidate base object is invalid: {error}"))?;
         let expected_old_commit = GitCommitId::parse(row.base_commit)
             .map_err(|error| format!("stored candidate base commit is invalid: {error}"))?;
@@ -539,15 +539,15 @@ impl DurableAuthorityResolver {
                     "campaign revision",
                 )?),
                 expected_old_commit: expected_old_commit_object,
-                resulting_commit: RepositoryObjectIdV1::parse(
+                resulting_commit: RepositoryObjectIdV2::parse(
                     delivery.delivered_commit.to_string(),
                 )
                 .map_err(|error| error.to_string())?,
                 candidate_commit: candidate_commit_object,
-                resulting_tree: RepositoryObjectIdV1::parse(delivery.delivered_tree.to_string())
+                resulting_tree: RepositoryObjectIdV2::parse(delivery.delivered_tree.to_string())
                     .map_err(|error| error.to_string())?,
                 factory_cost_micro_usd,
-                receipt: SealedArtifactReferenceV1 {
+                receipt: SealedArtifactReferenceV2 {
                     artifact_id: receipt.artifact_id,
                     digest: seal.digest(),
                     byte_length: seal.byte_length(),
@@ -810,7 +810,7 @@ impl DurableAuthorityResolver {
             .load_engineering_ticket(ticket_attempt_id, &assignment)
             .await?;
         let proposal_bytes = self.artifact_bytes(ticket.proposal_artifact_id).await?;
-        let proposal = parse_product_ticket_proposal_v1(
+        let proposal = parse_product_ticket_proposal_v2(
             &proposal_bytes,
             &application.bundle.ticket_policy.ticket_bounds,
         )
@@ -1080,7 +1080,7 @@ impl DurableAuthorityResolver {
 
     async fn exact_bytes(
         &self,
-        reference: &SealedArtifactReferenceV1,
+        reference: &SealedArtifactReferenceV2,
     ) -> Result<ExactBytes, String> {
         let bytes = self.artifact_bytes(reference.artifact_id).await?;
         ExactBytes::from_artifact(reference.digest, bytes).map_err(|error| {
@@ -1093,7 +1093,7 @@ impl DurableAuthorityResolver {
 
     async fn verify_proposal_artifacts(
         &self,
-        proposal: &factory_protocol::ProductTicketProposalV1,
+        proposal: &factory_protocol::ProductTicketProposalV2,
     ) -> Result<(), String> {
         let mut references = vec![
             &proposal.narrative,
@@ -1119,10 +1119,10 @@ impl DurableAuthorityResolver {
         &self,
         bundle: &ApplicationBundleV2,
         proposal_artifact_id: ArtifactId,
-    ) -> Result<Vec<TicketContractReadV1>, String> {
+    ) -> Result<Vec<TicketContractReadV2>, String> {
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
         let proposal =
-            parse_product_ticket_proposal_v1(&proposal_bytes, &bundle.ticket_policy.ticket_bounds)
+            parse_product_ticket_proposal_v2(&proposal_bytes, &bundle.ticket_policy.ticket_bounds)
                 .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
         self.verify_proposal_artifacts(&proposal).await?;
         Ok(proposal.contract_reads)
@@ -1131,7 +1131,7 @@ impl DurableAuthorityResolver {
     async fn command_from_reproducer(
         &self,
         stored_profile: &factory_protocol::CommandProfileV2,
-        proposal: &factory_protocol::ProductTicketProposalV1,
+        proposal: &factory_protocol::ProductTicketProposalV2,
     ) -> Result<DeterministicCommand, String> {
         let mut profile = stored_profile.clone();
         profile.expected_exit_status = proposal.reproducer.expected_observation.exit_status;
@@ -1320,7 +1320,7 @@ impl DurableAuthorityResolver {
         let proposal_artifact_id =
             ArtifactId::new(row.proposal_artifact_id).map_err(|error| error.to_string())?;
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
-        let proposal = parse_product_ticket_proposal_v1(
+        let proposal = parse_product_ticket_proposal_v2(
             &proposal_bytes,
             &application.bundle.ticket_policy.ticket_bounds,
         )
@@ -1437,7 +1437,7 @@ impl DurableAuthorityResolver {
             regression_tree: GitTreeId::parse(row.regression_tree)
                 .map_err(|error| format!("stored regression tree is invalid: {error}"))?,
             candidate_patch,
-            submission: factory_protocol::CandidateSubmissionV1 {
+            submission: factory_protocol::CandidateSubmissionV2 {
                 commit_subject: row.commit_subject,
                 commit_body: row.commit_body,
                 regression_test_identity: row.regression_test_identity,
@@ -1503,18 +1503,18 @@ impl DurableAuthorityResolver {
         let candidate_commit = row
             .candidate_commit
             .ok_or_else(|| "validated candidate is missing its attached commit".to_owned())?;
-        let packet = CandidatePacketV1 {
+        let packet = CandidatePacketV2 {
             candidate_id,
             ticket_attempt_id,
             ticket_revision_id: TicketRevisionId::new(row.ticket_revision_id)
                 .map_err(|error| error.to_string())?,
-            base_commit: RepositoryObjectIdV1::parse(row.base_commit)
+            base_commit: RepositoryObjectIdV2::parse(row.base_commit)
                 .map_err(|error| error.to_string())?,
-            base_tree: RepositoryObjectIdV1::parse(row.base_tree)
+            base_tree: RepositoryObjectIdV2::parse(row.base_tree)
                 .map_err(|error| error.to_string())?,
-            regression_tree: RepositoryObjectIdV1::parse(row.regression_tree)
+            regression_tree: RepositoryObjectIdV2::parse(row.regression_tree)
                 .map_err(|error| error.to_string())?,
-            candidate_tree: RepositoryObjectIdV1::parse(row.candidate_tree)
+            candidate_tree: RepositoryObjectIdV2::parse(row.candidate_tree)
                 .map_err(|error| error.to_string())?,
             regression_patch: self
                 .reference(
@@ -1549,7 +1549,7 @@ impl DurableAuthorityResolver {
                 .await?,
             hard_validation_id: factory_protocol::ValidationId::new(row.hard_validation_id)
                 .map_err(|error| error.to_string())?,
-            candidate_commit: RepositoryObjectIdV1::parse(candidate_commit)
+            candidate_commit: RepositoryObjectIdV2::parse(candidate_commit)
                 .map_err(|error| error.to_string())?,
             candidate_revision: persisted_revision(row.candidate_revision, "candidate revision")?,
         };
@@ -1562,7 +1562,7 @@ impl DurableAuthorityResolver {
         {
             Some(validation_id) => {
                 let validation_tree =
-                    RepositoryObjectIdV1::parse(row.quality_validation_tree.ok_or_else(|| {
+                    RepositoryObjectIdV2::parse(row.quality_validation_tree.ok_or_else(|| {
                         "persisted Quality validation has no pristine tree".to_owned()
                     })?)
                     .map_err(|error| error.to_string())?;
@@ -1575,7 +1575,7 @@ impl DurableAuthorityResolver {
                     "persisted Quality validation has no audit receipt".to_owned()
                 })?;
                 Some(QualityFullSuiteOutcome {
-                    receipt: factory_protocol::QualityValidationReceiptV1 {
+                    receipt: factory_protocol::QualityValidationReceiptV2 {
                         validation_id,
                         candidate_id,
                         candidate_tree: packet.candidate_tree.clone(),
@@ -1618,7 +1618,7 @@ impl DurableAuthorityResolver {
         proposal_artifact_id: ArtifactId,
     ) -> Result<DurableProposalEvidence, String> {
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
-        let proposal = parse_product_ticket_proposal_v1(
+        let proposal = parse_product_ticket_proposal_v2(
             &proposal_bytes,
             &application.ticket_policy.ticket_bounds,
         )
@@ -1657,7 +1657,7 @@ impl DurableAuthorityResolver {
         reproducer_artifact_id: ArtifactId,
     ) -> Result<EngineeringCheckpointContract, String> {
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
-        let proposal = parse_product_ticket_proposal_v1(
+        let proposal = parse_product_ticket_proposal_v2(
             &proposal_bytes,
             &application.ticket_policy.ticket_bounds,
         )
@@ -1832,7 +1832,7 @@ impl DurableAuthorityResolver {
     async fn reference(
         &self,
         artifact_id: ArtifactId,
-    ) -> Result<SealedArtifactReferenceV1, String> {
+    ) -> Result<SealedArtifactReferenceV2, String> {
         let process = self.store.process_store();
         let seal = process
             .registered_artifact(&self.cas, artifact_id)
@@ -1843,7 +1843,7 @@ impl DurableAuthorityResolver {
                     artifact_id.get()
                 )
             })?;
-        Ok(SealedArtifactReferenceV1 {
+        Ok(SealedArtifactReferenceV2 {
             artifact_id,
             digest: seal.digest(),
             byte_length: seal.byte_length(),
@@ -1930,7 +1930,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 )
                 .await
                 .map_err(precondition)?;
-            let proposal = parse_product_ticket_proposal_v1(
+            let proposal = parse_product_ticket_proposal_v2(
                 &proposal_bytes,
                 &application.bundle.ticket_policy.ticket_bounds,
             )
@@ -2114,7 +2114,7 @@ pub struct DurableAssignmentLaunchContext {
     pub engineering_checkpoint: Option<EngineeringCheckpointContract>,
     /// Exact sealed Product contract upstream of an Engineering/Quality
     /// assignment. Product has no preceding ticket proposal.
-    pub proposal: Option<SealedArtifactReferenceV1>,
+    pub proposal: Option<SealedArtifactReferenceV2>,
     /// Bounded, named immutable evidence closure rendered into the assignment
     /// target.  It is intentionally not a metadata map: each reference has a
     /// stable meaning, is re-verified from CAS here, and can be allowlisted by
@@ -2124,7 +2124,7 @@ pub struct DurableAssignmentLaunchContext {
     pub application_required_reads: Vec<RequiredReadV2>,
     /// Ticket-specific contract reads, parsed from the sealed admitted
     /// proposal. Product has none because it has no upstream ticket target.
-    pub ticket_contract_reads: Vec<TicketContractReadV1>,
+    pub ticket_contract_reads: Vec<TicketContractReadV2>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2141,11 +2141,11 @@ pub struct DurableAssignmentEvidence {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableProposalEvidence {
-    pub proposal: SealedArtifactReferenceV1,
-    pub narrative: SealedArtifactReferenceV1,
-    pub evidence: SealedArtifactReferenceV1,
-    pub reproducer_command: SealedArtifactReferenceV1,
-    pub reproducer_stdin: Option<SealedArtifactReferenceV1>,
+    pub proposal: SealedArtifactReferenceV2,
+    pub narrative: SealedArtifactReferenceV2,
+    pub evidence: SealedArtifactReferenceV2,
+    pub reproducer_command: SealedArtifactReferenceV2,
+    pub reproducer_stdin: Option<SealedArtifactReferenceV2>,
     pub expected_observation: DurableObservationEvidence,
     pub first_observation: DurableObservationEvidence,
     pub second_observation: DurableObservationEvidence,
@@ -2153,27 +2153,27 @@ pub struct DurableProposalEvidence {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableObservationEvidence {
-    pub stdout: SealedArtifactReferenceV1,
-    pub stderr: SealedArtifactReferenceV1,
+    pub stdout: SealedArtifactReferenceV2,
+    pub stderr: SealedArtifactReferenceV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableCandidateEvidence {
-    pub changed_paths: SealedArtifactReferenceV1,
-    pub regression_patch: SealedArtifactReferenceV1,
-    pub regression_command_set: SealedArtifactReferenceV1,
-    pub regression_log: SealedArtifactReferenceV1,
-    pub candidate_patch: SealedArtifactReferenceV1,
-    pub engineering_report: SealedArtifactReferenceV1,
-    pub engineering_risks: SealedArtifactReferenceV1,
-    pub hard_validation_command_set: SealedArtifactReferenceV1,
-    pub hard_validation_log: SealedArtifactReferenceV1,
+    pub changed_paths: SealedArtifactReferenceV2,
+    pub regression_patch: SealedArtifactReferenceV2,
+    pub regression_command_set: SealedArtifactReferenceV2,
+    pub regression_log: SealedArtifactReferenceV2,
+    pub candidate_patch: SealedArtifactReferenceV2,
+    pub engineering_report: SealedArtifactReferenceV2,
+    pub engineering_risks: SealedArtifactReferenceV2,
+    pub hard_validation_command_set: SealedArtifactReferenceV2,
+    pub hard_validation_log: SealedArtifactReferenceV2,
     /// Rework Quality must receive the prior additional-probes receipt as
     /// immutable evidence, rather than reconstructing it from a review row.
-    pub prior_quality_additional_probes: Option<SealedArtifactReferenceV1>,
-    pub prior_quality_rationale: Option<SealedArtifactReferenceV1>,
-    pub prior_quality_risks: Option<SealedArtifactReferenceV1>,
-    pub architect_rationale: Option<SealedArtifactReferenceV1>,
+    pub prior_quality_additional_probes: Option<SealedArtifactReferenceV2>,
+    pub prior_quality_rationale: Option<SealedArtifactReferenceV2>,
+    pub prior_quality_risks: Option<SealedArtifactReferenceV2>,
+    pub architect_rationale: Option<SealedArtifactReferenceV2>,
 }
 
 /// Narrow daemon-driver delivery input. All repository, tree, commit, and
@@ -2232,7 +2232,7 @@ struct EngineeringTicket {
 }
 
 struct QualityCandidate {
-    packet: CandidatePacketV1,
+    packet: CandidatePacketV2,
     attempt_revision: AggregateRevision,
     prior_full_suite: Option<QualityFullSuiteOutcome>,
 }
@@ -2250,8 +2250,8 @@ struct CandidateRecovery {
     application_revision_id: ApplicationRevisionId,
     candidate_tree: GitTreeId,
     regression_tree: GitTreeId,
-    candidate_patch: SealedArtifactReferenceV1,
-    submission: factory_protocol::CandidateSubmissionV1,
+    candidate_patch: SealedArtifactReferenceV2,
+    submission: factory_protocol::CandidateSubmissionV2,
     product_reproducer: DeterministicCommand,
     full_suite: Vec<DeterministicCommand>,
     hard_validation_id: Option<factory_protocol::ValidationId>,

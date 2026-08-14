@@ -5,24 +5,23 @@
 //! fact and one audit receipt in the same transaction; the audit receipt is
 //! also its bounded retry identity.
 
-use std::{borrow::Cow, collections::HashMap, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use crate::cas::{CasArtifact, CasStore};
-use crate::installed_runtime::InstalledKernelBuildReceiptV1;
+use crate::installed_runtime::InstalledKernelBuildReceiptV2;
 use factory_protocol::{
     AggregateRevision, ApplicationKey, ApplicationRevisionId, ArtifactId, ContentDigest,
     ExpectedRevision, KernelBuildId, RepositoryId,
 };
 use sqlx::{
-    PgPool, Postgres, Row,
-    migrate::{MigrateError, Migration, Migrator},
+    PgPool, Postgres,
+    migrate::{MigrateError, Migrator},
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use thiserror::Error;
 
 /// Comment installed on the factory-owned schema by the canonical migrations.
 pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:authority-v3";
-const SQUASHED_BASELINE_MIGRATION_VERSION: i64 = 1;
 
 /// A fixed kernel-local key. PostgreSQL holds it per connection until explicit
 /// release or connection death, so a daemon restart cannot inherit a stale lock.
@@ -38,24 +37,6 @@ const REGISTER_REPOSITORY_OPERATION: &str = "repository.register";
 const REGISTER_ARTIFACT_OPERATION: &str = "artifact.register";
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../schema/migrations");
-
-fn resolved_migrator(applied_checksums: &HashMap<i64, Vec<u8>>) -> Migrator {
-    let migrations = MIGRATOR
-        .iter()
-        .map(|migration| {
-            let mut migration = migration.clone();
-            if migration.version == SQUASHED_BASELINE_MIGRATION_VERSION
-                && let Some(checksum) = applied_checksums.get(&migration.version)
-            {
-                migration.checksum = Cow::Owned(checksum.clone());
-            }
-            migration
-        })
-        .collect::<Vec<Migration>>();
-    let mut migrator = Migrator::with_migrations(migrations);
-    migrator.set_ignore_missing(true);
-    migrator
-}
 
 #[path = "application_admission.rs"]
 mod application_admission;
@@ -91,62 +72,8 @@ impl KernelStore {
     /// identity comment. A binary that sees another schema fails before serving.
     pub async fn migrate_and_verify(&self) -> Result<(), StoreError> {
         self.verify_postgres_baseline().await?;
-        let applied_checksums = self.applied_migration_checksums().await?;
-        self.verify_known_migration_checksums(&applied_checksums)?;
-        let migrator = resolved_migrator(&applied_checksums);
-        migrator.run(&self.pool).await?;
-        let applied_checksums = self.applied_migration_checksums().await?;
-        self.verify_known_migration_checksums(&applied_checksums)?;
+        MIGRATOR.run(&self.pool).await?;
         self.verify_schema_identity().await
-    }
-
-    /// The repository keeps `0001_initial_authority.sql` as the canonical
-    /// fresh-schema definition after squashing historical V3 migrations.
-    /// Existing authorities may still retain those superseded migration rows,
-    /// so SQLx must ignore only missing historical versions while this method
-    /// continues to verify every migration that remains resolved here.
-    async fn applied_migration_checksums(&self) -> Result<HashMap<i64, Vec<u8>>, StoreError> {
-        let table_exists =
-            sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass('_sqlx_migrations')::TEXT")
-                .fetch_one(&self.pool)
-                .await?;
-        if table_exists.is_none() {
-            return Ok(HashMap::new());
-        }
-        let rows = sqlx::query(
-            "SELECT version, checksum FROM _sqlx_migrations WHERE success ORDER BY version",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter()
-            .map(|row| Ok((row.try_get("version")?, row.try_get("checksum")?)))
-            .collect()
-    }
-
-    fn verify_known_migration_checksums(
-        &self,
-        applied_checksums: &HashMap<i64, Vec<u8>>,
-    ) -> Result<(), StoreError> {
-        for (&version, checksum) in applied_checksums {
-            if version == SQUASHED_BASELINE_MIGRATION_VERSION {
-                // Version 1 is the canonical fresh-schema snapshot. Its SQL
-                // was intentionally rewritten when the historical V3
-                // migrations were squashed, so its old checksum is not a
-                // useful compatibility signal; schema identity remains a
-                // required independent guard below.
-                continue;
-            }
-            let Some(migration) = MIGRATOR
-                .iter()
-                .find(|migration| migration.version == version)
-            else {
-                continue;
-            };
-            if migration.checksum.as_ref() != checksum.as_slice() {
-                return Err(StoreError::MigrationChecksumMismatch { version });
-            }
-        }
-        Ok(())
     }
 
     /// The first authority lineage is exercised and supported only on the
@@ -683,7 +610,7 @@ impl KernelStore {
     pub async fn load_current_installed_runtime(
         &self,
         cas: &CasStore,
-    ) -> Result<Option<InstalledKernelBuildReceiptV1>, StoreError> {
+    ) -> Result<Option<InstalledKernelBuildReceiptV2>, StoreError> {
         let current = sqlx::query!(
             "SELECT kb.build_digest, a.digest AS \"receipt_digest!\",
                     a.byte_length AS \"receipt_byte_length!\", a.cas_relative_path
@@ -711,7 +638,7 @@ impl KernelStore {
         if bytes.len() as u64 != receipt_byte_length {
             return Err(StoreError::QualificationReceiptChanged);
         }
-        let receipt = InstalledKernelBuildReceiptV1::decode(&bytes)?;
+        let receipt = InstalledKernelBuildReceiptV2::decode(&bytes)?;
         if receipt.kernel_build_id() != build_id {
             return Err(StoreError::QualificationReceiptChanged);
         }
@@ -1217,7 +1144,7 @@ pub struct InstallQualifiedKernelBuild {
     pub principal: String,
     pub command_id: String,
     pub expected_revision: ExpectedRevision,
-    pub receipt: InstalledKernelBuildReceiptV1,
+    pub receipt: InstalledKernelBuildReceiptV2,
 }
 
 impl InstallKernelBuild {
@@ -1436,9 +1363,6 @@ pub enum StoreError {
 
     #[error(transparent)]
     Migration(#[from] MigrateError),
-
-    #[error("resolved migration checksum mismatch for version {version}")]
-    MigrationChecksumMismatch { version: i64 },
 
     #[error(transparent)]
     Contract(#[from] factory_protocol::ContractError),

@@ -13,10 +13,10 @@ use std::path::Path;
 
 use factory_protocol::{
     AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole,
-    CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV1, CandidateSubmissionV1,
+    CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV2, CandidateSubmissionV2,
     CandidateSubmitRequest, ContentDigest, ExpectedRevision, QualityRunFullSuiteRequest,
-    QualitySubmitReviewRequest, QualityValidationReceiptV1, RepositoryObjectIdV1,
-    SealedArtifactReferenceV1, SessionId, TerminalOperationV1, TicketAttemptId, TicketId,
+    QualitySubmitReviewRequest, QualityValidationReceiptV2, RepositoryObjectIdV2,
+    SealedArtifactReferenceV2, SessionId, TerminalOperationV2, TicketAttemptId, TicketId,
     TicketRevisionId, ValidationId,
 };
 use miniserde::{Serialize, json};
@@ -143,7 +143,7 @@ impl ResolvedEngineeringCandidateAuthority {
 pub struct ResolvedQualityCandidateAuthority {
     pub application: ApplicationBundleV2,
     pub repository: QualifiedRepository,
-    pub candidate: CandidatePacketV1,
+    pub candidate: CandidatePacketV2,
     pub expected_attempt_revision: ExpectedRevision,
     pub full_suite_identity: String,
     pub full_suite: Vec<DeterministicCommand>,
@@ -239,7 +239,7 @@ pub struct QualityCandidateAuthority<'a> {
     pub actor: ActorRequestBinding<'a>,
     pub application: &'a ApplicationBundleV2,
     pub repository: &'a QualifiedRepository,
-    pub candidate: &'a CandidatePacketV1,
+    pub candidate: &'a CandidatePacketV2,
     pub expected_attempt_revision: ExpectedRevision,
     pub validation: QualityValidationProgram<'a>,
 }
@@ -249,8 +249,8 @@ pub struct QualityCandidateAuthority<'a> {
 #[derive(Clone, Debug)]
 pub struct QualityReviewAuthority<'a> {
     pub actor: ActorRequestBinding<'a>,
-    pub candidate: &'a CandidatePacketV1,
-    pub full_suite: &'a QualityValidationReceiptV1,
+    pub candidate: &'a CandidatePacketV2,
+    pub full_suite: &'a QualityValidationReceiptV2,
     pub expected_attempt_revision: ExpectedRevision,
 }
 
@@ -265,9 +265,9 @@ pub struct RegressionCheckpoint {
     regression: TreeCapture,
     regression_identity: String,
     expected_failure: String,
-    regression_patch: SealedArtifactReferenceV1,
-    command_set: SealedArtifactReferenceV1,
-    log: SealedArtifactReferenceV1,
+    regression_patch: SealedArtifactReferenceV2,
+    command_set: SealedArtifactReferenceV2,
+    log: SealedArtifactReferenceV2,
 }
 
 impl RegressionCheckpoint {
@@ -277,17 +277,17 @@ impl RegressionCheckpoint {
     }
 
     #[must_use]
-    pub fn regression_patch(&self) -> &SealedArtifactReferenceV1 {
+    pub fn regression_patch(&self) -> &SealedArtifactReferenceV2 {
         &self.regression_patch
     }
 
     #[must_use]
-    pub fn command_set(&self) -> &SealedArtifactReferenceV1 {
+    pub fn command_set(&self) -> &SealedArtifactReferenceV2 {
         &self.command_set
     }
 
     #[must_use]
-    pub fn log(&self) -> &SealedArtifactReferenceV1 {
+    pub fn log(&self) -> &SealedArtifactReferenceV2 {
         &self.log
     }
 }
@@ -304,7 +304,7 @@ pub enum CandidateSubmissionOutcome {
     Validated {
         candidate: CandidateReceipt,
         hard_validation: ValidationReceipt,
-        candidate_tree: RepositoryObjectIdV1,
+        candidate_tree: RepositoryObjectIdV2,
     },
 }
 
@@ -312,7 +312,7 @@ pub enum CandidateSubmissionOutcome {
 /// sealed receipt, but it cannot be used for review submission.
 #[derive(Clone, Debug)]
 pub struct QualityFullSuiteOutcome {
-    pub receipt: QualityValidationReceiptV1,
+    pub receipt: QualityValidationReceiptV2,
     pub result: ValidationResult,
     pub resulting_attempt_revision: AggregateRevision,
     /// Durable validation transition which produced this exact receipt.
@@ -339,7 +339,7 @@ pub struct ResumedHardValidationAuthority {
     pub candidate_tree: GitTreeId,
     pub regression_tree: GitTreeId,
     pub candidate_patch_digest: ContentDigest,
-    pub submission: CandidateSubmissionV1,
+    pub submission: CandidateSubmissionV2,
     pub product_reproducer: DeterministicCommand,
     pub full_suite_identity: String,
     pub full_suite: Vec<DeterministicCommand>,
@@ -375,7 +375,7 @@ pub struct ResumeCandidateCommitAttachAuthority {
     pub candidate_tree: GitTreeId,
     pub regression_tree: GitTreeId,
     pub candidate_patch_digest: ContentDigest,
-    pub submission: CandidateSubmissionV1,
+    pub submission: CandidateSubmissionV2,
     pub commit: CandidateCommitPolicy,
 }
 
@@ -520,7 +520,7 @@ pub async fn submit_candidate(
     checkpoint: &RegressionCheckpoint,
     request: &CandidateSubmitRequest,
 ) -> Result<CandidateSubmissionOutcome, CandidateRuntimeError> {
-    validate_engineering_authority(authority, Some(TerminalOperationV1::CandidateSubmit))?;
+    validate_engineering_authority(authority, Some(TerminalOperationV2::CandidateSubmit))?;
     validate_request_revision(&authority.actor, request.expected_revision)?;
     validate_checkpoint(authority, checkpoint)?;
     let submission = request
@@ -974,7 +974,7 @@ pub async fn run_quality_full_suite(
             log: evidence.log.clone(),
         })
         .await?;
-    let receipt = QualityValidationReceiptV1 {
+    let receipt = QualityValidationReceiptV2 {
         validation_id: validation.validation_id,
         candidate_id: authority.candidate.candidate_id,
         candidate_tree: authority.candidate.candidate_tree.clone(),
@@ -1031,7 +1031,7 @@ pub async fn submit_quality_review(
 
 fn validate_engineering_authority(
     authority: &EngineeringCandidateAuthority<'_>,
-    terminal: Option<TerminalOperationV1>,
+    terminal: Option<TerminalOperationV2>,
 ) -> Result<(), CandidateRuntimeError> {
     validate_common_authority(
         authority.actor,
@@ -1085,7 +1085,7 @@ fn validate_review_authority(
     validate_packet_office(
         authority.actor,
         AssignmentRole::Quality,
-        Some(TerminalOperationV1::QualitySubmitReview),
+        Some(TerminalOperationV2::QualitySubmitReview),
     )?;
     authority
         .candidate
@@ -1108,7 +1108,7 @@ fn validate_common_authority(
     application: &ApplicationBundleV2,
     repository: &QualifiedRepository,
     assignment_role: AssignmentRole,
-    terminal: Option<TerminalOperationV1>,
+    terminal: Option<TerminalOperationV2>,
 ) -> Result<(), CandidateRuntimeError> {
     application
         .validate()
@@ -1127,7 +1127,7 @@ fn validate_common_authority(
 fn validate_packet_office(
     actor: ActorRequestBinding<'_>,
     assignment_role: AssignmentRole,
-    terminal: Option<TerminalOperationV1>,
+    terminal: Option<TerminalOperationV2>,
 ) -> Result<(), CandidateRuntimeError> {
     actor
         .packet
@@ -1262,7 +1262,7 @@ fn forbidden_changed_path<'a>(
 
 fn validate_commit_message_policy(
     application: &ApplicationBundleV2,
-    submission: &CandidateSubmissionV1,
+    submission: &CandidateSubmissionV2,
 ) -> Result<(), CandidateRuntimeError> {
     if submission.commit_subject.len()
         > usize::from(application.commit_message_policy.subject_byte_limit)
@@ -1319,7 +1319,7 @@ async fn verify_actor_artifacts(
     process: &ProcessStore,
     cas: &CasStore,
     principal: &str,
-    artifacts: Vec<&SealedArtifactReferenceV1>,
+    artifacts: Vec<&SealedArtifactReferenceV2>,
 ) -> Result<(), CandidateRuntimeError> {
     for reference in artifacts {
         let sealed = process
@@ -1333,8 +1333,8 @@ async fn verify_actor_artifacts(
 }
 
 fn review_artifacts(
-    submission: &factory_protocol::QualityReviewSubmissionV1,
-) -> Vec<&SealedArtifactReferenceV1> {
+    submission: &factory_protocol::QualityReviewSubmissionV2,
+) -> Vec<&SealedArtifactReferenceV2> {
     vec![
         &submission.rationale,
         &submission.risks,
@@ -1343,8 +1343,8 @@ fn review_artifacts(
 }
 
 struct EngineeringCompletionEvidence {
-    report: SealedArtifactReferenceV1,
-    risks: SealedArtifactReferenceV1,
+    report: SealedArtifactReferenceV2,
+    risks: SealedArtifactReferenceV2,
 }
 
 /// Produces the two Engineering narrative slots from custody facts, not
@@ -1360,8 +1360,8 @@ async fn seal_engineering_completion_evidence(
     kernel_build_id: factory_protocol::KernelBuildId,
     checkpoint: &RegressionCheckpoint,
     capture: &TreeCapture,
-    changed_paths: &SealedArtifactReferenceV1,
-    candidate_patch: &SealedArtifactReferenceV1,
+    changed_paths: &SealedArtifactReferenceV2,
+    candidate_patch: &SealedArtifactReferenceV2,
     hard_evidence: &ValidationEvidence,
     hard_result: ValidationResult,
 ) -> Result<EngineeringCompletionEvidence, CandidateRuntimeError> {
@@ -1416,7 +1416,7 @@ async fn seal_changed_paths(
     command_id: &str,
     kernel_build_id: factory_protocol::KernelBuildId,
     capture: &TreeCapture,
-) -> Result<SealedArtifactReferenceV1, CandidateRuntimeError> {
+) -> Result<SealedArtifactReferenceV2, CandidateRuntimeError> {
     let bytes = json::to_string(&ChangedPathsEvidence {
         format: "factory-changed-paths-v1",
         paths: capture.changed_paths().to_vec(),
@@ -1436,8 +1436,8 @@ async fn seal_changed_paths(
 }
 
 struct ValidationEvidence {
-    command_set: SealedArtifactReferenceV1,
-    log: SealedArtifactReferenceV1,
+    command_set: SealedArtifactReferenceV2,
+    log: SealedArtifactReferenceV2,
     duration_millis: u64,
 }
 
@@ -1631,7 +1631,7 @@ async fn seal_command_set(
     kernel_build_id: factory_protocol::KernelBuildId,
     profile: &str,
     commands: &[DeterministicCommand],
-) -> Result<SealedArtifactReferenceV1, CandidateRuntimeError> {
+) -> Result<SealedArtifactReferenceV2, CandidateRuntimeError> {
     let bytes = json::to_string(&CommandSetEvidence {
         format: COMMAND_SET_FORMAT,
         profile: profile.to_owned(),
@@ -1747,7 +1747,7 @@ async fn seal_bytes(
     bytes: &[u8],
     kind: &'static str,
     maximum: usize,
-) -> Result<SealedArtifactReferenceV1, CandidateRuntimeError> {
+) -> Result<SealedArtifactReferenceV2, CandidateRuntimeError> {
     if bytes.len() > maximum {
         return Err(CandidateRuntimeError::EvidenceTooLarge {
             kind,
@@ -1764,16 +1764,16 @@ async fn seal_bytes(
 fn reference(
     artifact_id: factory_protocol::ArtifactId,
     sealed: CasArtifact,
-) -> SealedArtifactReferenceV1 {
-    SealedArtifactReferenceV1 {
+) -> SealedArtifactReferenceV2 {
+    SealedArtifactReferenceV2 {
         artifact_id,
         digest: sealed.digest(),
         byte_length: sealed.byte_length(),
     }
 }
 
-fn repository_object(value: &str) -> Result<RepositoryObjectIdV1, CandidateRuntimeError> {
-    RepositoryObjectIdV1::parse(value)
+fn repository_object(value: &str) -> Result<RepositoryObjectIdV2, CandidateRuntimeError> {
+    RepositoryObjectIdV2::parse(value)
         .map_err(|error| CandidateRuntimeError::RequestContract(error.to_string()))
 }
 
@@ -1976,7 +1976,7 @@ struct ArtifactLogEvidence {
     byte_length: u64,
 }
 
-fn artifact_log(reference: SealedArtifactReferenceV1) -> ArtifactLogEvidence {
+fn artifact_log(reference: SealedArtifactReferenceV2) -> ArtifactLogEvidence {
     ArtifactLogEvidence {
         artifact_id: reference.artifact_id.get(),
         digest: reference.digest.to_hex(),

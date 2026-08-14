@@ -11,7 +11,7 @@ use std::{path::PathBuf, sync::Arc};
 use factory_protocol::{
     AggregateRevision, ContractError, ErrorResponse, ExpectedRevision, FrameError,
     OP_OPERATOR_SEAL_ARTIFACT, OperatorArtifactSealReceiptResponse, OperatorArtifactSealRequest,
-    PROTOCOL_VERSION_V1, decode_operation_request, decode_routing_envelope,
+    PROTOCOL_VERSION_V2, decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
 use thiserror::Error;
@@ -109,7 +109,7 @@ impl OperatorArtifactRpc {
             .await
             .map_err(OperatorArtifactRejection::Store)?;
         Ok(json::to_string(&OperatorArtifactSealReceiptResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation: OP_OPERATOR_SEAL_ARTIFACT.to_owned(),
             audit_id: receipt.audit_log_id,
@@ -147,7 +147,7 @@ impl OperatorArtifactRejection {
             Self::Contract(error) => ("invalid_operator_artifact_request", error.to_string()),
             Self::Store(StoreError::RevisionConflict { current, .. }) => {
                 return json::to_string(&factory_protocol::ConflictResponse {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id,
                     operation,
                     error_code: "revision_conflict".to_owned(),
@@ -162,7 +162,7 @@ impl OperatorArtifactRejection {
             ),
         };
         json::to_string(&ErrorResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation,
             error_code: error_code.to_owned(),
@@ -191,7 +191,7 @@ fn operator_artifact_store_error_code(error: &StoreError) -> &'static str {
 #[cfg(test)]
 mod tests {
     use factory_protocol::{
-        OperatorArtifactSealRequest, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
+        OperatorArtifactSealRequest, PROTOCOL_VERSION_V2, REQUEST_FRAME_MAX_BYTES,
         encode_json_frame,
     };
 
@@ -201,7 +201,7 @@ mod tests {
     fn operator_artifact_wire_requires_an_absolute_root_and_safe_relative_path() {
         let frame = encode_json_frame(
             &OperatorArtifactSealRequest {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: "operator-artifact-1".to_owned(),
                 operation: OP_OPERATOR_SEAL_ARTIFACT.to_owned(),
                 client_command_id: "operator-artifact-seal-1".to_owned(),

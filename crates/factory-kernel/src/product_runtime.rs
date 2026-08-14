@@ -11,10 +11,10 @@
 use std::path::Path;
 
 use factory_protocol::{
-    ApplicationRevisionId, ApprovedToolV2, ArtifactId, CommandObservationV1, CommandProfileV2,
+    ApplicationRevisionId, ApprovedToolV2, ArtifactId, CommandObservationV2, CommandProfileV2,
     DurationMillis, ExecutableV2, ExpectedRevision, KernelBuildId, ProductSubmitTicketRequest,
-    ProductTicketProposalV1, RepositoryRelativePath, SealedArtifactReferenceV1,
-    canonical_product_ticket_proposal_json_v1, parse_application_bundle_v2,
+    ProductTicketProposalV2, RepositoryRelativePath, SealedArtifactReferenceV2,
+    canonical_product_ticket_proposal_json_v2, parse_application_bundle_v2,
     parse_command_profile_v2,
 };
 use miniserde::{Serialize, json};
@@ -161,7 +161,7 @@ pub async fn execute_product_proposal(
     // expresses the admitted comparison rule rather than accidental bytes.
     let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
         persisted_discovery_observations(first.manifest_artifact_id, second.manifest_artifact_id);
-    let proposal_bytes = canonical_product_ticket_proposal_json_v1(input.request);
+    let proposal_bytes = canonical_product_ticket_proposal_json_v2(input.request);
     execute_duplicate_query(
         process,
         tickets,
@@ -318,7 +318,7 @@ async fn registered_reference_bytes(
     process: &ProcessStore,
     cas: &CasStore,
     principal: &str,
-    reference: &SealedArtifactReferenceV1,
+    reference: &SealedArtifactReferenceV2,
 ) -> Result<Vec<u8>, ProductRuntimeError> {
     let seal = process
         .registered_artifact_for_principal(cas, principal, reference.artifact_id)
@@ -335,7 +335,7 @@ async fn exact_reference_bytes(
     process: &ProcessStore,
     cas: &CasStore,
     principal: &str,
-    reference: &SealedArtifactReferenceV1,
+    reference: &SealedArtifactReferenceV2,
 ) -> Result<ExactBytes, ProductRuntimeError> {
     Ok(ExactBytes::from_artifact(
         reference.digest,
@@ -347,7 +347,7 @@ async fn verify_proposal_artifacts(
     process: &ProcessStore,
     cas: &CasStore,
     principal: &str,
-    proposal: &ProductTicketProposalV1,
+    proposal: &ProductTicketProposalV2,
 ) -> Result<(), ProductRuntimeError> {
     for reference in proposal_artifacts(proposal) {
         let _ = registered_reference_bytes(process, cas, principal, reference).await?;
@@ -355,7 +355,7 @@ async fn verify_proposal_artifacts(
     Ok(())
 }
 
-fn proposal_artifacts(proposal: &ProductTicketProposalV1) -> Vec<&SealedArtifactReferenceV1> {
+fn proposal_artifacts(proposal: &ProductTicketProposalV2) -> Vec<&SealedArtifactReferenceV2> {
     let mut artifacts = vec![
         &proposal.narrative,
         &proposal.evidence,
@@ -434,7 +434,7 @@ async fn seal_existing_observation_manifest(
     principal: &str,
     command_id: &str,
     kernel_build_id: KernelBuildId,
-    observation: &CommandObservationV1,
+    observation: &CommandObservationV2,
 ) -> Result<ArtifactId, ProductRuntimeError> {
     let bytes = status_only_observation_manifest_bytes(observation.exit_status);
     let (_, receipt) = process
@@ -461,15 +461,15 @@ async fn seal_bytes(
     command_id: &str,
     kernel_build_id: KernelBuildId,
     bytes: &[u8],
-) -> Result<SealedArtifactReferenceV1, ProductRuntimeError> {
+) -> Result<SealedArtifactReferenceV2, ProductRuntimeError> {
     let (seal, receipt) = process
         .adopt_and_register_kernel_bytes(cas, principal, command_id, kernel_build_id, bytes)
         .await?;
     Ok(reference(receipt.artifact_id, seal))
 }
 
-fn reference(artifact_id: ArtifactId, seal: CasArtifact) -> SealedArtifactReferenceV1 {
-    SealedArtifactReferenceV1 {
+fn reference(artifact_id: ArtifactId, seal: CasArtifact) -> SealedArtifactReferenceV2 {
+    SealedArtifactReferenceV2 {
         artifact_id,
         digest: seal.digest(),
         byte_length: seal.byte_length(),

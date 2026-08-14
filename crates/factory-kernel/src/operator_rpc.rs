@@ -19,18 +19,18 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use factory_protocol::{
-    AggregateRevision, ArchitectDecideCandidateRequest, ArchitectDecisionKindV1,
+    AggregateRevision, ArchitectDecideCandidateRequest, ArchitectDecisionKindV2,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, CampaignId, CampaignReceiptResponse,
     CampaignSessionCostAggregateResponse, CampaignSessionCostResponse, CampaignStatusResponse,
-    CandidateDecisionRequestV1, CandidateId, ConflictResponse, ContractError,
+    CandidateDecisionRequestV2, CandidateId, ConflictResponse, ContractError,
     DownstreamArchitectDecisionEvidenceResponse, DownstreamEvidenceResponse,
     DownstreamReviewEvidenceResponse, DownstreamValidationEvidenceResponse, ErrorResponse,
     ExpectedRevision, FrameError, OP_ARCHITECT_DECIDE_CANDIDATE,
     OP_ARCHITECT_RELEASE_TICKET_ATTEMPT, OP_ARCHITECT_SPONSOR_TICKET_REVISION,
     OP_OPERATOR_CAMPAIGN_STATUS, OP_OPERATOR_CANCEL_CAMPAIGN, OP_OPERATOR_START_CAMPAIGN,
     OperatorCampaignStatusRequest, OperatorCancelCampaignRequest, OperatorStartCampaignRequest,
-    PROTOCOL_VERSION_V1, ReviewId, TerminalCostV1, TicketAttemptId, decode_operation_request,
+    PROTOCOL_VERSION_V2, ReviewId, TerminalCostV2, TicketAttemptId, decode_operation_request,
     decode_routing_envelope,
 };
 use miniserde::json;
@@ -355,7 +355,7 @@ impl OperatorRpc {
 
     async fn resolve_candidate_decision(
         &self,
-        request: &CandidateDecisionRequestV1,
+        request: &CandidateDecisionRequestV2,
         caller_expected_candidate_revision: ExpectedRevision,
     ) -> Result<ResolvedCandidateDecisionTransition, ArchitectTransitionResolutionError> {
         let Some(resolver) = &self.resolver else {
@@ -393,7 +393,7 @@ impl ArchitectOperationRejection {
         match self {
             Self::Store(DecisionStoreError::RevisionConflict { current, .. }) => {
                 json::to_string(&ConflictResponse {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id,
                     operation,
                     error_code: "revision_conflict".to_owned(),
@@ -406,7 +406,7 @@ impl ArchitectOperationRejection {
                 current,
                 ..
             }) => json::to_string(&ConflictResponse {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id,
                 operation,
                 error_code: "revision_conflict".to_owned(),
@@ -471,11 +471,11 @@ fn receipt_response(
     operation: &'static str,
     audit_id: i64,
     aggregate_revision: AggregateRevision,
-    decision_kind: ArchitectDecisionKindV1,
+    decision_kind: ArchitectDecisionKindV2,
     architect_decision_id: i64,
 ) -> Vec<u8> {
     json::to_string(&ArchitectDecisionReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: operation.to_owned(),
         audit_id,
@@ -493,7 +493,7 @@ fn error_response(
     message: &str,
 ) -> Vec<u8> {
     json::to_string(&ErrorResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation,
         error_code: error_code.to_owned(),
@@ -502,13 +502,13 @@ fn error_response(
     .into_bytes()
 }
 
-fn decision_kind_name(value: ArchitectDecisionKindV1) -> &'static str {
+fn decision_kind_name(value: ArchitectDecisionKindV2) -> &'static str {
     match value {
-        ArchitectDecisionKindV1::Sponsor => "sponsor",
-        ArchitectDecisionKindV1::Release => "release",
-        ArchitectDecisionKindV1::Deliver => "deliver",
-        ArchitectDecisionKindV1::Rework => "rework",
-        ArchitectDecisionKindV1::Reject => "reject",
+        ArchitectDecisionKindV2::Sponsor => "sponsor",
+        ArchitectDecisionKindV2::Release => "release",
+        ArchitectDecisionKindV2::Deliver => "deliver",
+        ArchitectDecisionKindV2::Rework => "rework",
+        ArchitectDecisionKindV2::Reject => "reject",
     }
 }
 
@@ -726,7 +726,7 @@ impl CampaignOperationRejection {
         match self {
             Self::Store(StoreError::RevisionConflict { current, .. }) => {
                 json::to_string(&ConflictResponse {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id,
                     operation,
                     error_code: "revision_conflict".to_owned(),
@@ -769,7 +769,7 @@ fn campaign_receipt_response(
     receipt: CampaignReceipt,
 ) -> Vec<u8> {
     json::to_string(&CampaignReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: operation.to_owned(),
         audit_id: receipt.audit_log_id,
@@ -852,7 +852,7 @@ fn campaign_status_response(
                 }),
             });
     json::to_string(&CampaignStatusResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
         campaign_id: campaign.campaign_id.get(),
@@ -927,12 +927,12 @@ fn campaign_status_response(
     .into_bytes()
 }
 
-fn session_cost_projection(cost: Option<TerminalCostV1>) -> (&'static str, Option<u64>) {
+fn session_cost_projection(cost: Option<TerminalCostV2>) -> (&'static str, Option<u64>) {
     match cost {
         None => ("pending", None),
-        Some(TerminalCostV1::Known(cost)) => ("known", Some(cost.get())),
-        Some(TerminalCostV1::Unknown) => ("unknown", None),
-        Some(TerminalCostV1::Exceeded(cost)) => ("exceeded", Some(cost.get())),
+        Some(TerminalCostV2::Known(cost)) => ("known", Some(cost.get())),
+        Some(TerminalCostV2::Unknown) => ("unknown", None),
+        Some(TerminalCostV2::Exceeded(cost)) => ("exceeded", Some(cost.get())),
     }
 }
 
@@ -956,17 +956,17 @@ fn session_state_name(state: factory_protocol::SessionState) -> &'static str {
 }
 
 fn campaign_cost_projection(
-    cost: TerminalCostV1,
+    cost: TerminalCostV2,
     budget: factory_protocol::MicroUsd,
 ) -> (&'static str, Option<u64>, Option<u64>) {
     match cost {
-        TerminalCostV1::Known(measured) => (
+        TerminalCostV2::Known(measured) => (
             "known",
             Some(measured.get()),
             Some(budget.get().saturating_sub(measured.get())),
         ),
-        TerminalCostV1::Unknown => ("unknown", None, None),
-        TerminalCostV1::Exceeded(measured) => ("exceeded", Some(measured.get()), Some(0)),
+        TerminalCostV2::Unknown => ("unknown", None, None),
+        TerminalCostV2::Exceeded(measured) => ("exceeded", Some(measured.get()), Some(0)),
     }
 }
 
@@ -1035,7 +1035,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use factory_protocol::{SealedArtifactReferenceWireV1, decode_json_frame, encode_json_frame};
+    use factory_protocol::{SealedArtifactReferenceWireV2, decode_json_frame, encode_json_frame};
 
     use super::*;
 
@@ -1085,10 +1085,10 @@ mod tests {
             assert_eq!(command.decision.ticket_revision_id.get(), 7);
             Box::pin(async {
                 Ok(SponsorshipReceipt {
-                    decision: factory_protocol::ArchitectDecisionReceiptV1 {
+                    decision: factory_protocol::ArchitectDecisionReceiptV2 {
                         architect_decision_id: factory_protocol::ArchitectDecisionId::new(22)
                             .expect("decision ID"),
-                        kind: ArchitectDecisionKindV1::Sponsor,
+                        kind: ArchitectDecisionKindV2::Sponsor,
                     },
                     ticket_revision_id: factory_protocol::TicketRevisionId::new(7)
                         .expect("ticket revision ID"),
@@ -1128,8 +1128,8 @@ mod tests {
         }
     }
 
-    fn rationale() -> SealedArtifactReferenceWireV1 {
-        SealedArtifactReferenceWireV1 {
+    fn rationale() -> SealedArtifactReferenceWireV2 {
+        SealedArtifactReferenceWireV2 {
             artifact_id: 1,
             digest: "a".repeat(64),
             byte_length: 12,
@@ -1142,7 +1142,7 @@ mod tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let frame = encode_json_frame(
                 &ArchitectReleaseTicketAttemptRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "release-1".to_owned(),
                     operation: OP_ARCHITECT_RELEASE_TICKET_ATTEMPT.to_owned(),
                     client_command_id: "release-command".to_owned(),
@@ -1176,7 +1176,7 @@ mod tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let frame = encode_json_frame(
                 &ArchitectSponsorTicketRevisionRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "sponsor-1".to_owned(),
                     operation: OP_ARCHITECT_SPONSOR_TICKET_REVISION.to_owned(),
                     client_command_id: "sponsor-command".to_owned(),
@@ -1215,7 +1215,7 @@ mod tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let frame = encode_json_frame(
                 &ArchitectDecideCandidateRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "candidate-1".to_owned(),
                     operation: OP_ARCHITECT_DECIDE_CANDIDATE.to_owned(),
                     client_command_id: "candidate-command".to_owned(),
@@ -1250,13 +1250,13 @@ mod tests {
     fn campaign_cost_and_scheduler_explanations_are_closed_and_provider_free() {
         assert_eq!(
             campaign_cost_projection(
-                TerminalCostV1::Known(factory_protocol::MicroUsd::new(4)),
+                TerminalCostV2::Known(factory_protocol::MicroUsd::new(4)),
                 factory_protocol::MicroUsd::new(10)
             ),
             ("known", Some(4), Some(6))
         );
         assert_eq!(
-            campaign_cost_projection(TerminalCostV1::Unknown, factory_protocol::MicroUsd::new(10)),
+            campaign_cost_projection(TerminalCostV2::Unknown, factory_protocol::MicroUsd::new(10)),
             ("unknown", None, None)
         );
         assert_eq!(

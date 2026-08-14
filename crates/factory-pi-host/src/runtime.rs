@@ -4,7 +4,7 @@ use factory_pi_host::{
     DaemonError, DaemonFuture, FrameClient, FramedDaemon, LocalToolExecutor,
     MAX_REQUEST_FRAME_BYTES, ToolName,
 };
-use factory_protocol::{PROTOCOL_VERSION_V1, RepositoryRelativePath, encode_frame};
+use factory_protocol::{PROTOCOL_VERSION_V2, RepositoryRelativePath, encode_frame};
 use pi_agent_core::scheduler::CancellationToken;
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{
@@ -91,7 +91,7 @@ fn request_json(
     }
     object.insert(
         "protocol_version".to_owned(),
-        number(u64::from(PROTOCOL_VERSION_V1))?,
+        number(u64::from(PROTOCOL_VERSION_V2))?,
     );
     object.insert(
         "request_id".to_owned(),

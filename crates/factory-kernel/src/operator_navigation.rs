@@ -16,7 +16,7 @@ use factory_protocol::{
     OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest,
     OperatorCandidateShowRequest, OperatorInstitutionalSearchRequest,
     OperatorInstitutionalShowRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V1, TicketAttemptNavigationResponse, TicketListItemResponse,
+    PROTOCOL_VERSION_V2, TicketAttemptNavigationResponse, TicketListItemResponse,
     TicketListResponse, TicketShowResponse, decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
@@ -178,7 +178,7 @@ impl OperatorNavigationRpc {
             .then(|| items.last().map(|item| item.reference.clone()))
             .flatten();
         Ok(json::to_string(&InstitutionalSearchResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_INSTITUTIONAL_SEARCH.to_owned(),
             items,
@@ -336,7 +336,7 @@ impl OperatorNavigationRpc {
                 let id: i64 = row.try_get("id")?;
                 let created_at_micros: i64 = row.try_get("created_at_micros")?;
                 Ok(InstitutionalSearchHitResponse {
-                    reference: factory_protocol::InstitutionalReferenceWireV1 {
+                    reference: factory_protocol::InstitutionalReferenceWireV2 {
                         kind: kind.as_str().to_owned(),
                         id: positive(id, "institutional object ID")?,
                     },
@@ -402,7 +402,7 @@ impl OperatorNavigationRpc {
         rows.into_iter()
             .map(|row| {
                 Ok(InstitutionalSearchHitResponse {
-                    reference: factory_protocol::InstitutionalReferenceWireV1 {
+                    reference: factory_protocol::InstitutionalReferenceWireV2 {
                         kind: InstitutionalObjectKind::Publication.as_str().to_owned(),
                         id: positive(row.try_get("id")?, "publication ID")?,
                     },
@@ -544,10 +544,10 @@ impl OperatorNavigationRpc {
             .try_get("owner_office_id")
             .map_err(|error| NavigationRejection::Navigation(NavigationError::Database(error)))?;
         let response = InstitutionalShowResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_INSTITUTIONAL_SHOW.to_owned(),
-            reference: factory_protocol::InstitutionalReferenceWireV1::from_reference(reference),
+            reference: factory_protocol::InstitutionalReferenceWireV2::from_reference(reference),
             application_revision_id: positive(application_revision_id, "application revision ID")
                 .map_err(NavigationRejection::Navigation)?,
             owner_office_id: owner_office_id
@@ -620,7 +620,7 @@ impl OperatorNavigationRpc {
             .collect::<Result<Vec<_>, NavigationError>>()
             .map_err(NavigationRejection::Navigation)?;
         Ok(json::to_string(&TicketListResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_LIST_TICKETS.to_owned(),
             items,
@@ -755,7 +755,7 @@ impl OperatorNavigationRpc {
             )?);
         }
         Ok(json::to_string(&TicketShowResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_SHOW_TICKET.to_owned(),
             ticket_id: positive(ticket.ticket_id, "ticket ID")?,
@@ -949,7 +949,7 @@ impl OperatorNavigationRpc {
             .transpose()
             .map_err(NavigationRejection::Navigation)?;
         Ok(json::to_string(&CandidateShowResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_SHOW_CANDIDATE.to_owned(),
             candidate_id: positive(candidate.candidate_id, "candidate ID")?,
@@ -1010,7 +1010,7 @@ impl OperatorNavigationRpc {
             .await
             .map_err(NavigationRejection::Navigation)?;
         Ok(json::to_string(&AuditShowResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_OPERATOR_SHOW_AUDIT.to_owned(),
             selector: request.selector,
@@ -1145,7 +1145,7 @@ impl NavigationRejection {
             Self::Navigation(error) => (error.code(), error.to_string()),
         };
         json::to_string(&ErrorResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation,
             error_code: error_code.to_owned(),
@@ -1447,7 +1447,7 @@ mod tests {
             let requests = vec![
                 encode_json_frame(
                     &OperatorTicketListRequest {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: "navigation-list".to_owned(),
                         operation: OP_OPERATOR_LIST_TICKETS.to_owned(),
                         state: None,
@@ -1457,7 +1457,7 @@ mod tests {
                 .expect("frame"),
                 encode_json_frame(
                     &OperatorTicketShowRequest {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: "navigation-ticket".to_owned(),
                         operation: OP_OPERATOR_SHOW_TICKET.to_owned(),
                         ticket_id: 1,
@@ -1467,7 +1467,7 @@ mod tests {
                 .expect("frame"),
                 encode_json_frame(
                     &OperatorCandidateShowRequest {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: "navigation-candidate".to_owned(),
                         operation: OP_OPERATOR_SHOW_CANDIDATE.to_owned(),
                         candidate_id: 1,
@@ -1477,7 +1477,7 @@ mod tests {
                 .expect("frame"),
                 encode_json_frame(
                     &OperatorAuditShowRequest {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: "navigation-audit".to_owned(),
                         operation: OP_OPERATOR_SHOW_AUDIT.to_owned(),
                         selector: "audit:1".to_owned(),

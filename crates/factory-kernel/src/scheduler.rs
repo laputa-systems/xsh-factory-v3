@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The MVP permits one application-global Engineering claim at a time. This
-/// is a kernel concurrency invariant, not a replaceable product policy: V1
+/// is a kernel concurrency invariant, not a replaceable product policy: V2
 /// concurrency requires a separate aggregate-cost reservation design.
 pub const IN_FLIGHT_TICKET_MAXIMUM: u32 = 1;
 

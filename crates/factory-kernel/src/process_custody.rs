@@ -29,7 +29,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use factory_protocol::ProcessCustodyV1;
+use factory_protocol::ProcessCustodyV2;
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
 
@@ -246,7 +246,7 @@ impl ProcessCancellation {
 #[derive(Debug)]
 pub struct SpawnedPiHost {
     child: Child,
-    custody: ProcessCustodyV1,
+    custody: ProcessCustodyV2,
     started: Instant,
     supervision: ProcessSupervisionSpec,
     cancellation: ProcessCancellation,
@@ -258,7 +258,7 @@ pub struct SpawnedPiHost {
 
 impl SpawnedPiHost {
     #[must_use]
-    pub const fn custody(&self) -> ProcessCustodyV1 {
+    pub const fn custody(&self) -> ProcessCustodyV2 {
         self.custody
     }
 
@@ -353,7 +353,7 @@ pub enum ProcessStopReason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SupervisedProcessOutcome {
-    pub custody: ProcessCustodyV1,
+    pub custody: ProcessCustodyV2,
     pub reason: ProcessStopReason,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
@@ -420,7 +420,7 @@ fn spawn_owned_command(
     );
     Ok(SpawnedPiHost {
         child,
-        custody: ProcessCustodyV1 {
+        custody: ProcessCustodyV2 {
             pid,
             pgid,
             started_at_unix_millis: u64::try_from(started_at.as_millis())

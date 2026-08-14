@@ -8,11 +8,11 @@
 //! sibling Git-custody module.
 
 use factory_protocol::{
-    AggregateRevision, ArchitectDecisionKindV1, ArchitectDecisionReceiptV1,
-    CandidateDecisionRequestV1, CandidateDecisionV1, CandidateId, CandidateState,
-    CandidateSubmissionV1, ContentDigest, ExpectedRevision, KernelBuildId,
-    QualityReviewSubmissionV1, ReleaseDecisionV1, RepositoryObjectIdV1, ReviewId, ReviewVerdict,
-    SealedArtifactReferenceV1, SessionId, SponsorshipDecisionV1, TicketAttemptId, TicketRevisionId,
+    AggregateRevision, ArchitectDecisionKindV2, ArchitectDecisionReceiptV2,
+    CandidateDecisionRequestV2, CandidateDecisionV2, CandidateId, CandidateState,
+    CandidateSubmissionV2, ContentDigest, ExpectedRevision, KernelBuildId,
+    QualityReviewSubmissionV2, ReleaseDecisionV2, RepositoryObjectIdV2, ReviewId, ReviewVerdict,
+    SealedArtifactReferenceV2, SessionId, SponsorshipDecisionV2, TicketAttemptId, TicketRevisionId,
     TicketState, ValidationId, ValidationState,
 };
 use sqlx::{PgPool, Postgres, Transaction};
@@ -149,24 +149,24 @@ pub struct SubmitCandidate {
     pub expected_attempt_revision: ExpectedRevision,
     pub expected_ticket_revision: ExpectedRevision,
     pub engineering_session_id: SessionId,
-    pub base_commit: RepositoryObjectIdV1,
-    pub base_tree: RepositoryObjectIdV1,
-    pub regression_tree: RepositoryObjectIdV1,
-    pub candidate_tree: RepositoryObjectIdV1,
-    pub changed_paths: SealedArtifactReferenceV1,
+    pub base_commit: RepositoryObjectIdV2,
+    pub base_tree: RepositoryObjectIdV2,
+    pub regression_tree: RepositoryObjectIdV2,
+    pub candidate_tree: RepositoryObjectIdV2,
+    pub changed_paths: SealedArtifactReferenceV2,
     /// Kernel-captured regression-checkpoint evidence.  These identities are
     /// accepted only from the opaque checkpoint capability, never actor wire.
-    pub regression_patch: SealedArtifactReferenceV1,
-    pub regression_command_set: SealedArtifactReferenceV1,
-    pub regression_log: SealedArtifactReferenceV1,
-    pub candidate_patch: SealedArtifactReferenceV1,
+    pub regression_patch: SealedArtifactReferenceV2,
+    pub regression_command_set: SealedArtifactReferenceV2,
+    pub regression_log: SealedArtifactReferenceV2,
+    pub candidate_patch: SealedArtifactReferenceV2,
     /// Kernel-composed completion record derived from the captured worktree
     /// and validation receipts; Engineering cannot manufacture this evidence.
-    pub engineering_report: SealedArtifactReferenceV1,
+    pub engineering_report: SealedArtifactReferenceV2,
     /// Kernel-composed statement that no actor-authored risk report was
     /// required for this capture. Quality may add its own sealed risks later.
-    pub engineering_risks: SealedArtifactReferenceV1,
-    pub submission: CandidateSubmissionV1,
+    pub engineering_risks: SealedArtifactReferenceV2,
+    pub submission: CandidateSubmissionV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -192,11 +192,11 @@ pub struct RecordValidation {
     pub kernel_build_id: KernelBuildId,
     pub performed_by_session_id: SessionId,
     pub validation_profile: String,
-    pub pristine_tree: RepositoryObjectIdV1,
-    pub command_set: SealedArtifactReferenceV1,
+    pub pristine_tree: RepositoryObjectIdV2,
+    pub command_set: SealedArtifactReferenceV2,
     pub result: ValidationResult,
     pub duration_millis: u64,
-    pub log: SealedArtifactReferenceV1,
+    pub log: SealedArtifactReferenceV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,7 +220,7 @@ pub struct AttachCandidateCommit {
     pub command_id: String,
     pub candidate_id: CandidateId,
     pub expected_candidate_revision: ExpectedRevision,
-    pub candidate_commit: RepositoryObjectIdV1,
+    pub candidate_commit: RepositoryObjectIdV2,
     pub candidate_ref: String,
 }
 
@@ -232,7 +232,7 @@ pub struct SubmitQualityReview {
     pub expected_candidate_revision: ExpectedRevision,
     pub expected_attempt_revision: ExpectedRevision,
     pub quality_session_id: SessionId,
-    pub submission: QualityReviewSubmissionV1,
+    pub submission: QualityReviewSubmissionV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,12 +252,12 @@ pub struct ReviewReceipt {
 pub struct SponsorTicket {
     pub command_id: String,
     pub expected_ticket_revision: ExpectedRevision,
-    pub decision: SponsorshipDecisionV1,
+    pub decision: SponsorshipDecisionV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SponsorshipReceipt {
-    pub decision: ArchitectDecisionReceiptV1,
+    pub decision: ArchitectDecisionReceiptV2,
     pub ticket_revision_id: TicketRevisionId,
     pub resulting_ticket_revision: AggregateRevision,
     pub audit_log_id: i64,
@@ -271,7 +271,7 @@ pub struct ReleaseTicketAttempt {
     pub command_id: String,
     pub expected_attempt_revision: ExpectedRevision,
     pub expected_ticket_revision: ExpectedRevision,
-    pub decision: ReleaseDecisionV1,
+    pub decision: ReleaseDecisionV2,
     pub requalification: CurrentHeadRequalification,
 }
 
@@ -284,7 +284,7 @@ pub enum ReleaseOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseReceipt {
-    pub decision: ArchitectDecisionReceiptV1,
+    pub decision: ArchitectDecisionReceiptV2,
     pub ticket_attempt_id: TicketAttemptId,
     pub outcome: ReleaseOutcome,
     pub resulting_attempt_revision: AggregateRevision,
@@ -299,12 +299,12 @@ pub struct DecideCandidate {
     pub expected_candidate_revision: ExpectedRevision,
     pub expected_attempt_revision: ExpectedRevision,
     pub expected_ticket_revision: ExpectedRevision,
-    pub request: CandidateDecisionRequestV1,
+    pub request: CandidateDecisionRequestV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CandidateDecisionReceipt {
-    pub decision: ArchitectDecisionReceiptV1,
+    pub decision: ArchitectDecisionReceiptV2,
     pub candidate_id: CandidateId,
     pub candidate_state: CandidateState,
     pub resulting_candidate_revision: AggregateRevision,
@@ -326,12 +326,12 @@ pub struct RecordDelivery {
     pub expected_attempt_revision: ExpectedRevision,
     pub expected_ticket_revision: ExpectedRevision,
     pub expected_campaign_revision: ExpectedRevision,
-    pub expected_old_commit: RepositoryObjectIdV1,
-    pub candidate_commit: RepositoryObjectIdV1,
-    pub resulting_commit: RepositoryObjectIdV1,
-    pub resulting_tree: RepositoryObjectIdV1,
+    pub expected_old_commit: RepositoryObjectIdV2,
+    pub candidate_commit: RepositoryObjectIdV2,
+    pub resulting_commit: RepositoryObjectIdV2,
+    pub resulting_tree: RepositoryObjectIdV2,
     pub factory_cost_micro_usd: u64,
-    pub receipt: SealedArtifactReferenceV1,
+    pub receipt: SealedArtifactReferenceV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -989,7 +989,7 @@ impl DecisionStore {
             let ticket = lock_ticket_revision_state(&mut tx, ticket_revision_id).await?;
             tx.commit().await?;
             return Ok(SponsorshipReceipt {
-                decision: architect_receipt(receipt.subject_id, ArchitectDecisionKindV1::Sponsor)?,
+                decision: architect_receipt(receipt.subject_id, ArchitectDecisionKindV2::Sponsor)?,
                 ticket_revision_id,
                 resulting_ticket_revision: ticket.ticket_revision,
                 audit_log_id: receipt.audit_log_id,
@@ -1043,7 +1043,7 @@ impl DecisionStore {
         .await?;
         tx.commit().await?;
         Ok(SponsorshipReceipt {
-            decision: architect_receipt(decision_id, ArchitectDecisionKindV1::Sponsor)?,
+            decision: architect_receipt(decision_id, ArchitectDecisionKindV2::Sponsor)?,
             ticket_revision_id: command.decision.ticket_revision_id,
             resulting_ticket_revision: next,
             audit_log_id,
@@ -1081,7 +1081,7 @@ impl DecisionStore {
             let attempt = lock_candidate_attempt(&mut tx, attempt_id).await?;
             tx.commit().await?;
             return Ok(ReleaseReceipt {
-                decision: architect_receipt(receipt.subject_id, ArchitectDecisionKindV1::Release)?,
+                decision: architect_receipt(receipt.subject_id, ArchitectDecisionKindV2::Release)?,
                 ticket_attempt_id: attempt_id,
                 outcome: release_outcome(attempt.ticket_state)?,
                 resulting_attempt_revision: attempt.attempt_revision,
@@ -1165,7 +1165,7 @@ impl DecisionStore {
         .await?;
         tx.commit().await?;
         Ok(ReleaseReceipt {
-            decision: architect_receipt(decision_id, ArchitectDecisionKindV1::Release)?,
+            decision: architect_receipt(decision_id, ArchitectDecisionKindV2::Release)?,
             ticket_attempt_id: attempt.id,
             outcome,
             resulting_attempt_revision: next_attempt,
@@ -1243,14 +1243,14 @@ impl DecisionStore {
         let rejected_review = review.verdict == REVIEW_REJECT;
         let override_is_exact =
             command.request.quality_rejection_override == Some(command.request.review_id);
-        if command.request.decision == CandidateDecisionV1::Deliver {
+        if command.request.decision == CandidateDecisionV2::Deliver {
             if rejected_review != override_is_exact {
                 return Err(DecisionStoreError::QualityRejectionOverrideRequired);
             }
         } else if command.request.quality_rejection_override.is_some() {
             return Err(DecisionStoreError::QualityRejectionOverrideForbidden);
         }
-        if command.request.decision == CandidateDecisionV1::Rework && attempt.rework_ordinal != 0 {
+        if command.request.decision == CandidateDecisionV2::Rework && attempt.rework_ordinal != 0 {
             return Err(DecisionStoreError::ReworkLimitReached);
         }
         let decision_id = insert_decision(
@@ -1268,13 +1268,13 @@ impl DecisionStore {
         let next_candidate = candidate.revision.next()?;
         let next_attempt = attempt.attempt_revision.next()?;
         let next_ticket = match command.request.decision {
-            CandidateDecisionV1::Reject => attempt.ticket_revision.next()?,
-            CandidateDecisionV1::Deliver | CandidateDecisionV1::Rework => attempt.ticket_revision,
+            CandidateDecisionV2::Reject => attempt.ticket_revision.next()?,
+            CandidateDecisionV2::Deliver | CandidateDecisionV2::Rework => attempt.ticket_revision,
         };
         let (candidate_lifecycle, attempt_stage) = match command.request.decision {
-            CandidateDecisionV1::Deliver => (CANDIDATE_ACCEPTED, ATTEMPT_AWAITING_ARCHITECT),
-            CandidateDecisionV1::Rework => (CANDIDATE_REJECTED, ATTEMPT_REWORK_ENGINEERING),
-            CandidateDecisionV1::Reject => (CANDIDATE_REJECTED, ATTEMPT_FAILED),
+            CandidateDecisionV2::Deliver => (CANDIDATE_ACCEPTED, ATTEMPT_AWAITING_ARCHITECT),
+            CandidateDecisionV2::Rework => (CANDIDATE_REJECTED, ATTEMPT_REWORK_ENGINEERING),
+            CandidateDecisionV2::Reject => (CANDIDATE_REJECTED, ATTEMPT_FAILED),
         };
         sqlx::query!(
             "UPDATE factory.candidates SET lifecycle = $1, revision = $2 WHERE id = $3",
@@ -1287,14 +1287,14 @@ impl DecisionStore {
         sqlx::query!(
             "UPDATE factory.ticket_attempts SET stage = $1::SMALLINT, rework_ordinal = rework_ordinal + $2, failed_at = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN CURRENT_TIMESTAMP ELSE failed_at END, failure_reason = CASE WHEN $1::SMALLINT = $3::SMALLINT THEN 'architect rejected reviewed candidate' ELSE failure_reason END, revision = $4 WHERE id = $5",
             attempt_stage,
-            if command.request.decision == CandidateDecisionV1::Rework { 1 } else { 0 },
+            if command.request.decision == CandidateDecisionV2::Rework { 1 } else { 0 },
             ATTEMPT_FAILED,
             revision_sql(next_attempt)?,
             attempt.id.get(),
         )
             .execute(&mut *tx)
             .await?;
-        if command.request.decision == CandidateDecisionV1::Reject {
+        if command.request.decision == CandidateDecisionV2::Reject {
             update_ticket_state(&mut tx, &attempt, TICKET_REJECTED, next_ticket, None, None)
                 .await?;
         }
@@ -2145,7 +2145,7 @@ async fn delivered_attempt_count(
 
 async fn require_artifact(
     tx: &mut Transaction<'_, Postgres>,
-    reference: &SealedArtifactReferenceV1,
+    reference: &SealedArtifactReferenceV2,
 ) -> Result<(), DecisionStoreError> {
     let row = sqlx::query!(
         "SELECT digest, byte_length
@@ -2168,7 +2168,7 @@ async fn require_artifact(
 
 async fn require_artifact_unbound(
     tx: &mut Transaction<'_, Postgres>,
-    reference: &SealedArtifactReferenceV1,
+    reference: &SealedArtifactReferenceV2,
 ) -> Result<(), DecisionStoreError> {
     let row = sqlx::query!(
         "SELECT digest, byte_length FROM factory.artifacts WHERE id = $1",
@@ -2704,19 +2704,19 @@ fn release_outcome(state: TicketState) -> Result<ReleaseOutcome, DecisionStoreEr
     }
 }
 
-const fn decision_code(value: CandidateDecisionV1) -> i16 {
+const fn decision_code(value: CandidateDecisionV2) -> i16 {
     match value {
-        CandidateDecisionV1::Deliver => DECISION_DELIVER,
-        CandidateDecisionV1::Rework => DECISION_REWORK,
-        CandidateDecisionV1::Reject => DECISION_REJECT,
+        CandidateDecisionV2::Deliver => DECISION_DELIVER,
+        CandidateDecisionV2::Rework => DECISION_REWORK,
+        CandidateDecisionV2::Reject => DECISION_REJECT,
     }
 }
 
 fn architect_receipt(
     decision_id: i64,
-    kind: ArchitectDecisionKindV1,
-) -> Result<ArchitectDecisionReceiptV1, DecisionStoreError> {
-    Ok(ArchitectDecisionReceiptV1 {
+    kind: ArchitectDecisionKindV2,
+) -> Result<ArchitectDecisionReceiptV2, DecisionStoreError> {
+    Ok(ArchitectDecisionReceiptV2 {
         architect_decision_id: factory_protocol::ArchitectDecisionId::new(decision_id)?,
         kind,
     })
@@ -2739,13 +2739,13 @@ fn hash_expected(hasher: &mut blake3::Hasher, value: ExpectedRevision) {
     hash_u64(hasher, value.get().get());
 }
 
-fn hash_artifact(hasher: &mut blake3::Hasher, value: &SealedArtifactReferenceV1) {
+fn hash_artifact(hasher: &mut blake3::Hasher, value: &SealedArtifactReferenceV2) {
     hash_i64(hasher, value.artifact_id.get());
     hasher.update(&value.digest.as_bytes());
     hash_u64(hasher, value.byte_length);
 }
 
-fn hash_object(hasher: &mut blake3::Hasher, value: &RepositoryObjectIdV1) {
+fn hash_object(hasher: &mut blake3::Hasher, value: &RepositoryObjectIdV2) {
     hash_string(hasher, value.as_str());
 }
 

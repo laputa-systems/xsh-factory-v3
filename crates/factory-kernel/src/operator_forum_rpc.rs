@@ -6,12 +6,12 @@
 //! and migration work, not as a public mutation surface.
 
 use factory_protocol::{
-    AssignmentRole, ErrorResponse, ForumAttachmentViewV1, ForumAuthor, ForumListThreadsRequestV1,
-    ForumListTopicsRequestV1, ForumPageLimit, ForumPostId, ForumPostKind, ForumPostViewV1,
-    ForumPostsResponseV1, ForumReadThreadRequestV1, ForumSearchCursor, ForumSearchHitV1,
-    ForumSearchInput, ForumSearchQuery, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadId,
-    ForumThreadPage, ForumThreadViewV1, ForumThreadsResponseV1, ForumTopicId, ForumTopicViewV1,
-    ForumTopicsResponseV1, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES, decode_operation_request,
+    AssignmentRole, ErrorResponse, ForumAttachmentViewV2, ForumAuthor, ForumListThreadsRequestV2,
+    ForumListTopicsRequestV2, ForumPageLimit, ForumPostId, ForumPostKind, ForumPostViewV2,
+    ForumPostsResponseV2, ForumReadThreadRequestV2, ForumSearchCursor, ForumSearchHitV2,
+    ForumSearchInput, ForumSearchQuery, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadId,
+    ForumThreadPage, ForumThreadViewV2, ForumThreadsResponseV2, ForumTopicId, ForumTopicViewV2,
+    ForumTopicsResponseV2, PROTOCOL_VERSION_V2, REQUEST_FRAME_MAX_BYTES, decode_operation_request,
     decode_routing_envelope,
 };
 use miniserde::json;
@@ -38,7 +38,7 @@ impl OperatorForumRpc {
         Ok(match result {
             Ok(response) => response,
             Err(error) => json::to_string(&ErrorResponse {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id,
                 operation,
                 error_code: forum_error_code(&error).to_owned(),
@@ -52,15 +52,15 @@ impl OperatorForumRpc {
         let operation = decode_routing_envelope(frame, REQUEST_FRAME_MAX_BYTES)?.operation;
         Ok(match operation.as_str() {
             factory_protocol::OP_FORUM_LIST_TOPICS => {
-                let request: ForumListTopicsRequestV1 =
+                let request: ForumListTopicsRequestV2 =
                     decode(frame, factory_protocol::OP_FORUM_LIST_TOPICS)?;
                 let limit = ForumPageLimit::new(request.limit)?;
                 let items = self
                     .store
                     .list_topics(optional_id(&request.cursor, ForumTopicId::new)?, limit)
                     .await?;
-                json::to_string(&ForumTopicsResponseV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                json::to_string(&ForumTopicsResponseV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: request.request_id,
                     operation,
                     next_cursor: page_cursor(
@@ -73,7 +73,7 @@ impl OperatorForumRpc {
                 .into_bytes()
             }
             factory_protocol::OP_FORUM_LIST_THREADS => {
-                let request: ForumListThreadsRequestV1 =
+                let request: ForumListThreadsRequestV2 =
                     decode(frame, factory_protocol::OP_FORUM_LIST_THREADS)?;
                 let limit = ForumPageLimit::new(request.limit)?;
                 let topic_id = ForumTopicId::new(request.topic_id)?;
@@ -85,8 +85,8 @@ impl OperatorForumRpc {
                         limit,
                     )
                     .await?;
-                json::to_string(&ForumThreadsResponseV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                json::to_string(&ForumThreadsResponseV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: request.request_id,
                     operation,
                     next_cursor: page_cursor(
@@ -99,7 +99,7 @@ impl OperatorForumRpc {
                 .into_bytes()
             }
             factory_protocol::OP_FORUM_READ_THREAD => {
-                let request: ForumReadThreadRequestV1 =
+                let request: ForumReadThreadRequestV2 =
                     decode(frame, factory_protocol::OP_FORUM_READ_THREAD)?;
                 let limit = ForumPageLimit::new(request.limit)?;
                 let items = self
@@ -110,8 +110,8 @@ impl OperatorForumRpc {
                         limit,
                     ))
                     .await?;
-                json::to_string(&ForumPostsResponseV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                json::to_string(&ForumPostsResponseV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: request.request_id,
                     operation,
                     next_cursor: page_cursor(
@@ -124,7 +124,7 @@ impl OperatorForumRpc {
                 .into_bytes()
             }
             factory_protocol::OP_FORUM_SEARCH => {
-                let request: ForumSearchRequestV1 =
+                let request: ForumSearchRequestV2 =
                     decode(frame, factory_protocol::OP_FORUM_SEARCH)?;
                 let limit = ForumPageLimit::new(request.limit)?;
                 let input = ForumSearchInput {
@@ -151,8 +151,8 @@ impl OperatorForumRpc {
                 } else {
                     String::new()
                 };
-                json::to_string(&ForumSearchResponseV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                json::to_string(&ForumSearchResponseV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: request.request_id,
                     operation,
                     items: items.into_iter().map(search_wire).collect(),
@@ -274,9 +274,9 @@ fn author_wire(author: ForumAuthor) -> (u8, Option<i64>, Option<u8>) {
         ForumAuthor::GrandArchitect => (1, None, None),
     }
 }
-fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV1 {
+fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumTopicViewV1 {
+    ForumTopicViewV2 {
         id: item.topic_id.get(),
         name: item.name,
         description: item.description,
@@ -286,9 +286,9 @@ fn topic_wire(item: crate::forum_store::ForumTopicView) -> ForumTopicViewV1 {
         created_at_micros: item.created_at_micros,
     }
 }
-fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV1 {
+fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumThreadViewV1 {
+    ForumThreadViewV2 {
         id: item.thread_id.get(),
         topic_id: item.topic_id.get(),
         title: item.title,
@@ -298,9 +298,9 @@ fn thread_wire(item: crate::forum_store::ForumThreadView) -> ForumThreadViewV1 {
         created_at_micros: item.created_at_micros,
     }
 }
-fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
+fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV2 {
     let (author_kind, author_session_id, author_office) = author_wire(item.author);
-    ForumPostViewV1 {
+    ForumPostViewV2 {
         id: item.post_id.get(),
         thread_id: item.thread_id.get(),
         kind: post_kind_code(item.kind),
@@ -313,7 +313,7 @@ fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
         attachments: item
             .attachments
             .into_iter()
-            .map(|attachment| ForumAttachmentViewV1 {
+            .map(|attachment| ForumAttachmentViewV2 {
                 artifact_id: attachment.artifact_id.get(),
                 label: attachment.label,
             })
@@ -321,8 +321,8 @@ fn post_wire(item: crate::forum_store::ForumPostView) -> ForumPostViewV1 {
         created_at_micros: item.created_at_micros,
     }
 }
-fn search_wire(item: crate::forum_store::ForumSearchHit) -> ForumSearchHitV1 {
-    ForumSearchHitV1 {
+fn search_wire(item: crate::forum_store::ForumSearchHit) -> ForumSearchHitV2 {
+    ForumSearchHitV2 {
         topic_id: item.topic_id.get(),
         thread_id: item.thread_id.get(),
         post_id: item.post_id.get(),
@@ -374,15 +374,15 @@ mod tests {
             let router = OperatorForumRpc::from_operator_transport(store.forum_store());
             let before = audit_count(&store).await;
             for frame in [
-                frame(&ForumListTopicsRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                frame(&ForumListTopicsRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "forum-topics".to_owned(),
                     operation: factory_protocol::OP_FORUM_LIST_TOPICS.to_owned(),
                     cursor: String::new(),
                     limit: 20,
                 }),
-                frame(&ForumSearchRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                frame(&ForumSearchRequestV2 {
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "forum-search".to_owned(),
                     operation: factory_protocol::OP_FORUM_SEARCH.to_owned(),
                     query: "one".to_owned(),

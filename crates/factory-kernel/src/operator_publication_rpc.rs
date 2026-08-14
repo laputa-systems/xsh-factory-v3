@@ -5,7 +5,7 @@
 //! assignment, and it never supplies a session provenance value.
 
 use factory_protocol::{
-    ErrorResponse, OperatorPublicationCreateRequest, PROTOCOL_VERSION_V1,
+    ErrorResponse, OperatorPublicationCreateRequest, PROTOCOL_VERSION_V2,
     PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES, decode_operation_request,
     decode_routing_envelope,
 };
@@ -54,7 +54,7 @@ impl OperatorPublicationRpc {
         Ok(match response {
             Ok(response) => response,
             Err(error) => json::to_string(&ErrorResponse {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id,
                 operation,
                 error_code: publication_error_code(&error).to_owned(),
@@ -80,7 +80,7 @@ impl OperatorPublicationRpc {
             )
             .await?;
         Ok(json::to_string(&PublicationReceiptResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: factory_protocol::OP_OPERATOR_PUBLICATION_CREATE.to_owned(),
             audit_id: receipt.audit_log_id.get(),

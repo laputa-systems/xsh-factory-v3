@@ -14,7 +14,7 @@ use factory_protocol::{
     ConflictResponse, ContractError, ErrorResponse, ExpectedRevision, FrameError,
     OP_OPERATOR_ACTIVATE_APPLICATION, OP_OPERATOR_REGISTER_APPLICATION,
     OP_OPERATOR_SHOW_APPLICATION, OperatorApplicationActivateRequest,
-    OperatorApplicationRegisterRequest, OperatorApplicationShowRequest, PROTOCOL_VERSION_V1,
+    OperatorApplicationRegisterRequest, OperatorApplicationShowRequest, PROTOCOL_VERSION_V2,
     decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
@@ -205,7 +205,7 @@ impl ApplicationOperationRejection {
         match self {
             Self::Store(StoreError::RevisionConflict { current, .. }) => {
                 json::to_string(&ConflictResponse {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id,
                     operation,
                     error_code: "revision_conflict".to_owned(),
@@ -242,7 +242,7 @@ fn expected_revision(value: u64) -> ExpectedRevision {
 
 fn show_response(request_id: String, view: ApplicationRevisionView) -> Vec<u8> {
     json::to_string(&ApplicationShowResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: OP_OPERATOR_SHOW_APPLICATION.to_owned(),
         application_key: view.application_key.as_str().to_owned(),
@@ -256,7 +256,7 @@ fn show_response(request_id: String, view: ApplicationRevisionView) -> Vec<u8> {
 
 fn admission_response(request_id: String, receipt: ApplicationRevisionReceipt) -> Vec<u8> {
     json::to_string(&ApplicationRevisionReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: OP_OPERATOR_REGISTER_APPLICATION.to_owned(),
         audit_id: receipt.audit_log_id,
@@ -270,7 +270,7 @@ fn admission_response(request_id: String, receipt: ApplicationRevisionReceipt) -
 
 fn activation_response(request_id: String, receipt: ApplicationActivationReceipt) -> Vec<u8> {
     json::to_string(&ApplicationRevisionReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation: OP_OPERATOR_ACTIVATE_APPLICATION.to_owned(),
         audit_id: receipt.audit_log_id,
@@ -289,7 +289,7 @@ fn error_response(
     message: &str,
 ) -> Vec<u8> {
     json::to_string(&ErrorResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
+        protocol_version: PROTOCOL_VERSION_V2,
         request_id,
         operation,
         error_code: error_code.to_owned(),
@@ -317,7 +317,7 @@ fn application_store_error_code(error: &StoreError) -> &'static str {
 #[cfg(test)]
 mod tests {
     use factory_protocol::{
-        OperatorApplicationShowRequest, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
+        OperatorApplicationShowRequest, PROTOCOL_VERSION_V2, REQUEST_FRAME_MAX_BYTES,
         encode_json_frame,
     };
 
@@ -327,7 +327,7 @@ mod tests {
     fn malformed_application_request_cannot_be_routed_as_a_storage_command() {
         let frame = encode_json_frame(
             &OperatorApplicationShowRequest {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: "application-show-1".to_owned(),
                 operation: OP_OPERATOR_SHOW_APPLICATION.to_owned(),
                 application_key: "Not-lowercase".to_owned(),

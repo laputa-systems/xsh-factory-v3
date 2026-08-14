@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use crate::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentRole,
     CandidateId, ContentDigest, ContractError, ExpectedRevision, KernelBuildId,
-    MAX_POLICY_ARTIFACT_BYTES, MicroUsd, PROTOCOL_VERSION_V1, PolicyEntrypointV2,
+    MAX_POLICY_ARTIFACT_BYTES, MicroUsd, PROTOCOL_VERSION_V2, PolicyEntrypointV2,
     RepositoryRelativePath, SessionLimitsV2, TicketAttemptId,
 };
 
@@ -34,7 +34,7 @@ pub struct SessionAdmissionFrameV2 {
 
 impl SessionAdmissionFrameV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.r#type != "session.admitted" || self.protocol_version != PROTOCOL_VERSION_V1 {
+        if self.r#type != "session.admitted" || self.protocol_version != PROTOCOL_VERSION_V2 {
             return Err(ContractError::InvalidValue {
                 field: "session admission frame",
                 reason: "type or protocol version is unsupported",
@@ -391,7 +391,7 @@ impl RuntimeIdentityV2 {
 /// The exact terminal operation selected by the assignment. The host may not
 /// invent another terminal operation after it has been admitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TerminalOperationV1 {
+pub enum TerminalOperationV2 {
     WorkComplete,
     CandidateSubmit,
     QualitySubmitReview,
@@ -400,7 +400,7 @@ pub enum TerminalOperationV1 {
 /// Why the supervised host stopped. This is closed so a new stop reason is a
 /// protocol change rather than an unvalidated string in an audit row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum StopReasonV1 {
+pub enum StopReasonV2 {
     Completed,
     Cancelled,
     Deadline,
@@ -414,7 +414,7 @@ pub enum StopReasonV1 {
 /// Normalized provider usage. Provider-specific event streams are not stored
 /// in PostgreSQL; this bounded summary is the only cost input at terminal.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UsageTotalsV1 {
+pub struct UsageTotalsV2 {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -426,10 +426,10 @@ pub struct UsageTotalsV1 {
     pub reported_cost_micro_usd: Option<MicroUsd>,
 }
 
-impl UsageTotalsV1 {
+impl UsageTotalsV2 {
     /// Computes integer micro-USD with each token class rounded upward at the
     /// million-token boundary. A missing usage report is represented by
-    /// [`TerminalCostV1::Unknown`], never by zero usage.
+    /// [`TerminalCostV2::Unknown`], never by zero usage.
     pub fn cost_at(
         self,
         input_price_per_million: MicroUsd,
@@ -467,7 +467,7 @@ impl UsageTotalsV1 {
 /// Cost is explicit and tri-state. Unknown is not zero and freezes later paid
 /// admission at the campaign boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TerminalCostV1 {
+pub enum TerminalCostV2 {
     Known(MicroUsd),
     Unknown,
     Exceeded(MicroUsd),
@@ -504,7 +504,7 @@ pub struct AssignmentPacketV2 {
     pub runtime: RuntimeIdentityV2,
     pub required_reads: Vec<ReadExactFileV2>,
     pub assignment_evidence: Vec<AssignmentEvidenceV2>,
-    pub terminal_operations: Vec<TerminalOperationV1>,
+    pub terminal_operations: Vec<TerminalOperationV2>,
     pub remaining_campaign_allowance: MicroUsd,
     pub revision: AggregateRevision,
     pub packet_digest: ContentDigest,
@@ -627,21 +627,21 @@ impl AssignmentPacketV2 {
 /// Kernel-admitted terminal report. The host supplies sealed artifact IDs and
 /// normalized usage, while the kernel recomputes packet identity and cost.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TerminalReportV1 {
+pub struct TerminalReportV2 {
     pub packet_digest: ContentDigest,
     pub expected_session_revision: ExpectedRevision,
     /// Infrastructure shutdowns have no actor terminal operation. A supplied
     /// operation is checked against the assignment allowlist only for a
     /// successful actor submission.
-    pub operation: Option<TerminalOperationV1>,
-    pub stop_reason: StopReasonV1,
+    pub operation: Option<TerminalOperationV2>,
+    pub stop_reason: StopReasonV2,
     pub report_digest: ContentDigest,
 }
 
 /// The only process state persisted by the kernel. PID and PGID are custody
 /// evidence, never a permission supplied by an actor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessCustodyV1 {
+pub struct ProcessCustodyV2 {
     pub pid: u32,
     pub pgid: u32,
     pub started_at_unix_millis: u64,
@@ -653,12 +653,12 @@ mod tests {
 
     #[test]
     fn cost_rounds_each_class_upward() {
-        let usage = UsageTotalsV1 {
+        let usage = UsageTotalsV2 {
             input_tokens: 1,
             output_tokens: 1_000_001,
             reasoning_tokens: None,
             reported_cost_micro_usd: Some(MicroUsd::new(13)),
-            ..UsageTotalsV1::default()
+            ..UsageTotalsV2::default()
         };
         assert_eq!(
             usage.cost_at_with_cache(
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn absent_usage_is_unknown_not_zero() {
-        let usage = UsageTotalsV1::default();
+        let usage = UsageTotalsV2::default();
         assert!(
             usage
                 .cost_at_with_cache(

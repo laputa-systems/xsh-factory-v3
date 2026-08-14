@@ -2,13 +2,13 @@
 //!
 //! The Engineering actor can submit only bounded text. The kernel captures
 //! every tree, patch, report, risk record, validation, and commit
-//! identity itself, then exposes one immutable [`CandidatePacketV1`] to the
+//! identity itself, then exposes one immutable [`CandidatePacketV2`] to the
 //! fresh Quality assignment. Quality prose is likewise sealed before the
 //! review becomes durable. Neither office can turn a narrative into a hard
 //! validation pass or a delivery decision.
 
 use crate::{
-    AggregateRevision, CandidateId, ContractError, ReviewVerdict, SealedArtifactReferenceV1,
+    AggregateRevision, CandidateId, ContractError, ReviewVerdict, SealedArtifactReferenceV2,
     SessionId, TicketAttemptId, TicketRevisionId, ValidationId,
 };
 
@@ -27,9 +27,9 @@ pub const QUALITY_VALIDATION_PROFILE_BYTE_LIMIT: usize = 160;
 /// than pretending they are Factory content digests.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct RepositoryObjectIdV1(String);
+pub struct RepositoryObjectIdV2(String);
 
-impl RepositoryObjectIdV1 {
+impl RepositoryObjectIdV2 {
     pub fn parse(value: impl Into<String>) -> Result<Self, ContractError> {
         let value = value.into();
         if !matches!(value.len(), 40 | 64)
@@ -55,33 +55,33 @@ impl RepositoryObjectIdV1 {
 /// It contains identities and sealed artifacts only; the Quality worktree is
 /// independently materialized from `candidate_tree` by the kernel.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CandidatePacketV1 {
+pub struct CandidatePacketV2 {
     pub candidate_id: CandidateId,
     pub ticket_attempt_id: TicketAttemptId,
     pub ticket_revision_id: TicketRevisionId,
-    pub base_commit: RepositoryObjectIdV1,
-    pub base_tree: RepositoryObjectIdV1,
-    pub regression_tree: RepositoryObjectIdV1,
-    pub candidate_tree: RepositoryObjectIdV1,
+    pub base_commit: RepositoryObjectIdV2,
+    pub base_tree: RepositoryObjectIdV2,
+    pub regression_tree: RepositoryObjectIdV2,
+    pub candidate_tree: RepositoryObjectIdV2,
     /// The portable binary patch proving the accepted pre-fix regression tree.
     /// It may be empty when Product already captured the reproducer on the
     /// pristine tree and Engineering's checkpoint introduces no test-only
     /// delta. The command set, failed log, candidate patch, and hard
     /// validation remain independently required.
-    pub regression_patch: SealedArtifactReferenceV1,
+    pub regression_patch: SealedArtifactReferenceV2,
     /// Kernel-owned targeted-command set and complete failure receipt for the
     /// accepted regression checkpoint.
-    pub regression_command_set: SealedArtifactReferenceV1,
-    pub regression_log: SealedArtifactReferenceV1,
-    pub candidate_patch: SealedArtifactReferenceV1,
+    pub regression_command_set: SealedArtifactReferenceV2,
+    pub regression_log: SealedArtifactReferenceV2,
+    pub candidate_patch: SealedArtifactReferenceV2,
     pub engineering_session_id: SessionId,
-    pub engineering_report: SealedArtifactReferenceV1,
+    pub engineering_report: SealedArtifactReferenceV2,
     pub hard_validation_id: ValidationId,
-    pub candidate_commit: RepositoryObjectIdV1,
+    pub candidate_commit: RepositoryObjectIdV2,
     pub candidate_revision: AggregateRevision,
 }
 
-impl CandidatePacketV1 {
+impl CandidatePacketV2 {
     /// Checks the self-contained packet shape. The kernel separately proves
     /// that the patch reconstructs the tree and the hard validation belongs
     /// to that same exact candidate before it issues this packet.
@@ -106,13 +106,13 @@ impl CandidatePacketV1 {
 /// accepted from the actor: the kernel captures them from the exact owned
 /// worktree after this operation is submitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CandidateSubmissionV1 {
+pub struct CandidateSubmissionV2 {
     pub commit_subject: String,
     pub commit_body: String,
     pub regression_test_identity: String,
 }
 
-impl CandidateSubmissionV1 {
+impl CandidateSubmissionV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         validate_text(
             "candidate commit subject",
@@ -146,11 +146,11 @@ impl CandidateSubmissionV1 {
 /// Quality must inspect the returned validation receipt before it can submit
 /// its one terminal review.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QualityFullSuiteRequestV1 {
+pub struct QualityFullSuiteRequestV2 {
     pub validation_profile: String,
 }
 
-impl QualityFullSuiteRequestV1 {
+impl QualityFullSuiteRequestV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         validate_text(
             "Quality full-suite validation profile",
@@ -165,15 +165,15 @@ impl QualityFullSuiteRequestV1 {
 /// must name a separately kernel-run, passed validation on the exact
 /// candidate; prose cannot waive that requirement.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QualityReviewSubmissionV1 {
+pub struct QualityReviewSubmissionV2 {
     pub full_suite_validation_id: ValidationId,
     pub verdict: ReviewVerdict,
-    pub rationale: SealedArtifactReferenceV1,
-    pub risks: SealedArtifactReferenceV1,
-    pub additional_probes: SealedArtifactReferenceV1,
+    pub rationale: SealedArtifactReferenceV2,
+    pub risks: SealedArtifactReferenceV2,
+    pub additional_probes: SealedArtifactReferenceV2,
 }
 
-impl QualityReviewSubmissionV1 {
+impl QualityReviewSubmissionV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         self.rationale
             .validate("Quality rationale", QUALITY_RATIONALE_BYTE_LIMIT, false)?;
@@ -190,15 +190,15 @@ impl QualityReviewSubmissionV1 {
 /// Exact evidence produced by the kernel-owned full-suite runner. A review
 /// stores this identity rather than an actor's claim that it ran a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QualityValidationReceiptV1 {
+pub struct QualityValidationReceiptV2 {
     pub validation_id: ValidationId,
     pub candidate_id: CandidateId,
-    pub candidate_tree: RepositoryObjectIdV1,
-    pub log_artifact: SealedArtifactReferenceV1,
+    pub candidate_tree: RepositoryObjectIdV2,
+    pub log_artifact: SealedArtifactReferenceV2,
     pub revision: AggregateRevision,
 }
 
-impl QualityValidationReceiptV1 {
+impl QualityValidationReceiptV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         self.log_artifact
             .validate("Quality full-suite log", 16 * 1024 * 1024, true)
@@ -206,12 +206,12 @@ impl QualityValidationReceiptV1 {
 }
 
 /// Converts a wire artifact reference exactly once at the typed boundary.
-pub fn candidate_artifact_reference_v1(
+pub fn candidate_artifact_reference_v2(
     artifact_id: i64,
     digest: &str,
     byte_length: u64,
-) -> Result<SealedArtifactReferenceV1, ContractError> {
-    crate::sealed_artifact_reference_v1(artifact_id, digest, byte_length)
+) -> Result<SealedArtifactReferenceV2, ContractError> {
+    crate::sealed_artifact_reference_v2(artifact_id, digest, byte_length)
 }
 
 fn validate_text(
@@ -234,23 +234,23 @@ mod tests {
     use super::*;
     use crate::{ArtifactId, ContentDigest};
 
-    fn artifact(id: i64, byte: u8, byte_length: u64) -> SealedArtifactReferenceV1 {
-        SealedArtifactReferenceV1 {
+    fn artifact(id: i64, byte: u8, byte_length: u64) -> SealedArtifactReferenceV2 {
+        SealedArtifactReferenceV2 {
             artifact_id: ArtifactId::new(id).unwrap(),
             digest: ContentDigest::from_bytes([byte; 32]),
             byte_length,
         }
     }
 
-    fn candidate_packet(regression_patch_length: u64) -> CandidatePacketV1 {
-        CandidatePacketV1 {
+    fn candidate_packet(regression_patch_length: u64) -> CandidatePacketV2 {
+        CandidatePacketV2 {
             candidate_id: CandidateId::new(1).unwrap(),
             ticket_attempt_id: TicketAttemptId::new(2).unwrap(),
             ticket_revision_id: TicketRevisionId::new(3).unwrap(),
-            base_commit: RepositoryObjectIdV1::parse("a".repeat(40)).unwrap(),
-            base_tree: RepositoryObjectIdV1::parse("b".repeat(40)).unwrap(),
-            regression_tree: RepositoryObjectIdV1::parse("c".repeat(40)).unwrap(),
-            candidate_tree: RepositoryObjectIdV1::parse("d".repeat(40)).unwrap(),
+            base_commit: RepositoryObjectIdV2::parse("a".repeat(40)).unwrap(),
+            base_tree: RepositoryObjectIdV2::parse("b".repeat(40)).unwrap(),
+            regression_tree: RepositoryObjectIdV2::parse("c".repeat(40)).unwrap(),
+            candidate_tree: RepositoryObjectIdV2::parse("d".repeat(40)).unwrap(),
             regression_patch: artifact(1, 1, regression_patch_length),
             regression_command_set: artifact(2, 2, 1),
             regression_log: artifact(3, 3, 1),
@@ -258,14 +258,14 @@ mod tests {
             engineering_session_id: SessionId::new(4).unwrap(),
             engineering_report: artifact(5, 5, 1),
             hard_validation_id: ValidationId::new(5).unwrap(),
-            candidate_commit: RepositoryObjectIdV1::parse("e".repeat(40)).unwrap(),
+            candidate_commit: RepositoryObjectIdV2::parse("e".repeat(40)).unwrap(),
             candidate_revision: AggregateRevision::initial(),
         }
     }
 
     #[test]
     fn candidate_submission_is_bounded_and_never_requires_actor_sealed_prose() {
-        let submission = CandidateSubmissionV1 {
+        let submission = CandidateSubmissionV2 {
             commit_subject: "Fix visible behavior".into(),
             commit_body: String::new(),
             regression_test_identity: "cargo test regression".into(),
@@ -279,9 +279,9 @@ mod tests {
 
     #[test]
     fn repository_object_ids_are_not_confused_with_blake3_artifact_digests() {
-        assert!(RepositoryObjectIdV1::parse("a".repeat(40)).is_ok());
-        assert!(RepositoryObjectIdV1::parse("A".repeat(40)).is_err());
-        assert!(RepositoryObjectIdV1::parse("a".repeat(64)).is_ok());
+        assert!(RepositoryObjectIdV2::parse("a".repeat(40)).is_ok());
+        assert!(RepositoryObjectIdV2::parse("A".repeat(40)).is_err());
+        assert!(RepositoryObjectIdV2::parse("a".repeat(64)).is_ok());
     }
 
     #[test]

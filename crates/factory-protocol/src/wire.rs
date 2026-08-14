@@ -14,23 +14,23 @@ use thiserror::Error;
 use crate::{
     ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, ActorPolicyArtifactV2, ActorToolV2,
     ApplicationBundleV2, ApplicationKey, ApplicationRelativePath, ApprovedToolV2,
-    ArchitectPrincipalV1, AssignmentPacketWireV2, AssignmentRole, AssignmentRoleProfileV2,
-    CandidateDecisionRequestV1, CandidateDecisionV1, CandidateSubmissionV1, CommandObservationV1,
+    ArchitectPrincipalV2, AssignmentPacketWireV2, AssignmentRole, AssignmentRoleProfileV2,
+    CandidateDecisionRequestV2, CandidateDecisionV2, CandidateSubmissionV2, CommandObservationV2,
     CommandProfileV2, CommitMessagePolicyV2, ContentDigest, ContractError, DeliveryModeV2,
-    DuplicateSearchInputV1, DurationMillis, EnvironmentAdditionV2, ExecutableV2, GitPolicyV2,
+    DuplicateSearchInputV2, DurationMillis, EnvironmentAdditionV2, ExecutableV2, GitPolicyV2,
     InstitutionalObjectKind, InstitutionalReference, KernelBuildId, MAX_POLICY_ARTIFACT_BYTES,
-    MicroUsd, ModelCapabilityV2, ModelProfileV2, OP_FORUM_CREATE_THREAD_V1,
-    OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1, OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1,
-    OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1, PolicyEntrypointV2, ProductTicketProposalV1,
-    PublicationId, QualityFullSuiteRequestV1, QualityReviewSubmissionV1, ReleaseDecisionV1,
+    MicroUsd, ModelCapabilityV2, ModelProfileV2, OP_FORUM_CREATE_THREAD_V2,
+    OP_FORUM_CREATE_TOPIC_V2, OP_FORUM_LIST_THREADS_V2, OP_FORUM_LIST_TOPICS_V2, OP_FORUM_POST_V2,
+    OP_FORUM_READ_THREAD_V2, OP_FORUM_SEARCH_V2, PolicyEntrypointV2, ProductTicketProposalV2,
+    PublicationId, QualityFullSuiteRequestV2, QualityReviewSubmissionV2, ReleaseDecisionV2,
     RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2, ReviewId, ReviewVerdict,
-    RuntimeRelativePath, SealedArtifactReferenceV1, SessionLimitsV2, SponsorshipDecisionV1,
+    RuntimeRelativePath, SealedArtifactReferenceV2, SessionLimitsV2, SponsorshipDecisionV2,
     TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketAttemptId, TicketBoundsV2,
-    TicketContractReadV1, TicketPolicyV2, TicketRevisionId, TwoRunReproducerV1, ValidationId,
+    TicketContractReadV2, TicketPolicyV2, TicketRevisionId, TwoRunReproducerV2, ValidationId,
     ValidationProfilesV2,
 };
 
-pub const PROTOCOL_VERSION_V1: u16 = 1;
+pub const PROTOCOL_VERSION_V2: u16 = 2;
 pub const REQUEST_FRAME_MAX_BYTES: usize = 1 << 20;
 pub const RESPONSE_FRAME_MAX_BYTES: usize = 4 << 20;
 pub const FRAME_PREFIX_BYTES: usize = 4;
@@ -90,10 +90,10 @@ pub const OP_PUBLICATION_CREATE: &str = "publication.create";
 pub const OP_SESSION_VERIFY_PACKET: &str = "session.verify_packet";
 pub const OP_SESSION_SEAL_ARTIFACT: &str = "session.seal_artifact";
 pub const OP_SESSION_SUBMIT_TERMINAL: &str = "session.submit_terminal";
-pub const OP_FORUM_LIST_TOPICS: &str = OP_FORUM_LIST_TOPICS_V1;
-pub const OP_FORUM_LIST_THREADS: &str = OP_FORUM_LIST_THREADS_V1;
-pub const OP_FORUM_SEARCH: &str = OP_FORUM_SEARCH_V1;
-pub const OP_FORUM_READ_THREAD: &str = OP_FORUM_READ_THREAD_V1;
+pub const OP_FORUM_LIST_TOPICS: &str = OP_FORUM_LIST_TOPICS_V2;
+pub const OP_FORUM_LIST_THREADS: &str = OP_FORUM_LIST_THREADS_V2;
+pub const OP_FORUM_SEARCH: &str = OP_FORUM_SEARCH_V2;
+pub const OP_FORUM_READ_THREAD: &str = OP_FORUM_READ_THREAD_V2;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FrameError {
@@ -205,7 +205,7 @@ pub fn decode_routing_envelope(
     maximum: usize,
 ) -> Result<RoutingEnvelope, FrameError> {
     let envelope: RoutingEnvelope = decode_json_frame(frame, maximum, "routing envelope")?;
-    if envelope.protocol_version != PROTOCOL_VERSION_V1 {
+    if envelope.protocol_version != PROTOCOL_VERSION_V2 {
         return Err(FrameError::UnsupportedProtocol(envelope.protocol_version));
     }
     if !is_known_operation(&envelope.operation) {
@@ -232,7 +232,7 @@ pub fn decode_operation_request<T: Deserialize + Serialize>(
     if json::to_string(&request).as_bytes() != payload {
         return Err(FrameError::InvalidJson {
             operation: expected,
-            detail: "request bytes are not canonical V1 JSON or contain unknown fields".into(),
+            detail: "request bytes are not canonical V2 JSON or contain unknown fields".into(),
         });
     }
     Ok(request)
@@ -281,9 +281,9 @@ pub fn is_known_operation(operation: &str) -> bool {
             // actor receives a typed rejection rather than losing its socket.
             // They are absent from every SDK/host/application operation map
             // and no actor or operator router dispatches them.
-            | OP_FORUM_CREATE_TOPIC_V1
-            | OP_FORUM_CREATE_THREAD_V1
-            | OP_FORUM_POST_V1
+            | OP_FORUM_CREATE_TOPIC_V2
+            | OP_FORUM_CREATE_THREAD_V2
+            | OP_FORUM_POST_V2
     )
 }
 
@@ -355,13 +355,13 @@ mutating_request!(ProductSubmitTicketRequest {
     scope: String,
     contract_owner: String,
     risk: String,
-    narrative: SealedArtifactReferenceWireV1,
-    evidence: SealedArtifactReferenceWireV1,
+    narrative: SealedArtifactReferenceWireV2,
+    evidence: SealedArtifactReferenceWireV2,
     acceptance_criteria: Vec<String>,
-    contract_reads: Vec<TicketContractReadWireV1>,
-    duplicate_search: DuplicateSearchInputWireV1,
+    contract_reads: Vec<TicketContractReadWireV2>,
+    duplicate_search: DuplicateSearchInputWireV2,
     reproducer_profile: String,
-    reproducer: TwoRunReproducerWireV1,
+    reproducer: TwoRunReproducerWireV2,
 });
 
 /// The immutable proposal-only spelling retained in a ticket revision.  It
@@ -369,56 +369,56 @@ mutating_request!(ProductSubmitTicketRequest {
 /// authority can re-read the exact problem/reproducer closure without
 /// reconstructing it from untrusted transcript data.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProductTicketProposalWireV1 {
+pub struct ProductTicketProposalWireV2 {
     pub title: String,
     pub mission_value: String,
     pub scope: String,
     pub contract_owner: String,
     pub risk: String,
-    pub narrative: SealedArtifactReferenceWireV1,
-    pub evidence: SealedArtifactReferenceWireV1,
+    pub narrative: SealedArtifactReferenceWireV2,
+    pub evidence: SealedArtifactReferenceWireV2,
     pub acceptance_criteria: Vec<String>,
-    pub contract_reads: Vec<TicketContractReadWireV1>,
-    pub duplicate_search: DuplicateSearchInputWireV1,
+    pub contract_reads: Vec<TicketContractReadWireV2>,
+    pub duplicate_search: DuplicateSearchInputWireV2,
     pub reproducer_profile: String,
-    pub reproducer: TwoRunReproducerWireV1,
+    pub reproducer: TwoRunReproducerWireV2,
 }
 
 /// Wire reference to a previously sealed artifact. Large proposal bytes never
 /// travel in a Product submission frame; the kernel verifies this reference
 /// against its artifact record before assigning it a proposal meaning.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SealedArtifactReferenceWireV1 {
+pub struct SealedArtifactReferenceWireV2 {
     pub artifact_id: i64,
     pub digest: String,
     pub byte_length: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommandObservationWireV1 {
+pub struct CommandObservationWireV2 {
     pub exit_status: i32,
-    pub stdout: SealedArtifactReferenceWireV1,
-    pub stderr: SealedArtifactReferenceWireV1,
+    pub stdout: SealedArtifactReferenceWireV2,
+    pub stderr: SealedArtifactReferenceWireV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TwoRunReproducerWireV1 {
+pub struct TwoRunReproducerWireV2 {
     pub comparison_rule_version: u16,
-    pub command: SealedArtifactReferenceWireV1,
-    pub stdin: Option<SealedArtifactReferenceWireV1>,
-    pub expected_observation: CommandObservationWireV1,
-    pub first_observation: CommandObservationWireV1,
-    pub second_observation: CommandObservationWireV1,
+    pub command: SealedArtifactReferenceWireV2,
+    pub stdin: Option<SealedArtifactReferenceWireV2>,
+    pub expected_observation: CommandObservationWireV2,
+    pub first_observation: CommandObservationWireV2,
+    pub second_observation: CommandObservationWireV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TicketContractReadWireV1 {
+pub struct TicketContractReadWireV2 {
     pub path: String,
     pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DuplicateSearchInputWireV1 {
+pub struct DuplicateSearchInputWireV2 {
     pub query: String,
     pub limit: u8,
 }
@@ -431,13 +431,13 @@ impl ProductSubmitTicketRequest {
     pub fn proposal(
         &self,
         bounds: &TicketBoundsV2,
-    ) -> Result<ProductTicketProposalV1, ContractError> {
+    ) -> Result<ProductTicketProposalV2, ContractError> {
         self.proposal_wire().into_domain(bounds)
     }
 
     #[must_use]
-    pub fn proposal_wire(&self) -> ProductTicketProposalWireV1 {
-        ProductTicketProposalWireV1 {
+    pub fn proposal_wire(&self) -> ProductTicketProposalWireV2 {
+        ProductTicketProposalWireV2 {
             title: self.title.clone(),
             mission_value: self.mission_value.clone(),
             scope: self.scope.clone(),
@@ -457,7 +457,7 @@ impl ProductSubmitTicketRequest {
 /// Decodes one closed Product request without needing the application bounds.
 /// The caller must immediately invoke [`ProductSubmitTicketRequest::proposal`]
 /// with the exact admitted revision before treating it as a proposal.
-pub fn decode_product_submit_ticket_request_v1(
+pub fn decode_product_submit_ticket_request_v2(
     frame: &[u8],
 ) -> Result<ProductSubmitTicketRequest, FrameError> {
     decode_operation_request(frame, REQUEST_FRAME_MAX_BYTES, OP_PRODUCT_SUBMIT_TICKET)
@@ -467,32 +467,32 @@ pub fn decode_product_submit_ticket_request_v1(
 /// retry, and session revision fields are intentionally excluded: they prove
 /// transport authority but are not part of the Product problem contract.
 #[must_use]
-pub fn canonical_product_ticket_proposal_json_v1(request: &ProductSubmitTicketRequest) -> Vec<u8> {
-    canonical_product_ticket_proposal_wire_json_v1(&request.proposal_wire())
+pub fn canonical_product_ticket_proposal_json_v2(request: &ProductSubmitTicketRequest) -> Vec<u8> {
+    canonical_product_ticket_proposal_wire_json_v2(&request.proposal_wire())
 }
 
 /// Canonical bytes for the stored proposal-only DTO.  This is public so a
 /// durable reader can prove a retained CAS object has no unknown fields or
 /// alternate JSON spelling before using it as a ticket contract.
 #[must_use]
-pub fn canonical_product_ticket_proposal_wire_json_v1(
-    proposal: &ProductTicketProposalWireV1,
+pub fn canonical_product_ticket_proposal_wire_json_v2(
+    proposal: &ProductTicketProposalWireV2,
 ) -> Vec<u8> {
     json::to_string(proposal).into_bytes()
 }
 
 /// Parses the exact canonical proposal bytes stored by Product admission and
 /// validates them against the selected immutable application bounds.
-pub fn parse_product_ticket_proposal_v1(
+pub fn parse_product_ticket_proposal_v2(
     payload: &[u8],
     bounds: &TicketBoundsV2,
-) -> Result<ProductTicketProposalV1, FrameError> {
-    let proposal: ProductTicketProposalWireV1 = decode_closed_json(payload, "ticket proposal")?;
-    let canonical = canonical_product_ticket_proposal_wire_json_v1(&proposal);
+) -> Result<ProductTicketProposalV2, FrameError> {
+    let proposal: ProductTicketProposalWireV2 = decode_closed_json(payload, "ticket proposal")?;
+    let canonical = canonical_product_ticket_proposal_wire_json_v2(&proposal);
     if canonical != payload {
         return Err(FrameError::InvalidJson {
             operation: "ticket proposal",
-            detail: "proposal bytes are not canonical V1 JSON or contain unknown fields".into(),
+            detail: "proposal bytes are not canonical V2 JSON or contain unknown fields".into(),
         });
     }
     proposal
@@ -503,18 +503,18 @@ pub fn parse_product_ticket_proposal_v1(
         })
 }
 
-impl SealedArtifactReferenceWireV1 {
-    fn into_domain(self) -> Result<SealedArtifactReferenceV1, ContractError> {
-        crate::sealed_artifact_reference_v1(self.artifact_id, &self.digest, self.byte_length)
+impl SealedArtifactReferenceWireV2 {
+    fn into_domain(self) -> Result<SealedArtifactReferenceV2, ContractError> {
+        crate::sealed_artifact_reference_v2(self.artifact_id, &self.digest, self.byte_length)
     }
 }
 
-impl ProductTicketProposalWireV1 {
+impl ProductTicketProposalWireV2 {
     fn into_domain(
         self,
         bounds: &TicketBoundsV2,
-    ) -> Result<ProductTicketProposalV1, ContractError> {
-        let proposal = ProductTicketProposalV1 {
+    ) -> Result<ProductTicketProposalV2, ContractError> {
+        let proposal = ProductTicketProposalV2 {
             title: self.title,
             mission_value: self.mission_value,
             scope: self.scope,
@@ -526,7 +526,7 @@ impl ProductTicketProposalWireV1 {
             contract_reads: self
                 .contract_reads
                 .into_iter()
-                .map(TicketContractReadWireV1::into_domain)
+                .map(TicketContractReadWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             duplicate_search: self.duplicate_search.into_domain(),
             reproducer_profile: self.reproducer_profile,
@@ -537,9 +537,9 @@ impl ProductTicketProposalWireV1 {
     }
 }
 
-impl CommandObservationWireV1 {
-    fn into_domain(self) -> Result<CommandObservationV1, ContractError> {
-        Ok(CommandObservationV1 {
+impl CommandObservationWireV2 {
+    fn into_domain(self) -> Result<CommandObservationV2, ContractError> {
+        Ok(CommandObservationV2 {
             exit_status: self.exit_status,
             stdout: self.stdout.into_domain()?,
             stderr: self.stderr.into_domain()?,
@@ -547,14 +547,14 @@ impl CommandObservationWireV1 {
     }
 }
 
-impl TwoRunReproducerWireV1 {
-    fn into_domain(self) -> Result<TwoRunReproducerV1, ContractError> {
-        Ok(TwoRunReproducerV1 {
+impl TwoRunReproducerWireV2 {
+    fn into_domain(self) -> Result<TwoRunReproducerV2, ContractError> {
+        Ok(TwoRunReproducerV2 {
             comparison_rule_version: self.comparison_rule_version,
             command: self.command.into_domain()?,
             stdin: self
                 .stdin
-                .map(SealedArtifactReferenceWireV1::into_domain)
+                .map(SealedArtifactReferenceWireV2::into_domain)
                 .transpose()?,
             expected_observation: self.expected_observation.into_domain()?,
             first_observation: self.first_observation.into_domain()?,
@@ -563,18 +563,18 @@ impl TwoRunReproducerWireV1 {
     }
 }
 
-impl TicketContractReadWireV1 {
-    fn into_domain(self) -> Result<TicketContractReadV1, ContractError> {
-        Ok(TicketContractReadV1 {
+impl TicketContractReadWireV2 {
+    fn into_domain(self) -> Result<TicketContractReadV2, ContractError> {
+        Ok(TicketContractReadV2 {
             path: RepositoryRelativePath::parse(self.path)?,
             reason: self.reason,
         })
     }
 }
 
-impl DuplicateSearchInputWireV1 {
-    fn into_domain(self) -> DuplicateSearchInputV1 {
-        DuplicateSearchInputV1 {
+impl DuplicateSearchInputWireV2 {
+    fn into_domain(self) -> DuplicateSearchInputV2 {
+        DuplicateSearchInputV2 {
             query: self.query,
             limit: self.limit,
         }
@@ -585,8 +585,8 @@ impl CandidateSubmitRequest {
     /// Converts the actor terminal payload. Candidate tree/patch/commit
     /// identity is deliberately absent: the kernel captures it from the owned
     /// Engineering worktree after this request has passed all input checks.
-    pub fn submission(&self) -> Result<CandidateSubmissionV1, ContractError> {
-        let submission = CandidateSubmissionV1 {
+    pub fn submission(&self) -> Result<CandidateSubmissionV2, ContractError> {
+        let submission = CandidateSubmissionV2 {
             commit_subject: self.commit_subject.clone(),
             commit_body: self.commit_body.clone(),
             regression_test_identity: self.regression_test_identity.clone(),
@@ -599,8 +599,8 @@ impl CandidateSubmitRequest {
 impl QualityRunFullSuiteRequest {
     /// Validates the closed named profile before the kernel resolves it in the
     /// exact application revision pinned by the assignment.
-    pub fn full_suite_request(&self) -> Result<QualityFullSuiteRequestV1, ContractError> {
-        let request = QualityFullSuiteRequestV1 {
+    pub fn full_suite_request(&self) -> Result<QualityFullSuiteRequestV2, ContractError> {
+        let request = QualityFullSuiteRequestV2 {
             validation_profile: self.validation_profile.clone(),
         };
         request.validate()?;
@@ -612,7 +612,7 @@ impl QualitySubmitReviewRequest {
     /// Converts the terminal Quality payload. The kernel separately proves the
     /// referenced validation belongs to this Quality session/candidate and
     /// passed on the exact candidate tree.
-    pub fn submission(&self) -> Result<QualityReviewSubmissionV1, ContractError> {
+    pub fn submission(&self) -> Result<QualityReviewSubmissionV2, ContractError> {
         let verdict = match self.verdict.as_str() {
             "accept" => ReviewVerdict::Accept,
             "reject" => ReviewVerdict::Reject,
@@ -623,7 +623,7 @@ impl QualitySubmitReviewRequest {
                 });
             }
         };
-        let submission = QualityReviewSubmissionV1 {
+        let submission = QualityReviewSubmissionV2 {
             full_suite_validation_id: ValidationId::new(self.full_suite_validation_id)?,
             verdict,
             rationale: self.rationale.clone().into_domain()?,
@@ -638,11 +638,11 @@ impl QualitySubmitReviewRequest {
 impl ArchitectSponsorTicketRevisionRequest {
     /// Architect operations are accepted only over the operator connection;
     /// this conversion contains no actor/session identity.
-    pub fn decision(&self) -> Result<SponsorshipDecisionV1, ContractError> {
-        let decision = SponsorshipDecisionV1 {
+    pub fn decision(&self) -> Result<SponsorshipDecisionV2, ContractError> {
+        let decision = SponsorshipDecisionV2 {
             ticket_revision_id: TicketRevisionId::new(self.ticket_revision_id)?,
             rationale: self.rationale.clone().into_domain()?,
-            principal: ArchitectPrincipalV1::parse(self.principal.clone())?,
+            principal: ArchitectPrincipalV2::parse(self.principal.clone())?,
         };
         decision.validate()?;
         Ok(decision)
@@ -650,11 +650,11 @@ impl ArchitectSponsorTicketRevisionRequest {
 }
 
 impl ArchitectReleaseTicketAttemptRequest {
-    pub fn decision(&self) -> Result<ReleaseDecisionV1, ContractError> {
-        let decision = ReleaseDecisionV1 {
+    pub fn decision(&self) -> Result<ReleaseDecisionV2, ContractError> {
+        let decision = ReleaseDecisionV2 {
             ticket_attempt_id: TicketAttemptId::new(self.ticket_attempt_id)?,
             rationale: self.rationale.clone().into_domain()?,
-            principal: ArchitectPrincipalV1::parse(self.principal.clone())?,
+            principal: ArchitectPrincipalV2::parse(self.principal.clone())?,
         };
         decision.validate()?;
         Ok(decision)
@@ -662,11 +662,11 @@ impl ArchitectReleaseTicketAttemptRequest {
 }
 
 impl ArchitectDecideCandidateRequest {
-    pub fn decision(&self) -> Result<CandidateDecisionRequestV1, ContractError> {
+    pub fn decision(&self) -> Result<CandidateDecisionRequestV2, ContractError> {
         let decision = match self.decision.as_str() {
-            "deliver" => CandidateDecisionV1::Deliver,
-            "rework" => CandidateDecisionV1::Rework,
-            "reject" => CandidateDecisionV1::Reject,
+            "deliver" => CandidateDecisionV2::Deliver,
+            "rework" => CandidateDecisionV2::Rework,
+            "reject" => CandidateDecisionV2::Reject,
             _ => {
                 return Err(ContractError::InvalidValue {
                     field: "Architect candidate decision",
@@ -674,7 +674,7 @@ impl ArchitectDecideCandidateRequest {
                 });
             }
         };
-        let request = CandidateDecisionRequestV1 {
+        let request = CandidateDecisionRequestV2 {
             candidate_id: crate::CandidateId::new(self.candidate_id)?,
             review_id: ReviewId::new(self.review_id)?,
             decision,
@@ -683,7 +683,7 @@ impl ArchitectDecideCandidateRequest {
                 .quality_rejection_override_review_id
                 .map(ReviewId::new)
                 .transpose()?,
-            principal: ArchitectPrincipalV1::parse(self.principal.clone())?,
+            principal: ArchitectPrincipalV2::parse(self.principal.clone())?,
         };
         request.validate()?;
         Ok(request)
@@ -737,12 +737,12 @@ impl OperatorApplicationActivateRequest {
         crate::ApplicationRevisionId::new(self.application_revision_id)
     }
 
-    pub fn rationale(&self) -> Result<SealedArtifactReferenceV1, ContractError> {
+    pub fn rationale(&self) -> Result<SealedArtifactReferenceV2, ContractError> {
         self.rationale.clone().into_domain()
     }
 
-    pub fn principal(&self) -> Result<ArchitectPrincipalV1, ContractError> {
-        ArchitectPrincipalV1::parse(self.principal.clone())
+    pub fn principal(&self) -> Result<ArchitectPrincipalV2, ContractError> {
+        ArchitectPrincipalV2::parse(self.principal.clone())
     }
 }
 
@@ -774,28 +774,28 @@ mutating_request!(QualityRunFullSuiteRequest {
 mutating_request!(QualitySubmitReviewRequest {
     full_suite_validation_id: i64,
     verdict: String,
-    rationale: SealedArtifactReferenceWireV1,
-    risks: SealedArtifactReferenceWireV1,
-    additional_probes: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
+    risks: SealedArtifactReferenceWireV2,
+    additional_probes: SealedArtifactReferenceWireV2,
 });
 mutating_request!(WorkCompleteRequest {
     result_artifact_id: i64
 });
 mutating_request!(ArchitectSponsorTicketRevisionRequest {
     ticket_revision_id: i64,
-    rationale: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
     principal: String,
 });
 mutating_request!(ArchitectReleaseTicketAttemptRequest {
     ticket_attempt_id: i64,
-    rationale: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
     principal: String,
 });
 mutating_request!(ArchitectDecideCandidateRequest {
     candidate_id: i64,
     review_id: i64,
     decision: String,
-    rationale: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
     quality_rejection_override_review_id: Option<i64>,
     principal: String,
 });
@@ -835,7 +835,7 @@ mutating_request!(OperatorApplicationRegisterRequest {
 mutating_request!(OperatorApplicationActivateRequest {
     application_key: String,
     application_revision_id: i64,
-    rationale: SealedArtifactReferenceWireV1,
+    rationale: SealedArtifactReferenceWireV2,
     principal: String,
 });
 /// Unlike ordinary aggregate mutations, artifact sealing is guarded by the
@@ -869,12 +869,12 @@ read_request!(OperatorAuditShowRequest { selector: String });
 /// reference remains a flat closed value so miniserde cannot accept a map of
 /// arbitrary metadata in its place.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InstitutionalReferenceWireV1 {
+pub struct InstitutionalReferenceWireV2 {
     pub kind: String,
     pub id: i64,
 }
 
-impl InstitutionalReferenceWireV1 {
+impl InstitutionalReferenceWireV2 {
     pub fn reference(&self) -> Result<InstitutionalReference, ContractError> {
         InstitutionalReference::from_kind_and_id(
             InstitutionalObjectKind::parse(&self.kind)?,
@@ -900,9 +900,9 @@ read_request!(OperatorInstitutionalSearchRequest {
     kind: String,
     project_id: Option<i64>,
     owner_office_id: Option<i64>,
-    anchor: Option<InstitutionalReferenceWireV1>,
+    anchor: Option<InstitutionalReferenceWireV2>,
     limit: u8,
-    cursor: Option<InstitutionalReferenceWireV1>,
+    cursor: Option<InstitutionalReferenceWireV2>,
 });
 
 impl OperatorInstitutionalSearchRequest {
@@ -958,20 +958,20 @@ impl OperatorInstitutionalSearchRequest {
     pub fn anchor(&self) -> Result<Option<InstitutionalReference>, ContractError> {
         self.anchor
             .as_ref()
-            .map(InstitutionalReferenceWireV1::reference)
+            .map(InstitutionalReferenceWireV2::reference)
             .transpose()
     }
 
     pub fn cursor(&self) -> Result<Option<InstitutionalReference>, ContractError> {
         self.cursor
             .as_ref()
-            .map(InstitutionalReferenceWireV1::reference)
+            .map(InstitutionalReferenceWireV2::reference)
             .transpose()
     }
 }
 
 read_request!(OperatorInstitutionalShowRequest {
-    reference: InstitutionalReferenceWireV1,
+    reference: InstitutionalReferenceWireV2,
 });
 
 impl OperatorInstitutionalShowRequest {
@@ -983,7 +983,7 @@ impl OperatorInstitutionalShowRequest {
 /// One supporting sealed artifact selected for a publication. The kernel
 /// validates the artifact row and its bounded label before persistence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PublicationAttachmentWireV1 {
+pub struct PublicationAttachmentWireV2 {
     pub artifact_id: i64,
     pub label: String,
 }
@@ -994,11 +994,11 @@ pub struct PublicationAttachmentWireV1 {
 // authority adapter.
 read_request!(PublicationCreateRequest {
     client_command_id: String,
-    anchor: InstitutionalReferenceWireV1,
+    anchor: InstitutionalReferenceWireV2,
     kind: String,
     summary: String,
     body_artifact_id: i64,
-    attachments: Vec<PublicationAttachmentWireV1>,
+    attachments: Vec<PublicationAttachmentWireV2>,
     reply_to: Option<i64>,
     supersedes: Option<i64>,
 });
@@ -1073,11 +1073,11 @@ read_request!(OperatorPublicationCreateRequest {
     client_command_id: String,
     application_revision_id: i64,
     authoring_office_id: i64,
-    anchor: InstitutionalReferenceWireV1,
+    anchor: InstitutionalReferenceWireV2,
     kind: String,
     summary: String,
     body_artifact_id: i64,
-    attachments: Vec<PublicationAttachmentWireV1>,
+    attachments: Vec<PublicationAttachmentWireV2>,
     reply_to: Option<i64>,
     supersedes: Option<i64>,
 });
@@ -1639,7 +1639,7 @@ pub struct AuditShowResponse {
 /// discoverable without exposing an unbounded query surface.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstitutionalSearchHitResponse {
-    pub reference: InstitutionalReferenceWireV1,
+    pub reference: InstitutionalReferenceWireV2,
     pub title: String,
     pub summary: String,
     pub created_at_micros: u64,
@@ -1651,7 +1651,7 @@ pub struct InstitutionalSearchResponse {
     pub request_id: String,
     pub operation: String,
     pub items: Vec<InstitutionalSearchHitResponse>,
-    pub next_cursor: Option<InstitutionalReferenceWireV1>,
+    pub next_cursor: Option<InstitutionalReferenceWireV2>,
 }
 
 /// Fixed common projection returned by `operator.institutional.show`.
@@ -1662,7 +1662,7 @@ pub struct InstitutionalShowResponse {
     pub protocol_version: u16,
     pub request_id: String,
     pub operation: String,
-    pub reference: InstitutionalReferenceWireV1,
+    pub reference: InstitutionalReferenceWireV2,
     pub application_revision_id: i64,
     pub owner_office_id: Option<i64>,
     pub title: String,
@@ -2342,7 +2342,7 @@ pub fn canonical_command_profile_json_v2(command: &CommandWireV2) -> Result<Stri
     canonical_command(command)
 }
 
-/// Parses exactly the canonical V1 command profile bytes used by Product
+/// Parses exactly the canonical V2 command profile bytes used by Product
 /// reproducer custody. Unknown fields, alternate key order, or whitespace are
 /// rejected rather than normalized.
 pub fn parse_command_profile_v2(payload: &[u8]) -> Result<CommandProfileV2, FrameError> {

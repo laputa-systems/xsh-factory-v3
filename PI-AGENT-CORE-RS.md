@@ -1,8 +1,10 @@
 # Pure-Rust `pi-agent-core-rs` cutover plan
 
-**Status:** implemented; the provider-free qualification inputs remain
-operator-supplied. This is an execution contract, not an implementation
-authorization for a paid campaign. It preserves Factory's
+**Status:** implemented; `make pi-agent-core-rs-acceptance` passed locally
+against disposable PostgreSQL 18 authorities and an isolated restore pair.
+Replay it from the clean checkout created by the eventual commit. This is an
+execution contract, not an implementation authorization for a paid campaign.
+It preserves Factory's
 kernel custody, evidence, cost, validation, and delivery authority while
 removing the upstream Pi SDK and every Deno/TypeScript runtime path.
 
@@ -349,7 +351,7 @@ provider-free acceptance.  It performs all of these in one run:
    the same qualified build.  It need not manufacture a product defect in
    `../xsh`; that product checkout remains outside Factory test state.
 6. Run Rust-only backup/restore qualification, SQLx metadata validation, and
-   the legacy-absence/repository-boundary guard.
+   the rust-cutover-absence/repository-boundary guard.
 
 This is intentionally provider-free, as confirmed.  Passing it proves the
 full deterministic integration, not that a provider will find a useful XSH

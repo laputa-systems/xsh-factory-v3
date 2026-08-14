@@ -13,11 +13,11 @@ use factory_kernel::storage::{
 };
 use factory_protocol::{
     ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationKey,
-    ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV2, AssignmentRole,
-    ContentDigest, ContextInclusionClassV1, ContextItemV1, ContextReferenceV1, ExpectedRevision,
-    HARNESS_COMPILER_VERSION_V1, MicroUsd, ModelProfileV2, PolicyEntrypointV2, ReadExactFileV2,
-    ReadObservationV2, RepositoryRelativePath, RuntimeIdentityV2, SealedArtifactReferenceV1,
-    SessionLimitsV2, StopReasonV1, TerminalOperationV1, TerminalReportV1, UsageTotalsV1,
+    ApplicationRevisionId, ArchitectPrincipalV2, ArtifactId, AssignmentPacketV2, AssignmentRole,
+    ContentDigest, ContextInclusionClassV2, ContextItemV2, ContextReferenceV2, ExpectedRevision,
+    HARNESS_COMPILER_VERSION_V2, MicroUsd, ModelProfileV2, PolicyEntrypointV2, ReadExactFileV2,
+    ReadObservationV2, RepositoryRelativePath, RuntimeIdentityV2, SealedArtifactReferenceV2,
+    SessionLimitsV2, StopReasonV2, TerminalOperationV2, TerminalReportV2, UsageTotalsV2,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -131,7 +131,7 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                 digest: observed.digest,
                 reason: "authority contract".to_owned(),
             }],
-            terminal_operations: vec![TerminalOperationV1::WorkComplete],
+            terminal_operations: vec![TerminalOperationV2::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(1_000_000),
             revision: AggregateRevision::initial(),
             packet_digest: digest(703),
@@ -169,21 +169,21 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                         application_revision_id: application,
                         office_id,
                         assignment_role: AssignmentRole::ProductResearch,
-                        compiler_version: HARNESS_COMPILER_VERSION_V1,
+                        compiler_version: HARNESS_COMPILER_VERSION_V2,
                         spec_artifact_id: harness_spec.artifact_id,
                         system_prompt_artifact_id: system.artifact_id,
                         assignment_prompt_artifact_id: assignment_prompt.artifact_id,
                         packet_artifact_id: packet_artifact.artifact_id,
                         packet_digest,
                         context_items: vec![
-                            ContextItemV1 {
-                                reference: ContextReferenceV1::Office(office_id),
-                                inclusion: ContextInclusionClassV1::DirectTarget,
+                            ContextItemV2 {
+                                reference: ContextReferenceV2::Office(office_id),
+                                inclusion: ContextInclusionClassV2::DirectTarget,
                                 reason: "the admitted office owns this invocation".to_owned(),
                             },
-                            ContextItemV1 {
-                                reference: ContextReferenceV1::Artifact(expected_seal.artifact_id),
-                                inclusion: ContextInclusionClassV1::RequiredConstraint,
+                            ContextItemV2 {
+                                reference: ContextReferenceV2::Artifact(expected_seal.artifact_id),
+                                inclusion: ContextInclusionClassV2::RequiredConstraint,
                                 reason: "exact workspace reads are required before mutation"
                                     .to_owned(),
                             },
@@ -212,7 +212,7 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                 expected_assignment_revision: ExpectedRevision::new(assignment.resulting_revision),
                 assignment_id: assignment.assignment_id,
                 packet_digest: packet.packet_digest,
-                custody: factory_protocol::ProcessCustodyV1 {
+                custody: factory_protocol::ProcessCustodyV2 {
                     pid: std::process::id(),
                     pgid: std::process::id(),
                     started_at_unix_millis: 1,
@@ -286,11 +286,11 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                     partial_transcript: None,
                 },
                 assertion,
-                Some(UsageTotalsV1 {
+                Some(UsageTotalsV2 {
                     input_tokens: 1,
                     output_tokens: 1,
                     reported_cost_micro_usd: Some(MicroUsd::new(7)),
-                    ..UsageTotalsV1::default()
+                    ..UsageTotalsV2::default()
                 }),
             )
             .await
@@ -300,11 +300,11 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                 "architect",
                 &unique("terminal"),
                 session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(session.resulting_revision),
-                    operation: Some(TerminalOperationV1::WorkComplete),
-                    stop_reason: StopReasonV1::Completed,
+                    operation: Some(TerminalOperationV2::WorkComplete),
+                    stop_reason: StopReasonV2::Completed,
                     report_digest: digest(704),
                 },
                 evidence,
@@ -313,7 +313,7 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
             .expect("terminal");
         assert_eq!(
             terminal.cost,
-            factory_protocol::TerminalCostV1::Known(MicroUsd::new(7))
+            factory_protocol::TerminalCostV2::Known(MicroUsd::new(7))
         );
         let cancel_command_id = unique("cancel-campaign");
         let cancelled = process
@@ -530,12 +530,12 @@ async fn admit_application(
     let rationale = seal_and_register(store, build, "application-activation", b"activate").await;
     store
         .activate_application_revision(&ActivateApplicationRevision {
-            principal: ArchitectPrincipalV1::parse("architect").expect("principal"),
+            principal: ArchitectPrincipalV2::parse("architect").expect("principal"),
             command_id: unique("application-activate"),
             expected_revision: ExpectedRevision::new(admitted.resulting_revision),
             application_key: ApplicationKey::parse(key).expect("application key"),
             application_revision_id: admitted.application_revision_id,
-            rationale: SealedArtifactReferenceV1 {
+            rationale: SealedArtifactReferenceV2 {
                 artifact_id: rationale.artifact_id,
                 digest: rationale.sealed.digest(),
                 byte_length: rationale.sealed.byte_length(),

@@ -282,13 +282,13 @@ fn base64_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use factory_protocol::PROTOCOL_VERSION_V1;
+    use factory_protocol::PROTOCOL_VERSION_V2;
     use std::io::Cursor;
 
     fn admission_json(packet_b64: &str, assignment_id: &str) -> String {
         let frame = SessionAdmissionFrameV2 {
             r#type: "session.admitted".to_owned(),
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             assignment_id: assignment_id.to_owned(),
             session_id: 7,
             session_revision: 3,

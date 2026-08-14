@@ -8,7 +8,7 @@ and performs guarded local delivery.
 
 ## Application bundle and revision
 
-`ApplicationBundleV1` is immutable, closed policy: repository binding,
+`ApplicationBundleV2` is immutable, closed policy: repository binding,
 templates, tools, model profile, required reads, ticket limits, reproducer,
 validation commands, path policy, and commit-message policy. Registration
 adopts one bundle and its named source artifacts into CAS as an application

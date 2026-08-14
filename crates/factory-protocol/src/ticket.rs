@@ -12,7 +12,7 @@ use crate::{ArtifactId, ContentDigest, ContractError, RepositoryRelativePath, Ti
 /// The only comparison rule currently understood for a ticket reproducer.
 /// A future comparison needs a named protocol revision; it cannot be hidden
 /// in command output or application policy prose.
-pub const EXACT_OBSERVATION_COMPARISON_V1: u16 = 1;
+pub const EXACT_OBSERVATION_COMPARISON_V2: u16 = 2;
 
 pub const PRODUCT_TICKET_TITLE_BYTE_LIMIT: usize = 240;
 pub const PRODUCT_TICKET_MISSION_VALUE_BYTE_LIMIT: usize = 4096;
@@ -37,13 +37,13 @@ pub const PRODUCT_DUPLICATE_SEARCH_LIMIT_MAXIMUM: u8 = 20;
 /// over-bound reference before reading it; the kernel independently checks it
 /// against the artifacts relation before accepting any transition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SealedArtifactReferenceV1 {
+pub struct SealedArtifactReferenceV2 {
     pub artifact_id: ArtifactId,
     pub digest: ContentDigest,
     pub byte_length: u64,
 }
 
-impl SealedArtifactReferenceV1 {
+impl SealedArtifactReferenceV2 {
     pub fn validate(
         &self,
         field: &'static str,
@@ -70,13 +70,13 @@ impl SealedArtifactReferenceV1 {
 /// separately: neither unbounded stdout nor stderr crosses the local JSON
 /// protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommandObservationV1 {
+pub struct CommandObservationV2 {
     pub exit_status: i32,
-    pub stdout: SealedArtifactReferenceV1,
-    pub stderr: SealedArtifactReferenceV1,
+    pub stdout: SealedArtifactReferenceV2,
+    pub stderr: SealedArtifactReferenceV2,
 }
 
-impl CommandObservationV1 {
+impl CommandObservationV2 {
     fn validate(&self, field: &'static str) -> Result<(), ContractError> {
         self.stdout
             .validate(field, PRODUCT_REPRODUCER_STREAM_BYTE_LIMIT, true)?;
@@ -102,24 +102,24 @@ impl CommandObservationV1 {
 /// specification adopted by the kernel; Product cannot replace it with shell
 /// interpolation after proposing the ticket.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TwoRunReproducerV1 {
+pub struct TwoRunReproducerV2 {
     pub comparison_rule_version: u16,
-    pub command: SealedArtifactReferenceV1,
+    pub command: SealedArtifactReferenceV2,
     /// Optional exact standard input. This is a sealed artifact rather than
     /// inline JSON so a reproducer can carry a bounded source fixture without
     /// dirtying the discovery checkout or introducing shell interpolation.
-    pub stdin: Option<SealedArtifactReferenceV1>,
-    pub expected_observation: CommandObservationV1,
-    pub first_observation: CommandObservationV1,
-    pub second_observation: CommandObservationV1,
+    pub stdin: Option<SealedArtifactReferenceV2>,
+    pub expected_observation: CommandObservationV2,
+    pub first_observation: CommandObservationV2,
+    pub second_observation: CommandObservationV2,
 }
 
-impl TwoRunReproducerV1 {
+impl TwoRunReproducerV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.comparison_rule_version != EXACT_OBSERVATION_COMPARISON_V1 {
+        if self.comparison_rule_version != EXACT_OBSERVATION_COMPARISON_V2 {
             return Err(ContractError::InvalidValue {
                 field: "reproducer comparison rule version",
-                reason: "is not the exact-observation V1 rule",
+                reason: "is not the exact-observation V2 rule",
             });
         }
         self.command.validate(
@@ -167,12 +167,12 @@ impl TwoRunReproducerV1 {
 /// while admitting a proposal. Product supplies a bounded search expression;
 /// it never supplies a trusted statement that no duplicate exists.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DuplicateSearchInputV1 {
+pub struct DuplicateSearchInputV2 {
     pub query: String,
     pub limit: u8,
 }
 
-impl DuplicateSearchInputV1 {
+impl DuplicateSearchInputV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         validate_text(
             "duplicate search query",
@@ -192,12 +192,12 @@ impl DuplicateSearchInputV1 {
 /// A product-contract file that Product believes constrains the defect. These
 /// are proposal evidence, distinct from an assignment's required-read proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TicketContractReadV1 {
+pub struct TicketContractReadV2 {
     pub path: RepositoryRelativePath,
     pub reason: String,
 }
 
-impl TicketContractReadV1 {
+impl TicketContractReadV2 {
     fn validate(&self) -> Result<(), ContractError> {
         validate_text(
             "ticket contract read reason",
@@ -211,22 +211,22 @@ impl TicketContractReadV1 {
 /// taxonomy, application metadata, actor identity, or sponsorship field.
 /// Sponsorship is an external Architect transition, not an actor capability.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProductTicketProposalV1 {
+pub struct ProductTicketProposalV2 {
     pub title: String,
     pub mission_value: String,
     pub scope: String,
     pub contract_owner: String,
     pub risk: String,
-    pub narrative: SealedArtifactReferenceV1,
-    pub evidence: SealedArtifactReferenceV1,
+    pub narrative: SealedArtifactReferenceV2,
+    pub evidence: SealedArtifactReferenceV2,
     pub acceptance_criteria: Vec<String>,
-    pub contract_reads: Vec<TicketContractReadV1>,
-    pub duplicate_search: DuplicateSearchInputV1,
+    pub contract_reads: Vec<TicketContractReadV2>,
+    pub duplicate_search: DuplicateSearchInputV2,
     pub reproducer_profile: String,
-    pub reproducer: TwoRunReproducerV1,
+    pub reproducer: TwoRunReproducerV2,
 }
 
-impl ProductTicketProposalV1 {
+impl ProductTicketProposalV2 {
     /// Validates the generic proposal shape plus the exact bounds pinned in
     /// the selected application revision.
     pub fn validate(&self, bounds: &TicketBoundsV2) -> Result<(), ContractError> {
@@ -298,12 +298,12 @@ impl ProductTicketProposalV1 {
 
 /// Converts a text-boundary artifact reference into the typed contract. This
 /// lives here so every caller shares the same positive-ID and digest rules.
-pub fn sealed_artifact_reference_v1(
+pub fn sealed_artifact_reference_v2(
     artifact_id: i64,
     digest: &str,
     byte_length: u64,
-) -> Result<SealedArtifactReferenceV1, ContractError> {
-    Ok(SealedArtifactReferenceV1 {
+) -> Result<SealedArtifactReferenceV2, ContractError> {
+    Ok(SealedArtifactReferenceV2 {
         artifact_id: ArtifactId::new(artifact_id)?,
         digest: ContentDigest::from_str(digest)?,
         byte_length,
@@ -324,24 +324,24 @@ fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(),
 mod tests {
     use super::*;
 
-    fn artifact(id: i64, byte: u8, byte_length: u64) -> SealedArtifactReferenceV1 {
-        SealedArtifactReferenceV1 {
+    fn artifact(id: i64, byte: u8, byte_length: u64) -> SealedArtifactReferenceV2 {
+        SealedArtifactReferenceV2 {
             artifact_id: ArtifactId::new(id).unwrap(),
             digest: ContentDigest::from_bytes([byte; 32]),
             byte_length,
         }
     }
 
-    fn observation(id: i64, status: i32, byte: u8) -> CommandObservationV1 {
-        CommandObservationV1 {
+    fn observation(id: i64, status: i32, byte: u8) -> CommandObservationV2 {
+        CommandObservationV2 {
             exit_status: status,
             stdout: artifact(id, byte, 1),
             stderr: artifact(id + 1, byte.wrapping_add(1), 1),
         }
     }
 
-    fn proposal() -> ProductTicketProposalV1 {
-        ProductTicketProposalV1 {
+    fn proposal() -> ProductTicketProposalV2 {
+        ProductTicketProposalV2 {
             title: "observable failure".to_owned(),
             mission_value: "users receive a correct result".to_owned(),
             scope: "public command behavior".to_owned(),
@@ -350,17 +350,17 @@ mod tests {
             narrative: artifact(1, 1, 32),
             evidence: artifact(2, 2, 32),
             acceptance_criteria: vec!["the public result is correct".to_owned()],
-            contract_reads: vec![TicketContractReadV1 {
+            contract_reads: vec![TicketContractReadV2 {
                 path: RepositoryRelativePath::parse("docs/contract.md").unwrap(),
                 reason: "defines the public behavior".to_owned(),
             }],
-            duplicate_search: DuplicateSearchInputV1 {
+            duplicate_search: DuplicateSearchInputV2 {
                 query: "observable failure".to_owned(),
                 limit: 20,
             },
             reproducer_profile: "reproducer".to_owned(),
-            reproducer: TwoRunReproducerV1 {
-                comparison_rule_version: EXACT_OBSERVATION_COMPARISON_V1,
+            reproducer: TwoRunReproducerV2 {
+                comparison_rule_version: EXACT_OBSERVATION_COMPARISON_V2,
                 command: artifact(3, 3, 16),
                 stdin: Some(artifact(10, 10, 32)),
                 expected_observation: observation(4, 0, 4),
@@ -399,7 +399,7 @@ mod tests {
         assert!(oversized.validate(&bounds()).is_err());
 
         let mut too_many_reads = proposal();
-        too_many_reads.contract_reads.push(TicketContractReadV1 {
+        too_many_reads.contract_reads.push(TicketContractReadV2 {
             path: RepositoryRelativePath::parse("docs/other.md").unwrap(),
             reason: "another contract".to_owned(),
         });

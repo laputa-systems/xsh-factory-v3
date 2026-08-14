@@ -817,7 +817,7 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
         ) {
             return "The admitted reproducer profile name is `reproducer`. Set `reproducer_profile` to `reproducer`; it names the profile, not the command bytes. Keep `reproducer.command` as the exact canonical JSON profile supplied in the assignment, then submit again.".into();
         }
-        if sanitized.contains("command bytes are not canonical V1 JSON") {
+        if sanitized.contains("command bytes are not canonical V2 JSON") {
             return "The sealed command artifact must be the canonical JSON profile, not a shell command string. Use the exact profile JSON supplied in the assignment as the command artifact; put the behavioral program only in the sealed stdin artifact.".into();
         }
         if sanitized.contains("sealed reproducer command differs from its named admitted profile") {

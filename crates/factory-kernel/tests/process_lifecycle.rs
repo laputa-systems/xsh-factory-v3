@@ -19,10 +19,10 @@ use factory_kernel::storage::{
 };
 use factory_protocol::{
     ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationKey,
-    ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV2, AssignmentRole,
+    ApplicationRevisionId, ArchitectPrincipalV2, ArtifactId, AssignmentPacketV2, AssignmentRole,
     ContentDigest, ExpectedRevision, MicroUsd, ModelProfileV2, PolicyEntrypointV2, ReadExactFileV2,
-    RepositoryRelativePath, RuntimeIdentityV2, SealedArtifactReferenceV1, SessionLimitsV2,
-    StopReasonV1, TerminalOperationV1, TerminalReportV1, UsageTotalsV1,
+    RepositoryRelativePath, RuntimeIdentityV2, SealedArtifactReferenceV2, SessionLimitsV2,
+    StopReasonV2, TerminalOperationV2, TerminalReportV2, UsageTotalsV2,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -347,13 +347,13 @@ fn tranche5_lifecycle_judges() {
                 "architect",
                 &unique("completed-without-operation"),
                 first_session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: first.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(
                         first_session.resulting_revision,
                     ),
                     operation: None,
-                    stop_reason: StopReasonV1::Completed,
+                    stop_reason: StopReasonV2::Completed,
                     report_digest: digest(2_001),
                 },
                 first_evidence.clone(),
@@ -368,13 +368,13 @@ fn tranche5_lifecycle_judges() {
                 "architect",
                 &unique("illegal-operation"),
                 first_session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: first.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(
                         first_session.resulting_revision,
                     ),
-                    operation: Some(TerminalOperationV1::CandidateSubmit),
-                    stop_reason: StopReasonV1::Completed,
+                    operation: Some(TerminalOperationV2::CandidateSubmit),
+                    stop_reason: StopReasonV2::Completed,
                     report_digest: digest(2_002),
                 },
                 first_evidence.clone(),
@@ -389,11 +389,11 @@ fn tranche5_lifecycle_judges() {
             before_invalid_terminal
         );
 
-        let first_report = TerminalReportV1 {
+        let first_report = TerminalReportV2 {
             packet_digest: first.packet.packet_digest,
             expected_session_revision: ExpectedRevision::new(first_session.resulting_revision),
-            operation: Some(TerminalOperationV1::WorkComplete),
-            stop_reason: StopReasonV1::Completed,
+            operation: Some(TerminalOperationV2::WorkComplete),
+            stop_reason: StopReasonV2::Completed,
             report_digest: digest(2_003),
         };
         let first_terminal = process
@@ -408,7 +408,7 @@ fn tranche5_lifecycle_judges() {
             .expect("completed terminal");
         assert_eq!(
             first_terminal.cost,
-            factory_protocol::TerminalCostV1::Known(MicroUsd::new(7))
+            factory_protocol::TerminalCostV2::Known(MicroUsd::new(7))
         );
         campaign.resulting_revision = first_terminal.campaign_revision;
 
@@ -468,13 +468,13 @@ fn tranche5_lifecycle_judges() {
                 "architect",
                 &unique("disconnect"),
                 second_session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: second.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(
                         second_session.resulting_revision,
                     ),
                     operation: None,
-                    stop_reason: StopReasonV1::DaemonDisconnected,
+                    stop_reason: StopReasonV2::DaemonDisconnected,
                     report_digest: digest(2_005),
                 },
                 second_evidence,
@@ -487,7 +487,7 @@ fn tranche5_lifecycle_judges() {
         );
         assert_eq!(
             second_terminal.cost,
-            factory_protocol::TerminalCostV1::Known(MicroUsd::new(2))
+            factory_protocol::TerminalCostV2::Known(MicroUsd::new(2))
         );
         campaign.resulting_revision = second_terminal.campaign_revision;
 
@@ -509,13 +509,13 @@ fn tranche5_lifecycle_judges() {
                 "architect",
                 &unique("overshoot"),
                 third_session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: third.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(
                         third_session.resulting_revision,
                     ),
-                    operation: Some(TerminalOperationV1::WorkComplete),
-                    stop_reason: StopReasonV1::Completed,
+                    operation: Some(TerminalOperationV2::WorkComplete),
+                    stop_reason: StopReasonV2::Completed,
                     report_digest: digest(2_006),
                 },
                 third_evidence,
@@ -524,7 +524,7 @@ fn tranche5_lifecycle_judges() {
             .expect("overshooting terminal");
         assert_eq!(
             third_terminal.cost,
-            factory_protocol::TerminalCostV1::Exceeded(MicroUsd::new(7))
+            factory_protocol::TerminalCostV2::Exceeded(MicroUsd::new(7))
         );
 
         // The failed campaign is no longer admissible, and a new campaign can
@@ -590,20 +590,20 @@ fn tranche5_lifecycle_judges() {
                 "architect",
                 &unique("unknown-cost"),
                 frozen_session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: frozen_assignment.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(
                         frozen_session.resulting_revision,
                     ),
                     operation: None,
-                    stop_reason: StopReasonV1::UnknownCost,
+                    stop_reason: StopReasonV2::UnknownCost,
                     report_digest: digest(2_007),
                 },
                 frozen_evidence,
             )
             .await
             .expect("unknown-cost terminal");
-        assert_eq!(unknown.cost, factory_protocol::TerminalCostV1::Unknown);
+        assert_eq!(unknown.cost, factory_protocol::TerminalCostV2::Unknown);
         frozen_campaign.resulting_revision = unknown.campaign_revision;
         let campaign_status = process
             .campaign_status(frozen_campaign.campaign_id)
@@ -615,7 +615,7 @@ fn tranche5_lifecycle_judges() {
         );
         assert_eq!(
             campaign_status.measured_cost,
-            factory_protocol::TerminalCostV1::Unknown
+            factory_protocol::TerminalCostV2::Unknown
         );
         let frozen_next = fixture
             .packet_only(
@@ -724,7 +724,7 @@ fn daemon_restart_reconciles_exact_group_and_freezes_unknown_cost_without_resume
                 ),
                 assignment_id: assignment.assignment.assignment_id,
                 packet_digest: assignment.packet.packet_digest,
-                custody: factory_protocol::ProcessCustodyV1 {
+                custody: factory_protocol::ProcessCustodyV2 {
                     pid: absent_pid,
                     pgid: absent_pid,
                     started_at_unix_millis: unique_number(),
@@ -752,7 +752,7 @@ fn daemon_restart_reconciles_exact_group_and_freezes_unknown_cost_without_resume
         );
         assert_eq!(
             report.recovered[0].terminal.cost,
-            factory_protocol::TerminalCostV1::Unknown
+            factory_protocol::TerminalCostV2::Unknown
         );
         assert!(
             process
@@ -768,7 +768,7 @@ fn daemon_restart_reconciles_exact_group_and_freezes_unknown_cost_without_resume
         assert_eq!(status.state, factory_protocol::CampaignState::Failed);
         assert_eq!(
             status.measured_cost,
-            factory_protocol::TerminalCostV1::Unknown
+            factory_protocol::TerminalCostV2::Unknown
         );
         assert_eq!(
             status.failure_reason.as_deref(),
@@ -828,7 +828,7 @@ impl AssignmentFixture {
             expected_assignment_revision: ExpectedRevision::new(self.assignment.resulting_revision),
             assignment_id: self.assignment.assignment_id,
             packet_digest: self.packet.packet_digest,
-            custody: factory_protocol::ProcessCustodyV1 {
+            custody: factory_protocol::ProcessCustodyV2 {
                 pid: std::process::id(),
                 pgid: std::process::id(),
                 started_at_unix_millis: unique_number(),
@@ -1007,7 +1007,7 @@ impl Fixture {
                 digest: self.read_digest,
                 reason: "required contract".to_owned(),
             }],
-            terminal_operations: vec![TerminalOperationV1::WorkComplete],
+            terminal_operations: vec![TerminalOperationV2::WorkComplete],
             remaining_campaign_allowance: allowance,
             revision: AggregateRevision::initial(),
             packet_digest: digest(703),
@@ -1111,7 +1111,7 @@ impl Fixture {
         let usage = if index == 4 {
             None
         } else {
-            Some(UsageTotalsV1 {
+            Some(UsageTotalsV2 {
                 input_tokens: 1,
                 output_tokens: 1,
                 reported_cost_micro_usd: Some(MicroUsd::new(if index == 1 {
@@ -1121,7 +1121,7 @@ impl Fixture {
                 } else {
                     7
                 })),
-                ..UsageTotalsV1::default()
+                ..UsageTotalsV2::default()
             })
         };
         process
@@ -1462,12 +1462,12 @@ async fn admit_application(
     let rationale = seal_and_register(store, build, "application-activation", b"activate").await;
     store
         .activate_application_revision(&ActivateApplicationRevision {
-            principal: ArchitectPrincipalV1::parse("architect").expect("principal"),
+            principal: ArchitectPrincipalV2::parse("architect").expect("principal"),
             command_id: unique("application-activate"),
             expected_revision: ExpectedRevision::new(admitted.resulting_revision),
             application_key: ApplicationKey::parse(application_key).expect("application key"),
             application_revision_id: admitted.application_revision_id,
-            rationale: SealedArtifactReferenceV1 {
+            rationale: SealedArtifactReferenceV2 {
                 artifact_id: rationale.artifact_id,
                 digest: rationale.sealed.digest(),
                 byte_length: rationale.sealed.byte_length(),

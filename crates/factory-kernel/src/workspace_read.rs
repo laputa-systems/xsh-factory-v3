@@ -15,7 +15,7 @@ use std::{
 };
 
 use factory_protocol::{
-    ContentDigest, OP_WORKSPACE_READ, PROTOCOL_VERSION_V1, RESPONSE_FRAME_MAX_BYTES,
+    ContentDigest, OP_WORKSPACE_READ, PROTOCOL_VERSION_V2, RESPONSE_FRAME_MAX_BYTES,
     ReadExactFileV2, ReadObservationV2, RepositoryRelativePath, WorkspaceReadRequest,
     WorkspaceReadResponse, decode_operation_request,
 };
@@ -127,7 +127,7 @@ impl WorkspaceReadAuthority {
         let binding = self.binding;
         let result = self.read_exact_for_binding(&binding, path)?;
         let response = WorkspaceReadResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: request.request_id,
             operation: OP_WORKSPACE_READ.to_owned(),
             canonical_path: result.path.as_str().to_owned(),
@@ -178,7 +178,7 @@ impl WorkspaceReadAuthority {
         let binding = self.binding;
         let result = self.read_exact_for_binding(&binding, path)?;
         Ok(WorkspaceReadResponse {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id: "daemon-direct-read".to_owned(),
             operation: OP_WORKSPACE_READ.to_owned(),
             canonical_path: result.path.as_str().to_owned(),

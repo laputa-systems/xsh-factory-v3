@@ -148,12 +148,12 @@ impl HostIdentityOutput {
 /// One closed, digest-qualified kernel source-file observation retained with
 /// an installed build. It is deliberately not a generic file manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KernelSourceReceiptFileV1 {
+pub struct KernelSourceReceiptFileV2 {
     relative_path: RuntimeRelativePath,
     digest: ContentDigest,
 }
 
-impl KernelSourceReceiptFileV1 {
+impl KernelSourceReceiptFileV2 {
     pub fn new(
         relative_path: RuntimeRelativePath,
         digest: ContentDigest,
@@ -184,20 +184,20 @@ impl KernelSourceReceiptFileV1 {
 /// shared kernel operation makes the exact build digest reproducible without
 /// granting a daemon entrypoint direct hashing or CAS authority.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KernelSourceQualificationV1 {
+pub struct KernelSourceQualificationV2 {
     source_root: PathBuf,
-    files: Vec<KernelSourceReceiptFileV1>,
+    files: Vec<KernelSourceReceiptFileV2>,
     digest: ContentDigest,
 }
 
-impl KernelSourceQualificationV1 {
+impl KernelSourceQualificationV2 {
     #[must_use]
     pub fn source_root(&self) -> &Path {
         &self.source_root
     }
 
     #[must_use]
-    pub fn files(&self) -> &[KernelSourceReceiptFileV1] {
+    pub fn files(&self) -> &[KernelSourceReceiptFileV2] {
         &self.files
     }
 
@@ -210,10 +210,10 @@ impl KernelSourceQualificationV1 {
 /// Qualifies precisely the source paths supplied by an offline installer.
 /// Paths are safe-relative at the protocol boundary; this operation proves
 /// their canonical bytes remain beneath the explicit source root.
-pub fn qualify_kernel_source_v1(
+pub fn qualify_kernel_source_v2(
     source_root: &Path,
     source_paths: &[RuntimeRelativePath],
-) -> Result<KernelSourceQualificationV1, InstalledRuntimeError> {
+) -> Result<KernelSourceQualificationV2, InstalledRuntimeError> {
     if source_paths.is_empty() || source_paths.len() > MAX_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::ReceiptInvalid {
             reason: "kernel source graph count is invalid",
@@ -231,14 +231,14 @@ pub fn qualify_kernel_source_v1(
                 path: relative_path.as_str().to_owned(),
             });
         }
-        files.push(KernelSourceReceiptFileV1::new(
+        files.push(KernelSourceReceiptFileV2::new(
             relative_path.clone(),
             digest_regular_file("kernel source file", &canonical)?,
         )?);
     }
     let files = normalize_kernel_source_files(files)?;
     let digest = kernel_source_graph_digest(&files)?;
-    Ok(KernelSourceQualificationV1 {
+    Ok(KernelSourceQualificationV2 {
         source_root,
         files,
         digest,
@@ -248,7 +248,7 @@ pub fn qualify_kernel_source_v1(
 /// Canonical executable and content identity of the exact installed Rust
 /// kernel binary. It has no process-spawning behavior.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KernelBinaryQualificationV1 {
+pub struct KernelBinaryQualificationV2 {
     path: PathBuf,
     digest: ContentDigest,
 }
@@ -258,12 +258,12 @@ pub struct KernelBinaryQualificationV1 {
 /// executable paths. Cargo's compiler/documentation companions are derived
 /// from Cargo's canonical directory and qualified alongside it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InstalledExecutableQualificationV1 {
+pub struct InstalledExecutableQualificationV2 {
     path: PathBuf,
     digest: ContentDigest,
 }
 
-impl InstalledExecutableQualificationV1 {
+impl InstalledExecutableQualificationV2 {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -278,42 +278,42 @@ impl InstalledExecutableQualificationV1 {
 /// Qualifies a direct executable selected by stopped-daemon installation.
 /// The label is closed at the callsite and exists only to make drift evidence
 /// useful; it never becomes application or actor-controlled metadata.
-pub fn qualify_installed_executable_v1(
+pub fn qualify_installed_executable_v2(
     field: &'static str,
     path: &Path,
-) -> Result<InstalledExecutableQualificationV1, InstalledRuntimeError> {
+) -> Result<InstalledExecutableQualificationV2, InstalledRuntimeError> {
     let path = canonical_executable_file(field, path)?;
     let digest = digest_regular_file(field, &path)?;
-    Ok(InstalledExecutableQualificationV1 { path, digest })
+    Ok(InstalledExecutableQualificationV2 { path, digest })
 }
 
 /// Closed qualification for the deterministic command/Git executables.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InstalledApprovedToolsQualificationV1 {
-    cargo: InstalledExecutableQualificationV1,
-    cargo_rustc: InstalledExecutableQualificationV1,
-    cargo_rustdoc: InstalledExecutableQualificationV1,
-    git: InstalledExecutableQualificationV1,
+pub struct InstalledApprovedToolsQualificationV2 {
+    cargo: InstalledExecutableQualificationV2,
+    cargo_rustc: InstalledExecutableQualificationV2,
+    cargo_rustdoc: InstalledExecutableQualificationV2,
+    git: InstalledExecutableQualificationV2,
 }
 
-impl InstalledApprovedToolsQualificationV1 {
+impl InstalledApprovedToolsQualificationV2 {
     pub fn qualify(cargo: &Path, git: &Path) -> Result<Self, InstalledRuntimeError> {
-        let cargo = qualify_installed_executable_v1("Cargo executable", cargo)?;
+        let cargo = qualify_installed_executable_v2("Cargo executable", cargo)?;
         let cargo_parent = cargo
             .path
             .parent()
             .ok_or(InstalledRuntimeError::ReceiptInvalid {
                 reason: "Cargo executable has no parent directory",
             })?;
-        let cargo_rustc = qualify_installed_executable_v1(
+        let cargo_rustc = qualify_installed_executable_v2(
             "Cargo Rust compiler executable",
             &cargo_parent.join("rustc"),
         )?;
-        let cargo_rustdoc = qualify_installed_executable_v1(
+        let cargo_rustdoc = qualify_installed_executable_v2(
             "Cargo Rust documentation executable",
             &cargo_parent.join("rustdoc"),
         )?;
-        let git = qualify_installed_executable_v1("Git executable", git)?;
+        let git = qualify_installed_executable_v2("Git executable", git)?;
         Ok(Self {
             cargo,
             cargo_rustc,
@@ -353,8 +353,8 @@ impl InstalledApprovedToolsQualificationV1 {
     fn decode_receipt_fields(
         cursor: &mut ReceiptCursor<'_>,
     ) -> Result<Self, InstalledRuntimeError> {
-        let mut read = |field: &'static str| -> Result<InstalledExecutableQualificationV1, InstalledRuntimeError> {
-            Ok(InstalledExecutableQualificationV1 {
+        let mut read = |field: &'static str| -> Result<InstalledExecutableQualificationV2, InstalledRuntimeError> {
+            Ok(InstalledExecutableQualificationV2 {
                 path: cursor.absolute_path(field)?,
                 digest: cursor.digest()?,
             })
@@ -460,7 +460,7 @@ impl InstalledKernelExecutionTools {
     }
 }
 
-impl KernelBinaryQualificationV1 {
+impl KernelBinaryQualificationV2 {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -472,12 +472,12 @@ impl KernelBinaryQualificationV1 {
     }
 }
 
-pub fn qualify_kernel_binary_v1(
+pub fn qualify_kernel_binary_v2(
     path: &Path,
-) -> Result<KernelBinaryQualificationV1, InstalledRuntimeError> {
+) -> Result<KernelBinaryQualificationV2, InstalledRuntimeError> {
     let path = canonical_regular_file("kernel binary", path)?;
     let digest = digest_regular_file("kernel binary", &path)?;
-    Ok(KernelBinaryQualificationV1 { path, digest })
+    Ok(KernelBinaryQualificationV2 { path, digest })
 }
 
 /// Versioned, closed installed-build provenance sealed as the one kernel
@@ -488,28 +488,28 @@ pub fn qualify_kernel_binary_v1(
 /// The only MVP provider source is OpenRouter's named environment variable.
 /// This receipt never contains its value, an OAuth token, or any other secret.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InstalledKernelBuildReceiptV1 {
+pub struct InstalledKernelBuildReceiptV2 {
     kernel_build_id: KernelBuildId,
     schema_identity: String,
     kernel_source_root: PathBuf,
-    kernel_source_files: Vec<KernelSourceReceiptFileV1>,
+    kernel_source_files: Vec<KernelSourceReceiptFileV2>,
     kernel_source_digest: ContentDigest,
     kernel_binary: PathBuf,
     kernel_binary_digest: ContentDigest,
-    approved_tools: InstalledApprovedToolsQualificationV1,
+    approved_tools: InstalledApprovedToolsQualificationV2,
     runtime: InstalledRuntimeManifest,
     openrouter_credential_environment: String,
 }
 
-impl InstalledKernelBuildReceiptV1 {
+impl InstalledKernelBuildReceiptV2 {
     /// Constructs one installed-build receipt from the two closed
     /// qualifications produced by this module. Daemon entrypoints should use
     /// this operation instead of hashing source or binary bytes themselves.
     pub fn from_qualifications(
         schema_identity: String,
-        source: KernelSourceQualificationV1,
-        binary: KernelBinaryQualificationV1,
-        approved_tools: InstalledApprovedToolsQualificationV1,
+        source: KernelSourceQualificationV2,
+        binary: KernelBinaryQualificationV2,
+        approved_tools: InstalledApprovedToolsQualificationV2,
         runtime: InstalledRuntimeManifest,
         openrouter_credential_environment: String,
     ) -> Result<Self, InstalledRuntimeError> {
@@ -530,11 +530,11 @@ impl InstalledKernelBuildReceiptV1 {
     pub fn qualify(
         schema_identity: String,
         kernel_source_root: PathBuf,
-        kernel_source_files: Vec<KernelSourceReceiptFileV1>,
+        kernel_source_files: Vec<KernelSourceReceiptFileV2>,
         kernel_source_digest: ContentDigest,
         kernel_binary: PathBuf,
         kernel_binary_digest: ContentDigest,
-        approved_tools: InstalledApprovedToolsQualificationV1,
+        approved_tools: InstalledApprovedToolsQualificationV2,
         runtime: InstalledRuntimeManifest,
         openrouter_credential_environment: String,
     ) -> Result<Self, InstalledRuntimeError> {
@@ -565,11 +565,11 @@ impl InstalledKernelBuildReceiptV1 {
         kernel_build_id: KernelBuildId,
         schema_identity: String,
         kernel_source_root: PathBuf,
-        kernel_source_files: Vec<KernelSourceReceiptFileV1>,
+        kernel_source_files: Vec<KernelSourceReceiptFileV2>,
         kernel_source_digest: ContentDigest,
         kernel_binary: PathBuf,
         kernel_binary_digest: ContentDigest,
-        approved_tools: InstalledApprovedToolsQualificationV1,
+        approved_tools: InstalledApprovedToolsQualificationV2,
         runtime: InstalledRuntimeManifest,
         openrouter_credential_environment: String,
     ) -> Result<Self, InstalledRuntimeError> {
@@ -791,7 +791,7 @@ impl InstalledKernelBuildReceiptV1 {
                     .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
                         reason: "kernel source file path is invalid",
                     })?;
-            kernel_source_files.push(KernelSourceReceiptFileV1::new(
+            kernel_source_files.push(KernelSourceReceiptFileV2::new(
                 relative_path,
                 cursor.digest()?,
             )?);
@@ -799,7 +799,7 @@ impl InstalledKernelBuildReceiptV1 {
         let kernel_binary = cursor.absolute_path("kernel binary")?;
         let kernel_binary_digest = cursor.digest()?;
         let approved_tools =
-            InstalledApprovedToolsQualificationV1::decode_receipt_fields(&mut cursor)?;
+            InstalledApprovedToolsQualificationV2::decode_receipt_fields(&mut cursor)?;
         let runtime = InstalledRuntimeManifest::decode_receipt_fields(&mut cursor)?;
         let openrouter_credential_environment = cursor.text("OpenRouter credential environment")?;
         if !cursor.is_finished() {
@@ -850,7 +850,7 @@ impl InstalledKernelBuildReceiptV1 {
                     evidence: "kernel source file resolves outside source root",
                 });
             }
-            observed_files.push(KernelSourceReceiptFileV1::new(
+            observed_files.push(KernelSourceReceiptFileV2::new(
                 file.relative_path.clone(),
                 digest_regular_file("kernel source file", &canonical)?,
             )?);
@@ -890,7 +890,7 @@ impl InstalledKernelBuildReceiptV1 {
     }
 }
 
-impl SessionRuntimeVerifier for InstalledKernelBuildReceiptV1 {
+impl SessionRuntimeVerifier for InstalledKernelBuildReceiptV2 {
     fn verify_packet(
         &self,
         packet: &AssignmentPacketV2,
@@ -1697,8 +1697,8 @@ fn inventory_host_source_directory(
 }
 
 fn normalize_kernel_source_files(
-    mut files: Vec<KernelSourceReceiptFileV1>,
-) -> Result<Vec<KernelSourceReceiptFileV1>, InstalledRuntimeError> {
+    mut files: Vec<KernelSourceReceiptFileV2>,
+) -> Result<Vec<KernelSourceReceiptFileV2>, InstalledRuntimeError> {
     if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::ReceiptInvalid {
             reason: "kernel source graph count is invalid",
@@ -1721,7 +1721,7 @@ fn normalize_kernel_source_files(
 }
 
 fn kernel_source_graph_digest(
-    files: &[KernelSourceReceiptFileV1],
+    files: &[KernelSourceReceiptFileV2],
 ) -> Result<ContentDigest, InstalledRuntimeError> {
     if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::ReceiptInvalid {

@@ -485,7 +485,6 @@ dependencies = [
  "pi-agent-core",
  "pi-agent-luau",
  "pi-agent-protocol",
- "pi-agent-trace",
  "smol",
  "thiserror",
 ]
@@ -1069,10 +1068,6 @@ version = "0.1.0"
 dependencies = [
  "miniserde",
 ]
-
-[[package]]
-name = "pi-agent-trace"
-version = "0.1.0"
 
 [[package]]
 name = "pin-project-lite"

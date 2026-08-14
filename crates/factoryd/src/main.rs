@@ -21,9 +21,9 @@ use factory_kernel::{
     cas::CasStore,
     durable_authority::DurableAuthorityResolver,
     installed_runtime::{
-        InstalledApprovedToolsQualificationV1, InstalledKernelBuildReceiptV1,
-        InstalledRuntimeManifest, InstalledRuntimeQualification, qualify_kernel_binary_v1,
-        qualify_kernel_source_v1,
+        InstalledApprovedToolsQualificationV2, InstalledKernelBuildReceiptV2,
+        InstalledRuntimeManifest, InstalledRuntimeQualification, qualify_kernel_binary_v2,
+        qualify_kernel_source_v2,
     },
     local_transport::{LocalDaemon, LocalTransportConfig},
     restart_recovery::{RestartRecoveryPolicy, reconcile_daemon_restart},
@@ -81,7 +81,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| {
             init_error("factoryd serve found no sealed current installed-build receipt")
         })?;
-    let running_binary = qualify_kernel_binary_v1(&env::current_exe()?)?
+    let running_binary = qualify_kernel_binary_v2(&env::current_exe()?)?
         .path()
         .to_owned();
     verify_serve_preflight(&installed, current_build, &running_binary)?;
@@ -192,7 +192,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// means a test can prove source/host-binary drift is rejected before a
 /// resident daemon acquires a listener.
 fn verify_serve_preflight(
-    installed: &InstalledKernelBuildReceiptV1,
+    installed: &InstalledKernelBuildReceiptV2,
     current_build: factory_protocol::KernelBuildId,
     running_binary: &Path,
 ) -> Result<(), io::Error> {
@@ -226,19 +226,19 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
             host_source_root: args.host_source_root.clone(),
             host_source_files: args.host_source_files.clone(),
         })?;
-        let source = qualify_kernel_source_v1(&args.kernel_source_root, &args.kernel_source_files)?;
-        let binary = qualify_kernel_binary_v1(&args.kernel_binary)?;
-        let approved_tools = InstalledApprovedToolsQualificationV1::qualify(
+        let source = qualify_kernel_source_v2(&args.kernel_source_root, &args.kernel_source_files)?;
+        let binary = qualify_kernel_binary_v2(&args.kernel_binary)?;
+        let approved_tools = InstalledApprovedToolsQualificationV2::qualify(
             &args.cargo_executable,
             &args.git_executable,
         )?;
-        let running_binary = qualify_kernel_binary_v1(&env::current_exe()?)?;
+        let running_binary = qualify_kernel_binary_v2(&env::current_exe()?)?;
         if binary.path() != running_binary.path() {
             return Err(boxed_init_error(
                 "--kernel-binary must be the exact executable running `factoryd init`",
             ));
         }
-        let build_receipt = InstalledKernelBuildReceiptV1::from_qualifications(
+        let build_receipt = InstalledKernelBuildReceiptV2::from_qualifications(
             SCHEMA_IDENTITY.to_owned(),
             source,
             binary,
@@ -718,16 +718,16 @@ mod tests {
         let main = source_root.join("crates/factoryd/src/main.rs");
         fs::write(&main, "fn main() {}\n").expect("source file");
         let graph = vec![RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap()];
-        let before = qualify_kernel_source_v1(&source_root, &graph).expect("initial source graph");
+        let before = qualify_kernel_source_v2(&source_root, &graph).expect("initial source graph");
         fs::write(&main, "fn main() { println!(\"drift\"); }\n").expect("changed source file");
-        let after = qualify_kernel_source_v1(&source_root, &graph).expect("changed source graph");
+        let after = qualify_kernel_source_v2(&source_root, &graph).expect("changed source graph");
         assert_ne!(before.digest(), after.digest());
 
         let duplicate = vec![
             RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap(),
             RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap(),
         ];
-        assert!(qualify_kernel_source_v1(&source_root, &duplicate).is_err());
+        assert!(qualify_kernel_source_v2(&source_root, &duplicate).is_err());
 
         #[cfg(unix)]
         {
@@ -736,7 +736,7 @@ mod tests {
             std::os::unix::fs::symlink(&outside, source_root.join("escape.rs"))
                 .expect("source escape symlink");
             assert!(
-                qualify_kernel_source_v1(
+                qualify_kernel_source_v2(
                     &source_root,
                     &[RuntimeRelativePath::parse("escape.rs").unwrap()],
                 )

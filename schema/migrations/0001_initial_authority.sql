@@ -1,3 +1,6 @@
+
+-- Squashed from the pre-release schema lineage; fresh authorities use this one snapshot.
+
 -- Factory V3's canonical fresh-schema authority. This pre-release schema has
 -- one migration: every durable relation, constraint, index, and trigger below
 -- is the current MVP contract. No historical V3 database shape is supported.
@@ -876,3 +879,1242 @@ $$;
 CREATE TRIGGER assignments_identity_immutable
     BEFORE UPDATE ON factory.assignments FOR EACH ROW
     EXECUTE FUNCTION factory.reject_assignment_identity_update();
+
+
+-- Attach the final measured Factory spend to every immutable local delivery.
+-- Existing delivery rows are backfilled from their campaign aggregate before
+-- the column becomes mandatory; an unknown historical cost must fail closed.
+
+ALTER TABLE factory.deliveries
+    ADD COLUMN factory_cost_micro_usd BIGINT;
+
+DROP TRIGGER deliveries_immutable ON factory.deliveries;
+
+UPDATE factory.deliveries AS delivery
+   SET factory_cost_micro_usd = campaign.measured_cost_micro_usd
+  FROM factory.candidates AS candidate
+  JOIN factory.ticket_attempts AS attempt
+    ON attempt.id = candidate.ticket_attempt_id
+  JOIN factory.campaigns AS campaign
+    ON campaign.id = attempt.campaign_id
+ WHERE candidate.id = delivery.candidate_id;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM factory.deliveries
+         WHERE factory_cost_micro_usd IS NULL
+    ) THEN
+        RAISE EXCEPTION
+            'cannot attach Factory-Cost to a historical delivery with unknown campaign cost';
+    END IF;
+END;
+$$;
+
+ALTER TABLE factory.deliveries
+    ALTER COLUMN factory_cost_micro_usd SET NOT NULL,
+    ADD CONSTRAINT deliveries_factory_cost_micro_usd_nonnegative
+        CHECK (factory_cost_micro_usd >= 0);
+
+CREATE TRIGGER deliveries_immutable
+    BEFORE UPDATE ON factory.deliveries FOR EACH ROW
+    EXECUTE FUNCTION factory.reject_delivery_update();
+
+COMMENT ON COLUMN factory.deliveries.factory_cost_micro_usd IS
+    'Final known aggregate Factory spend for the campaign that delivered this commit, in micro-USD';
+
+
+-- Durable offices are the institutional owners of fungible assignment
+-- invocations.  The closed assignment role remains a packet capability; an
+-- assignment now carries both identities and SQL proves that they agree.
+
+CREATE TABLE factory.offices (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    -- Root offices carry one of the currently closed assignment roles.  A
+    -- child office can be durable governance structure without pretending it
+    -- is directly runnable under one of those three roles.
+    assignment_role SMALLINT CHECK (assignment_role BETWEEN 0 AND 2),
+    parent_office_id BIGINT,
+    charter_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    authority_mask BIGINT NOT NULL CHECK (authority_mask BETWEEN 1 AND 7),
+    budget_ceiling_micro_usd BIGINT
+        CHECK (budget_ceiling_micro_usd IS NULL OR budget_ceiling_micro_usd >= 0),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 2),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (application_revision_id, assignment_role),
+    UNIQUE (id, application_revision_id),
+    UNIQUE (id, application_revision_id, assignment_role),
+    CONSTRAINT offices_parent_same_application_fkey
+        FOREIGN KEY (parent_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX offices_application_lifecycle_index
+    ON factory.offices (application_revision_id, lifecycle, id);
+
+CREATE FUNCTION factory.assert_office_parent_acyclic()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    cursor_id BIGINT := NEW.parent_office_id;
+    hops INTEGER := 0;
+BEGIN
+    WHILE cursor_id IS NOT NULL LOOP
+        IF cursor_id = NEW.id THEN
+            RAISE EXCEPTION 'office parent relation must be acyclic'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        SELECT parent_office_id
+          INTO cursor_id
+          FROM factory.offices
+         WHERE id = cursor_id
+           AND application_revision_id = NEW.application_revision_id;
+        hops := hops + 1;
+        IF hops > 64 THEN
+            RAISE EXCEPTION 'office parent relation exceeds bounded depth'
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END LOOP;
+    RETURN NEW;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER offices_parent_acyclic
+    AFTER INSERT OR UPDATE OF parent_office_id, application_revision_id
+    ON factory.offices
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION factory.assert_office_parent_acyclic();
+
+-- Existing application revisions need the same fixed roots before their
+-- assignment rows can be made office-bound.  The template artifacts are the
+-- admitted, immutable charters for this initial root set.
+INSERT INTO factory.offices (
+    application_revision_id, assignment_role, charter_artifact_id, authority_mask
+)
+SELECT ar.id, roots.assignment_role, roots.charter_artifact_id, roots.authority_mask
+  FROM factory.application_revisions ar
+ CROSS JOIN LATERAL (
+    VALUES
+        (0, ar.product_research_system_template_artifact_id, 1::BIGINT),
+        (1, ar.engineering_system_template_artifact_id, 2::BIGINT),
+        (2, ar.quality_system_template_artifact_id, 4::BIGINT)
+ ) AS roots(assignment_role, charter_artifact_id, authority_mask)
+ON CONFLICT (application_revision_id, assignment_role) DO NOTHING;
+
+ALTER TABLE factory.assignments
+    RENAME COLUMN office TO assignment_role;
+
+ALTER TABLE factory.sessions
+    RENAME COLUMN office TO assignment_role;
+
+ALTER TABLE factory.assignments
+    ADD COLUMN office_id BIGINT;
+
+UPDATE factory.assignments AS a
+   SET office_id = o.id
+  FROM factory.offices AS o
+ WHERE o.application_revision_id = a.application_revision_id
+   AND o.assignment_role = a.assignment_role;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM factory.assignments WHERE office_id IS NULL) THEN
+        RAISE EXCEPTION 'cannot bind historical assignment to a durable office';
+    END IF;
+END;
+$$;
+
+ALTER TABLE factory.assignments
+    ALTER COLUMN office_id SET NOT NULL,
+    ADD CONSTRAINT assignments_office_application_role_fkey
+        FOREIGN KEY (office_id, application_revision_id, assignment_role)
+        REFERENCES factory.offices (id, application_revision_id, assignment_role);
+
+ALTER TABLE factory.sessions
+    ADD COLUMN office_id BIGINT;
+
+UPDATE factory.sessions AS s
+   SET office_id = a.office_id
+  FROM factory.assignments AS a
+ WHERE a.id = s.assignment_id;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM factory.sessions WHERE office_id IS NULL) THEN
+        RAISE EXCEPTION 'cannot bind historical session to a durable office';
+    END IF;
+END;
+$$;
+
+ALTER TABLE factory.sessions
+    ALTER COLUMN office_id SET NOT NULL,
+    ADD CONSTRAINT sessions_office_application_role_fkey
+        FOREIGN KEY (office_id, application_revision_id, assignment_role)
+        REFERENCES factory.offices (id, application_revision_id, assignment_role);
+
+-- The baseline trigger body is recreated because its role column was renamed.
+CREATE OR REPLACE FUNCTION factory.assert_assignment_target_relation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    candidate_attempt_id BIGINT;
+BEGIN
+    IF NEW.assignment_role = 0 THEN
+        IF NEW.ticket_attempt_id IS NOT NULL OR NEW.candidate_id IS NOT NULL THEN
+            RAISE EXCEPTION 'Product assignment must not name a ticket attempt or candidate'
+                USING ERRCODE = 'check_violation';
+        END IF;
+    ELSIF NEW.assignment_role = 1 THEN
+        IF NEW.ticket_attempt_id IS NULL OR NEW.candidate_id IS NOT NULL THEN
+            RAISE EXCEPTION 'Engineering assignment must name exactly one ticket attempt'
+                USING ERRCODE = 'check_violation';
+        END IF;
+    ELSIF NEW.assignment_role = 2 THEN
+        IF NEW.ticket_attempt_id IS NULL OR NEW.candidate_id IS NULL THEN
+            RAISE EXCEPTION 'Quality assignment must name an attempt and candidate'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        SELECT ticket_attempt_id INTO candidate_attempt_id
+          FROM factory.candidates
+         WHERE id = NEW.candidate_id;
+        IF NOT FOUND OR candidate_attempt_id <> NEW.ticket_attempt_id THEN
+            RAISE EXCEPTION 'Quality assignment candidate does not belong to its ticket attempt'
+                USING ERRCODE = 'check_violation';
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'assignment role is invalid' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_assignment_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.campaign_id, NEW.kernel_build_id, NEW.application_revision_id,
+           NEW.office_id, NEW.assignment_role, NEW.target,
+           NEW.ticket_attempt_id, NEW.candidate_id,
+           NEW.packet_artifact_id, NEW.packet_digest,
+           NEW.system_prompt_artifact_id, NEW.assignment_prompt_artifact_id,
+           NEW.required_read_manifest_artifact_id, NEW.model_provider, NEW.model_id,
+           NEW.thinking_level, NEW.context_token_limit, NEW.output_token_limit,
+           NEW.input_price_micro_usd_per_million, NEW.output_price_micro_usd_per_million,
+           NEW.cache_read_price_micro_usd_per_million, NEW.cache_write_price_micro_usd_per_million,
+           NEW.turn_limit, NEW.wall_limit_millis, NEW.output_byte_limit,
+           NEW.terminal_operations_mask, NEW.remaining_campaign_allowance_micro_usd,
+           NEW.attempt_ordinal)
+       IS DISTINCT FROM
+       ROW(OLD.campaign_id, OLD.kernel_build_id, OLD.application_revision_id,
+           OLD.office_id, OLD.assignment_role, OLD.target,
+           OLD.ticket_attempt_id, OLD.candidate_id,
+           OLD.packet_artifact_id, OLD.packet_digest,
+           OLD.system_prompt_artifact_id, OLD.assignment_prompt_artifact_id,
+           OLD.required_read_manifest_artifact_id, OLD.model_provider, OLD.model_id,
+           OLD.thinking_level, OLD.context_token_limit, OLD.output_token_limit,
+           OLD.input_price_micro_usd_per_million, OLD.output_price_micro_usd_per_million,
+           OLD.cache_read_price_micro_usd_per_million, OLD.cache_write_price_micro_usd_per_million,
+           OLD.turn_limit, OLD.wall_limit_millis, OLD.output_byte_limit,
+           OLD.terminal_operations_mask, OLD.remaining_campaign_allowance_micro_usd,
+           OLD.attempt_ordinal) THEN
+        RAISE EXCEPTION 'assignment packet identity is immutable' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+COMMENT ON TABLE factory.offices IS
+    'Durable institutional offices scoped to an admitted application revision';
+COMMENT ON COLUMN factory.assignments.assignment_role IS
+    'Closed packet role; SQL foreign key binds it to the selected office';
+
+
+-- Institutional records are deliberately concrete relations.  This migration
+-- does not create a generic object directory or copy custody facts into a
+-- second graph.  Long bodies and evidence stay in the sealed CAS and are
+-- addressed here by factory.artifacts.
+
+-- Composite identities let every new relation prove application scope in the
+-- foreign key itself.  The primary keys remain convenient public identities.
+ALTER TABLE factory.tickets
+    ADD CONSTRAINT tickets_id_application_revision_unique
+        UNIQUE (id, application_revision_id);
+ALTER TABLE factory.ticket_revisions
+    ADD CONSTRAINT ticket_revisions_id_application_revision_unique
+        UNIQUE (id, application_revision_id);
+ALTER TABLE factory.ticket_revisions
+    ADD CONSTRAINT ticket_revisions_ticket_application_revision_fkey
+        FOREIGN KEY (ticket_id, application_revision_id)
+        REFERENCES factory.tickets (id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE factory.assignments
+    ADD CONSTRAINT assignments_id_application_revision_unique
+        UNIQUE (id, application_revision_id);
+ALTER TABLE factory.sessions
+    ADD CONSTRAINT sessions_id_application_revision_unique
+        UNIQUE (id, application_revision_id);
+ALTER TABLE factory.candidates
+    ADD COLUMN application_revision_id BIGINT;
+UPDATE factory.candidates AS candidate
+   SET application_revision_id = application_revision.id
+  FROM factory.ticket_attempts AS attempt
+  JOIN factory.campaigns AS campaign ON campaign.id = attempt.campaign_id
+  JOIN factory.application_revisions AS application_revision
+    ON application_revision.id = campaign.application_revision_id
+ WHERE attempt.id = candidate.ticket_attempt_id;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM factory.candidates WHERE application_revision_id IS NULL) THEN
+        RAISE EXCEPTION 'cannot scope historical candidate to an application revision';
+    END IF;
+END;
+$$;
+ALTER TABLE factory.candidates
+    ALTER COLUMN application_revision_id SET NOT NULL,
+    ADD CONSTRAINT candidates_id_application_revision_unique
+        UNIQUE (id, application_revision_id),
+    ADD CONSTRAINT candidates_application_revision_fkey
+        FOREIGN KEY (application_revision_id)
+        REFERENCES factory.application_revisions (id);
+
+-- Candidate custody remains authoritative.  The added application scope is
+-- an immutable derived fact, so a later update cannot move a candidate into
+-- another institutional graph merely by changing the composite FK column.
+CREATE OR REPLACE FUNCTION factory.reject_candidate_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.ticket_attempt_id, NEW.application_revision_id,
+           NEW.base_commit, NEW.base_tree, NEW.regression_tree,
+           NEW.candidate_tree, NEW.changed_paths_artifact_id,
+           NEW.regression_patch_artifact_id, NEW.regression_command_set_artifact_id,
+           NEW.regression_log_artifact_id, NEW.patch_artifact_id,
+           NEW.engineering_session_id, NEW.engineering_report_artifact_id,
+           NEW.commit_subject, NEW.commit_body, NEW.regression_test_identity,
+           NEW.risks_artifact_id, NEW.created_at)
+       IS DISTINCT FROM
+       ROW(OLD.ticket_attempt_id, OLD.application_revision_id,
+           OLD.base_commit, OLD.base_tree, OLD.regression_tree,
+           OLD.candidate_tree, OLD.changed_paths_artifact_id,
+           OLD.regression_patch_artifact_id, OLD.regression_command_set_artifact_id,
+           OLD.regression_log_artifact_id, OLD.patch_artifact_id,
+           OLD.engineering_session_id, OLD.engineering_report_artifact_id,
+           OLD.commit_subject, OLD.commit_body, OLD.regression_test_identity,
+           OLD.risks_artifact_id, OLD.created_at) THEN
+        RAISE EXCEPTION 'candidate evidence identity is immutable' USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.candidate_commit IS NOT NULL
+       AND ROW(NEW.candidate_commit, NEW.candidate_ref)
+           IS DISTINCT FROM ROW(OLD.candidate_commit, OLD.candidate_ref) THEN
+        RAISE EXCEPTION 'candidate commit identity is immutable once attached' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- Migration 0005 renamed the session role column and added its durable office
+-- identity. Recreate this inherited immutability function under the new
+-- column names before any later session transition can invoke a stale body.
+CREATE OR REPLACE FUNCTION factory.reject_session_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.assignment_id, NEW.campaign_id, NEW.kernel_build_id,
+           NEW.application_revision_id, NEW.office_id, NEW.assignment_role,
+           NEW.model_provider, NEW.model_id, NEW.thinking_level,
+           NEW.input_price_micro_usd_per_million,
+           NEW.output_price_micro_usd_per_million,
+           NEW.cache_read_price_micro_usd_per_million,
+           NEW.cache_write_price_micro_usd_per_million, NEW.pid, NEW.pgid,
+           NEW.process_started_at_unix_millis)
+       IS DISTINCT FROM
+       ROW(OLD.assignment_id, OLD.campaign_id, OLD.kernel_build_id,
+           OLD.application_revision_id, OLD.office_id, OLD.assignment_role,
+           OLD.model_provider, OLD.model_id, OLD.thinking_level,
+           OLD.input_price_micro_usd_per_million,
+           OLD.output_price_micro_usd_per_million,
+           OLD.cache_read_price_micro_usd_per_million,
+           OLD.cache_write_price_micro_usd_per_million, OLD.pid, OLD.pgid,
+           OLD.process_started_at_unix_millis) THEN
+        RAISE EXCEPTION 'session process identity is immutable' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TABLE factory.projects (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    owner_office_id BIGINT NOT NULL,
+    title TEXT NOT NULL CHECK (
+        octet_length(title) BETWEEN 1 AND 240 AND title !~ E'[\\n\\r\\000]'
+    ),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096 AND summary !~ E'[\\n\\r\\000]'
+    ),
+    body_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 4),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT projects_owner_office_scope_fkey
+        FOREIGN KEY (owner_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id)
+);
+
+CREATE INDEX projects_application_lifecycle_index
+    ON factory.projects (application_revision_id, lifecycle, id);
+CREATE INDEX projects_search_gin ON factory.projects USING GIN (search_vector);
+
+CREATE TABLE factory.rfcs (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    owner_office_id BIGINT NOT NULL,
+    project_id BIGINT,
+    title TEXT NOT NULL CHECK (
+        octet_length(title) BETWEEN 1 AND 240 AND title !~ E'[\\n\\r\\000]'
+    ),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096 AND summary !~ E'[\\n\\r\\000]'
+    ),
+    current_rfc_revision_id BIGINT,
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 5),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id)
+);
+
+CREATE INDEX rfcs_application_lifecycle_index
+    ON factory.rfcs (application_revision_id, lifecycle, id);
+
+ALTER TABLE factory.rfcs
+    ADD CONSTRAINT rfcs_owner_office_scope_fkey
+        FOREIGN KEY (owner_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    ADD CONSTRAINT rfcs_project_scope_fkey
+        FOREIGN KEY (project_id, application_revision_id)
+        REFERENCES factory.projects (id, application_revision_id);
+
+CREATE INDEX rfcs_search_gin ON factory.rfcs USING GIN (search_vector);
+
+CREATE TABLE factory.rfc_revisions (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rfc_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+    REFERENCES factory.application_revisions (id),
+    revision_ordinal INTEGER NOT NULL CHECK (revision_ordinal > 0),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096 AND summary !~ E'[\\n\\r\\000]'
+    ),
+    body_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    author_office_id BIGINT NOT NULL,
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 3),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    supersedes_rfc_revision_id BIGINT,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (rfc_id, revision_ordinal),
+    UNIQUE (id, application_revision_id),
+    UNIQUE (id, rfc_id, application_revision_id),
+    CONSTRAINT rfc_revisions_rfc_scope_fkey
+        FOREIGN KEY (rfc_id, application_revision_id)
+        REFERENCES factory.rfcs (id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT rfc_revisions_author_office_scope_fkey
+        FOREIGN KEY (author_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT rfc_revisions_supersedes_scope_fkey
+        FOREIGN KEY (supersedes_rfc_revision_id, rfc_id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, rfc_id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX rfc_revisions_application_index
+    ON factory.rfc_revisions (application_revision_id, rfc_id, revision_ordinal DESC);
+CREATE INDEX rfc_revisions_search_gin ON factory.rfc_revisions USING GIN (search_vector);
+
+ALTER TABLE factory.rfcs
+    ADD CONSTRAINT rfcs_current_revision_scope_fkey
+        FOREIGN KEY (current_rfc_revision_id, id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, rfc_id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED;
+
+CREATE TABLE factory.experiments (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    owner_office_id BIGINT NOT NULL,
+    project_id BIGINT,
+    question TEXT NOT NULL CHECK (
+        octet_length(question) BETWEEN 1 AND 4096 AND question !~ E'[\\n\\r\\000]'
+    ),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096 AND summary !~ E'[\\n\\r\\000]'
+    ),
+    evaluation_plan_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    intended_base_commit TEXT CHECK (
+        intended_base_commit IS NULL OR (
+            octet_length(intended_base_commit) BETWEEN 40 AND 64
+            AND intended_base_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        )
+    ),
+    intended_base_tree TEXT CHECK (
+        intended_base_tree IS NULL OR (
+            octet_length(intended_base_tree) BETWEEN 40 AND 64
+            AND intended_base_tree ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        )
+    ),
+    target_claim_id BIGINT,
+    target_rfc_revision_id BIGINT,
+    budget_micro_usd BIGINT NOT NULL CHECK (budget_micro_usd >= 0),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 6),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(question, '') || ' ' || coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT experiments_owner_office_scope_fkey
+        FOREIGN KEY (owner_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT experiments_project_scope_fkey
+        FOREIGN KEY (project_id, application_revision_id)
+        REFERENCES factory.projects (id, application_revision_id),
+    CONSTRAINT experiments_target_exactly_one_check CHECK (
+        num_nonnulls(target_claim_id, target_rfc_revision_id) = 1
+    ),
+    CONSTRAINT experiments_intended_base_pair_check CHECK (
+        (intended_base_commit IS NULL AND intended_base_tree IS NULL)
+        OR (intended_base_commit IS NOT NULL AND intended_base_tree IS NOT NULL)
+    ));
+
+CREATE INDEX experiments_application_lifecycle_index
+    ON factory.experiments (application_revision_id, lifecycle, id);
+CREATE INDEX experiments_project_index
+    ON factory.experiments (project_id, id) WHERE project_id IS NOT NULL;
+CREATE INDEX experiments_search_gin ON factory.experiments USING GIN (search_vector);
+
+CREATE TABLE factory.experiment_runs (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    experiment_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    owner_office_id BIGINT NOT NULL,
+    run_ordinal INTEGER NOT NULL CHECK (run_ordinal > 0),
+    base_commit TEXT NOT NULL CHECK (
+        octet_length(base_commit) BETWEEN 40 AND 64
+            AND base_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'
+    ),
+    base_tree TEXT NOT NULL CHECK (
+        octet_length(base_tree) BETWEEN 40 AND 64
+            AND base_tree ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'
+    ),
+    invocation_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    evaluation_plan_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    candidate_id BIGINT,
+    assignment_id BIGINT,
+    session_id BIGINT,
+    result_artifact_id BIGINT REFERENCES factory.artifacts (id),
+    evaluator_receipt_artifact_id BIGINT REFERENCES factory.artifacts (id),
+    produced_candidate_tree TEXT CHECK (
+        produced_candidate_tree IS NULL OR (
+            octet_length(produced_candidate_tree) BETWEEN 40 AND 64
+            AND produced_candidate_tree ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        )
+    ),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 4),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(base_commit, '') || ' ' || coalesce(base_tree, ''))
+    ) STORED,
+    UNIQUE (experiment_id, run_ordinal),
+    UNIQUE (id, application_revision_id),
+    UNIQUE (id, experiment_id, application_revision_id),
+    CONSTRAINT experiment_runs_experiment_scope_fkey
+        FOREIGN KEY (experiment_id, application_revision_id)
+        REFERENCES factory.experiments (id, application_revision_id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT experiment_runs_owner_office_scope_fkey
+        FOREIGN KEY (owner_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT experiment_runs_candidate_scope_fkey
+        FOREIGN KEY (candidate_id, application_revision_id)
+        REFERENCES factory.candidates (id, application_revision_id),
+    CONSTRAINT experiment_runs_assignment_scope_fkey
+        FOREIGN KEY (assignment_id, application_revision_id)
+        REFERENCES factory.assignments (id, application_revision_id),
+    CONSTRAINT experiment_runs_session_scope_fkey
+        FOREIGN KEY (session_id, application_revision_id)
+        REFERENCES factory.sessions (id, application_revision_id)
+);
+
+CREATE INDEX experiment_runs_application_lifecycle_index
+    ON factory.experiment_runs (application_revision_id, lifecycle, id);
+CREATE INDEX experiment_runs_experiment_index
+    ON factory.experiment_runs (experiment_id, run_ordinal DESC);
+CREATE INDEX experiment_runs_search_gin ON factory.experiment_runs USING GIN (search_vector);
+
+CREATE TABLE factory.claims (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    owner_office_id BIGINT NOT NULL,
+    proposition TEXT NOT NULL CHECK (
+        octet_length(proposition) BETWEEN 1 AND 4096 AND proposition !~ E'[\\n\\r\\000]'
+    ),
+    body_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 3),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(proposition, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT claims_owner_office_scope_fkey
+        FOREIGN KEY (owner_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id)
+);
+
+CREATE INDEX claims_application_lifecycle_index
+    ON factory.claims (application_revision_id, lifecycle, id);
+CREATE INDEX claims_search_gin ON factory.claims USING GIN (search_vector);
+
+ALTER TABLE factory.experiments
+    ADD CONSTRAINT experiments_target_claim_scope_fkey
+        FOREIGN KEY (target_claim_id, application_revision_id)
+        REFERENCES factory.claims (id, application_revision_id),
+    ADD CONSTRAINT experiments_target_rfc_revision_scope_fkey
+        FOREIGN KEY (target_rfc_revision_id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, application_revision_id);
+
+CREATE TABLE factory.claim_evidence (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    claim_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    relation_kind SMALLINT NOT NULL CHECK (relation_kind BETWEEN 0 AND 1),
+    experiment_run_id BIGINT,
+    evidence_artifact_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT claim_evidence_claim_scope_fkey
+        FOREIGN KEY (claim_id, application_revision_id)
+        REFERENCES factory.claims (id, application_revision_id),
+    CONSTRAINT claim_evidence_run_scope_fkey
+        FOREIGN KEY (experiment_run_id, application_revision_id)
+        REFERENCES factory.experiment_runs (id, application_revision_id),
+    CONSTRAINT claim_evidence_artifact_fkey
+        FOREIGN KEY (evidence_artifact_id) REFERENCES factory.artifacts (id),
+    CONSTRAINT claim_evidence_one_source_check CHECK (
+        (experiment_run_id IS NOT NULL AND evidence_artifact_id IS NULL)
+        OR (experiment_run_id IS NULL AND evidence_artifact_id IS NOT NULL)
+    )
+);
+
+CREATE INDEX claim_evidence_claim_index
+    ON factory.claim_evidence (claim_id, relation_kind, id);
+CREATE INDEX claim_evidence_run_index
+    ON factory.claim_evidence (experiment_run_id, id)
+    WHERE experiment_run_id IS NOT NULL;
+
+CREATE TABLE factory.decisions (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    deciding_office_id BIGINT NOT NULL,
+    decision_kind SMALLINT NOT NULL CHECK (decision_kind BETWEEN 0 AND 3),
+    title TEXT NOT NULL CHECK (
+        octet_length(title) BETWEEN 1 AND 240 AND title !~ E'[\\n\\r\\000]'
+    ),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096 AND summary !~ E'[\\n\\r\\000]'
+    ),
+    rationale_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    lifecycle SMALLINT NOT NULL DEFAULT 0 CHECK (lifecycle BETWEEN 0 AND 2),
+    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT decisions_office_scope_fkey
+        FOREIGN KEY (deciding_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id)
+);
+
+CREATE INDEX decisions_application_lifecycle_index
+    ON factory.decisions (application_revision_id, lifecycle, id);
+CREATE INDEX decisions_search_gin ON factory.decisions USING GIN (search_vector);
+
+CREATE TABLE factory.decision_targets (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    decision_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    rfc_revision_id BIGINT,
+    ticket_revision_id BIGINT,
+    experiment_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT decision_targets_decision_scope_fkey
+        FOREIGN KEY (decision_id, application_revision_id)
+        REFERENCES factory.decisions (id, application_revision_id),
+    CONSTRAINT decision_targets_rfc_scope_fkey
+        FOREIGN KEY (rfc_revision_id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, application_revision_id),
+    CONSTRAINT decision_targets_ticket_scope_fkey
+        FOREIGN KEY (ticket_revision_id, application_revision_id)
+        REFERENCES factory.ticket_revisions (id, application_revision_id),
+    CONSTRAINT decision_targets_experiment_scope_fkey
+        FOREIGN KEY (experiment_id, application_revision_id)
+        REFERENCES factory.experiments (id, application_revision_id),
+    CONSTRAINT decision_targets_exactly_one_kind_check CHECK (
+        (rfc_revision_id IS NOT NULL)::INTEGER
+        + (ticket_revision_id IS NOT NULL)::INTEGER
+        + (experiment_id IS NOT NULL)::INTEGER = 1
+    )
+);
+
+CREATE INDEX decision_targets_decision_index
+    ON factory.decision_targets (decision_id, id);
+CREATE INDEX decision_targets_rfc_index
+    ON factory.decision_targets (rfc_revision_id, id)
+    WHERE rfc_revision_id IS NOT NULL;
+CREATE INDEX decision_targets_ticket_index
+    ON factory.decision_targets (ticket_revision_id, id)
+    WHERE ticket_revision_id IS NOT NULL;
+CREATE INDEX decision_targets_experiment_index
+    ON factory.decision_targets (experiment_id, id)
+    WHERE experiment_id IS NOT NULL;
+
+-- These are the only extra edge tables in the initial graph.  An RFC and an
+-- experiment already carry a single scoped project FK, while a Decision and
+-- an Experiment already carry their typed target FKs.  Repeating those facts
+-- in link rows would make two sources of truth.  Tickets may relate to more
+-- than one project or RFC without changing their delivery contract.
+CREATE TABLE factory.project_ticket_links (
+    project_id BIGINT NOT NULL,
+    ticket_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, ticket_id),
+    FOREIGN KEY (project_id, application_revision_id)
+        REFERENCES factory.projects (id, application_revision_id),
+    FOREIGN KEY (ticket_id, application_revision_id)
+        REFERENCES factory.tickets (id, application_revision_id)
+);
+
+CREATE TABLE factory.ticket_rfc_links (
+    ticket_id BIGINT NOT NULL,
+    rfc_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticket_id, rfc_id),
+    FOREIGN KEY (ticket_id, application_revision_id)
+        REFERENCES factory.tickets (id, application_revision_id),
+    FOREIGN KEY (rfc_id, application_revision_id)
+        REFERENCES factory.rfcs (id, application_revision_id)
+);
+
+CREATE OR REPLACE FUNCTION factory.reject_institutional_row_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION '% rows are immutable: %', TG_TABLE_NAME, OLD.id
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_institutional_link_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION '% relations are immutable', TG_TABLE_NAME
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+CREATE TRIGGER rfc_revisions_immutable
+    BEFORE UPDATE OR DELETE ON factory.rfc_revisions
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_row_mutation();
+CREATE TRIGGER experiment_runs_immutable
+    BEFORE UPDATE OR DELETE ON factory.experiment_runs
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_row_mutation();
+CREATE TRIGGER claim_evidence_immutable
+    BEFORE UPDATE OR DELETE ON factory.claim_evidence
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_row_mutation();
+CREATE TRIGGER decision_targets_immutable
+    BEFORE UPDATE OR DELETE ON factory.decision_targets
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_row_mutation();
+
+CREATE TRIGGER project_ticket_links_immutable
+    BEFORE UPDATE OR DELETE ON factory.project_ticket_links
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_link_mutation();
+CREATE TRIGGER ticket_rfc_links_immutable
+    BEFORE UPDATE OR DELETE ON factory.ticket_rfc_links
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_link_mutation();
+
+CREATE OR REPLACE FUNCTION factory.reject_project_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.id, NEW.application_revision_id, NEW.owner_office_id,
+           NEW.title, NEW.summary, NEW.body_artifact_id, NEW.created_at)
+       IS DISTINCT FROM
+       ROW(OLD.id, OLD.application_revision_id, OLD.owner_office_id,
+           OLD.title, OLD.summary, OLD.body_artifact_id, OLD.created_at)
+    OR NEW.revision <= OLD.revision THEN
+        RAISE EXCEPTION 'project identity is immutable and revisions must increase'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_rfc_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    selected_rfc BIGINT;
+BEGIN
+    IF ROW(NEW.id, NEW.application_revision_id, NEW.owner_office_id,
+           NEW.project_id, NEW.title, NEW.summary, NEW.created_at)
+       IS DISTINCT FROM ROW(OLD.id, OLD.application_revision_id, OLD.owner_office_id,
+           OLD.project_id, OLD.title, OLD.summary, OLD.created_at)
+    OR NEW.revision <= OLD.revision THEN
+        RAISE EXCEPTION 'RFC identity is immutable and revisions must increase'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.current_rfc_revision_id IS NOT NULL THEN
+        SELECT rfc_id INTO selected_rfc
+          FROM factory.rfc_revisions
+         WHERE id = NEW.current_rfc_revision_id
+           AND application_revision_id = NEW.application_revision_id;
+        IF selected_rfc IS DISTINCT FROM NEW.id THEN
+            RAISE EXCEPTION 'RFC current revision belongs to another RFC'
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_experiment_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.id, NEW.application_revision_id, NEW.owner_office_id,
+           NEW.project_id, NEW.question, NEW.summary,
+           NEW.evaluation_plan_artifact_id,
+           NEW.intended_base_commit, NEW.intended_base_tree,
+           NEW.target_claim_id, NEW.target_rfc_revision_id,
+           NEW.budget_micro_usd, NEW.created_at)
+       IS DISTINCT FROM
+       ROW(OLD.id, OLD.application_revision_id, OLD.owner_office_id,
+           OLD.project_id, OLD.question, OLD.summary,
+           OLD.evaluation_plan_artifact_id,
+           OLD.intended_base_commit, OLD.intended_base_tree,
+           OLD.target_claim_id, OLD.target_rfc_revision_id,
+           OLD.budget_micro_usd, OLD.created_at)
+    OR NEW.revision <= OLD.revision THEN
+        RAISE EXCEPTION 'experiment identity is immutable and revisions must increase'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_claim_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF ROW(NEW.id, NEW.application_revision_id, NEW.owner_office_id,
+           NEW.proposition, NEW.body_artifact_id, NEW.created_at)
+       IS DISTINCT FROM
+       ROW(OLD.id, OLD.application_revision_id, OLD.owner_office_id,
+           OLD.proposition, OLD.body_artifact_id, OLD.created_at)
+    OR NEW.revision <= OLD.revision THEN
+        RAISE EXCEPTION 'claim identity is immutable and revisions must increase'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION factory.reject_decision_identity_update()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'decisions are immutable' USING ERRCODE = 'check_violation';
+END;
+$$;
+
+CREATE TRIGGER projects_identity_immutable
+    BEFORE UPDATE OR DELETE ON factory.projects
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_project_identity_update();
+CREATE TRIGGER rfcs_identity_immutable
+    BEFORE UPDATE OR DELETE ON factory.rfcs
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_rfc_identity_update();
+CREATE TRIGGER experiments_identity_immutable
+    BEFORE UPDATE OR DELETE ON factory.experiments
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_experiment_identity_update();
+CREATE TRIGGER claims_immutable
+    BEFORE UPDATE OR DELETE ON factory.claims
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_claim_identity_update();
+CREATE TRIGGER decisions_immutable
+    BEFORE UPDATE OR DELETE ON factory.decisions
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_decision_identity_update();
+
+CREATE OR REPLACE FUNCTION factory.assert_rfc_current_revision_present()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.current_rfc_revision_id IS NULL THEN
+        RAISE EXCEPTION 'RFC % must have a current revision', NEW.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER rfcs_current_revision_present
+    AFTER INSERT OR UPDATE ON factory.rfcs
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION factory.assert_rfc_current_revision_present();
+
+COMMENT ON TABLE factory.projects IS
+    'Bounded institutional responsibility area; narrative is a sealed artifact';
+COMMENT ON TABLE factory.rfcs IS
+    'RFC identity and safe pointer to immutable RFC revisions';
+COMMENT ON TABLE factory.rfc_revisions IS
+    'Immutable RFC proposal body and searchable bounded summary';
+COMMENT ON TABLE factory.experiments IS
+    'Bounded institutional question and evaluation plan';
+COMMENT ON TABLE factory.experiment_runs IS
+    'Append-only execution evidence for one exact experiment plan and base tree';
+COMMENT ON TABLE factory.claims IS
+    'Immutable institutional proposition; support and challenge are separate facts';
+COMMENT ON TABLE factory.decisions IS
+    'Immutable authoritative disposition with typed decision targets';
+COMMENT ON TABLE factory.project_ticket_links IS
+    'Immutable project-to-ticket relation; ticket delivery contract remains separate';
+COMMENT ON TABLE factory.ticket_rfc_links IS
+    'Immutable ticket-to-RFC relation; an RFC does not rewrite a ticket revision';
+
+
+-- Anchored publications are the new durable discourse boundary.  Forum rows
+-- remain the legacy, read-only discussion projection; this migration does not
+-- reinterpret or rewrite them.
+--
+-- The anchor columns are intentionally concrete nullable foreign keys.  The
+-- exactly-one check below is the closed polymorphic boundary: no generic
+-- object directory, JSON metadata, or free-form topic identity is admitted.
+
+-- A session provenance reference is only valid when it names the same durable
+-- office that authored the publication.  The existing session primary key is
+-- sufficient for ordinary reads, while this composite key lets SQL prove the
+-- office relationship without a trigger or an untyped lookup.
+ALTER TABLE factory.sessions
+    ADD CONSTRAINT sessions_id_application_office_unique
+        UNIQUE (id, application_revision_id, office_id);
+
+CREATE TABLE factory.publications (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    authoring_office_id BIGINT NOT NULL,
+    originating_session_id BIGINT,
+    publication_kind SMALLINT NOT NULL CHECK (publication_kind BETWEEN 0 AND 5),
+    summary TEXT NOT NULL CHECK (
+        octet_length(summary) BETWEEN 1 AND 4096
+        AND summary !~ E'[\\n\\r\\000]'
+    ),
+    body_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    project_id BIGINT,
+    rfc_id BIGINT,
+    rfc_revision_id BIGINT,
+    ticket_id BIGINT,
+    ticket_revision_id BIGINT,
+    experiment_id BIGINT,
+    claim_id BIGINT,
+    decision_id BIGINT,
+    office_id BIGINT,
+    reply_to_publication_id BIGINT,
+    supersedes_publication_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(summary, ''))
+    ) STORED,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT publications_authoring_office_scope_fkey
+        FOREIGN KEY (authoring_office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT publications_originating_session_scope_fkey
+        FOREIGN KEY (
+            originating_session_id, application_revision_id, authoring_office_id
+        )
+        REFERENCES factory.sessions (id, application_revision_id, office_id),
+    CONSTRAINT publications_project_anchor_scope_fkey
+        FOREIGN KEY (project_id, application_revision_id)
+        REFERENCES factory.projects (id, application_revision_id),
+    CONSTRAINT publications_rfc_anchor_scope_fkey
+        FOREIGN KEY (rfc_id, application_revision_id)
+        REFERENCES factory.rfcs (id, application_revision_id),
+    CONSTRAINT publications_rfc_revision_anchor_scope_fkey
+        FOREIGN KEY (rfc_revision_id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, application_revision_id),
+    CONSTRAINT publications_ticket_anchor_scope_fkey
+        FOREIGN KEY (ticket_id, application_revision_id)
+        REFERENCES factory.tickets (id, application_revision_id),
+    CONSTRAINT publications_ticket_revision_anchor_scope_fkey
+        FOREIGN KEY (ticket_revision_id, application_revision_id)
+        REFERENCES factory.ticket_revisions (id, application_revision_id),
+    CONSTRAINT publications_experiment_anchor_scope_fkey
+        FOREIGN KEY (experiment_id, application_revision_id)
+        REFERENCES factory.experiments (id, application_revision_id),
+    CONSTRAINT publications_claim_anchor_scope_fkey
+        FOREIGN KEY (claim_id, application_revision_id)
+        REFERENCES factory.claims (id, application_revision_id),
+    CONSTRAINT publications_decision_anchor_scope_fkey
+        FOREIGN KEY (decision_id, application_revision_id)
+        REFERENCES factory.decisions (id, application_revision_id),
+    CONSTRAINT publications_office_anchor_scope_fkey
+        FOREIGN KEY (office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT publications_reply_scope_fkey
+        FOREIGN KEY (reply_to_publication_id, application_revision_id)
+        REFERENCES factory.publications (id, application_revision_id),
+    CONSTRAINT publications_supersedes_scope_fkey
+        FOREIGN KEY (supersedes_publication_id, application_revision_id)
+        REFERENCES factory.publications (id, application_revision_id),
+    CONSTRAINT publications_exactly_one_anchor_check CHECK (
+        num_nonnulls(
+            project_id,
+            rfc_id,
+            rfc_revision_id,
+            ticket_id,
+            ticket_revision_id,
+            experiment_id,
+            claim_id,
+            decision_id,
+            office_id
+        ) = 1
+    ),
+    CONSTRAINT publications_no_self_link_check CHECK (
+        (reply_to_publication_id IS NULL OR reply_to_publication_id <> id)
+        AND (supersedes_publication_id IS NULL OR supersedes_publication_id <> id)
+    )
+);
+
+CREATE INDEX publications_application_created_index
+    ON factory.publications (application_revision_id, created_at DESC, id DESC);
+CREATE INDEX publications_search_gin ON factory.publications USING GIN (search_vector);
+CREATE INDEX publications_project_anchor_index
+    ON factory.publications (application_revision_id, project_id, id)
+    WHERE project_id IS NOT NULL;
+CREATE INDEX publications_rfc_anchor_index
+    ON factory.publications (application_revision_id, rfc_id, id)
+    WHERE rfc_id IS NOT NULL;
+CREATE INDEX publications_rfc_revision_anchor_index
+    ON factory.publications (application_revision_id, rfc_revision_id, id)
+    WHERE rfc_revision_id IS NOT NULL;
+CREATE INDEX publications_ticket_anchor_index
+    ON factory.publications (application_revision_id, ticket_id, id)
+    WHERE ticket_id IS NOT NULL;
+CREATE INDEX publications_ticket_revision_anchor_index
+    ON factory.publications (application_revision_id, ticket_revision_id, id)
+    WHERE ticket_revision_id IS NOT NULL;
+CREATE INDEX publications_experiment_anchor_index
+    ON factory.publications (application_revision_id, experiment_id, id)
+    WHERE experiment_id IS NOT NULL;
+CREATE INDEX publications_claim_anchor_index
+    ON factory.publications (application_revision_id, claim_id, id)
+    WHERE claim_id IS NOT NULL;
+CREATE INDEX publications_decision_anchor_index
+    ON factory.publications (application_revision_id, decision_id, id)
+    WHERE decision_id IS NOT NULL;
+CREATE INDEX publications_office_anchor_index
+    ON factory.publications (application_revision_id, office_id, id)
+    WHERE office_id IS NOT NULL;
+
+-- Attachments retain the Forum quota and label discipline, but now attach to
+-- an immutable anchored publication rather than to an unanchored post.
+CREATE TABLE factory.publication_attachments (
+    publication_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL
+        REFERENCES factory.application_revisions (id),
+    artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    label TEXT NOT NULL CHECK (octet_length(label) BETWEEN 1 AND 160),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (publication_id, artifact_id),
+    CONSTRAINT publication_attachments_publication_scope_fkey
+        FOREIGN KEY (publication_id, application_revision_id)
+        REFERENCES factory.publications (id, application_revision_id)
+);
+
+CREATE INDEX publication_attachments_artifact_index
+    ON factory.publication_attachments (artifact_id, publication_id);
+
+CREATE FUNCTION factory.enforce_publication_attachment_quota()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF (
+        SELECT count(*)
+          FROM factory.publication_attachments
+         WHERE publication_id = NEW.publication_id
+           AND application_revision_id = NEW.application_revision_id
+    ) >= 8 THEN
+        RAISE EXCEPTION
+            'publication % exceeds the eight-attachment quota',
+            NEW.publication_id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER publication_attachments_count_check
+    BEFORE INSERT ON factory.publication_attachments
+    FOR EACH ROW EXECUTE FUNCTION factory.enforce_publication_attachment_quota();
+
+CREATE FUNCTION factory.reject_publication_identity_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'publication identities are immutable: %', OLD.id
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+CREATE TRIGGER publications_immutable
+    BEFORE UPDATE OR DELETE ON factory.publications
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_publication_identity_mutation();
+
+CREATE TRIGGER publication_attachments_immutable
+    BEFORE UPDATE OR DELETE ON factory.publication_attachments
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_link_mutation();
+
+COMMENT ON TABLE factory.publications IS
+    'Immutable anchored discourse identity; legacy Forum rows are not publications';
+COMMENT ON TABLE factory.publication_attachments IS
+    'Immutable sealed artifacts attached to an anchored publication';
+
+
+-- A harness compilation records the deterministic bridge from admitted policy
+-- and durable context references to the exact actor packet. It is not agent
+-- memory and it is not an executable application callback.
+
+ALTER TABLE factory.assignments
+    ADD CONSTRAINT assignments_id_application_office_role_unique
+        UNIQUE (id, application_revision_id, office_id, assignment_role);
+
+CREATE TABLE factory.harness_compilations (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    assignment_id BIGINT NOT NULL UNIQUE,
+    application_revision_id BIGINT NOT NULL,
+    office_id BIGINT NOT NULL,
+    assignment_role SMALLINT NOT NULL CHECK (assignment_role BETWEEN 0 AND 2),
+    compiler_version SMALLINT NOT NULL CHECK (compiler_version = 2),
+    spec_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    system_prompt_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    assignment_prompt_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    packet_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
+    packet_digest BYTEA NOT NULL CHECK (octet_length(packet_digest) = 32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (id, application_revision_id),
+    CONSTRAINT harness_compilations_assignment_scope_fkey
+        FOREIGN KEY (assignment_id, application_revision_id, office_id, assignment_role)
+        REFERENCES factory.assignments (id, application_revision_id, office_id, assignment_role),
+    CONSTRAINT harness_compilations_office_scope_fkey
+        FOREIGN KEY (office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id)
+);
+
+CREATE INDEX harness_compilations_application_created_index
+    ON factory.harness_compilations (application_revision_id, created_at DESC, id DESC);
+
+CREATE TABLE factory.harness_context_items (
+    compilation_id BIGINT NOT NULL,
+    application_revision_id BIGINT NOT NULL,
+    ordinal SMALLINT NOT NULL CHECK (ordinal BETWEEN 0 AND 31),
+    inclusion_class SMALLINT NOT NULL CHECK (inclusion_class BETWEEN 0 AND 3),
+    reason TEXT NOT NULL CHECK (
+        octet_length(reason) BETWEEN 1 AND 512
+        -- PostgreSQL TEXT cannot contain NUL; the expression guards the two
+        -- remaining line breaks that would make an inclusion reason prompt text.
+        AND reason !~ E'[\n\r]'
+    ),
+    artifact_id BIGINT REFERENCES factory.artifacts (id),
+    project_id BIGINT,
+    rfc_id BIGINT,
+    rfc_revision_id BIGINT,
+    ticket_id BIGINT,
+    ticket_revision_id BIGINT,
+    experiment_id BIGINT,
+    claim_id BIGINT,
+    decision_id BIGINT,
+    office_id BIGINT,
+    PRIMARY KEY (compilation_id, ordinal),
+    CONSTRAINT harness_context_items_compilation_scope_fkey
+        FOREIGN KEY (compilation_id, application_revision_id)
+        REFERENCES factory.harness_compilations (id, application_revision_id),
+    CONSTRAINT harness_context_items_project_scope_fkey
+        FOREIGN KEY (project_id, application_revision_id)
+        REFERENCES factory.projects (id, application_revision_id),
+    CONSTRAINT harness_context_items_rfc_scope_fkey
+        FOREIGN KEY (rfc_id, application_revision_id)
+        REFERENCES factory.rfcs (id, application_revision_id),
+    CONSTRAINT harness_context_items_rfc_revision_scope_fkey
+        FOREIGN KEY (rfc_revision_id, application_revision_id)
+        REFERENCES factory.rfc_revisions (id, application_revision_id),
+    CONSTRAINT harness_context_items_ticket_scope_fkey
+        FOREIGN KEY (ticket_id, application_revision_id)
+        REFERENCES factory.tickets (id, application_revision_id),
+    CONSTRAINT harness_context_items_ticket_revision_scope_fkey
+        FOREIGN KEY (ticket_revision_id, application_revision_id)
+        REFERENCES factory.ticket_revisions (id, application_revision_id),
+    CONSTRAINT harness_context_items_experiment_scope_fkey
+        FOREIGN KEY (experiment_id, application_revision_id)
+        REFERENCES factory.experiments (id, application_revision_id),
+    CONSTRAINT harness_context_items_claim_scope_fkey
+        FOREIGN KEY (claim_id, application_revision_id)
+        REFERENCES factory.claims (id, application_revision_id),
+    CONSTRAINT harness_context_items_decision_scope_fkey
+        FOREIGN KEY (decision_id, application_revision_id)
+        REFERENCES factory.decisions (id, application_revision_id),
+    CONSTRAINT harness_context_items_office_scope_fkey
+        FOREIGN KEY (office_id, application_revision_id)
+        REFERENCES factory.offices (id, application_revision_id),
+    CONSTRAINT harness_context_items_exactly_one_reference_check CHECK (
+        num_nonnulls(
+            artifact_id, project_id, rfc_id, rfc_revision_id, ticket_id,
+            ticket_revision_id, experiment_id, claim_id, decision_id, office_id
+        ) = 1
+    )
+);
+
+CREATE INDEX harness_context_items_artifact_index
+    ON factory.harness_context_items (artifact_id, compilation_id)
+    WHERE artifact_id IS NOT NULL;
+
+CREATE TRIGGER harness_compilations_immutable
+    BEFORE UPDATE OR DELETE ON factory.harness_compilations
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_row_mutation();
+
+CREATE TRIGGER harness_context_items_immutable
+    BEFORE UPDATE OR DELETE ON factory.harness_context_items
+    FOR EACH ROW EXECUTE FUNCTION factory.reject_institutional_link_mutation();
+
+COMMENT ON TABLE factory.harness_compilations IS
+    'Immutable reproducible assignment harness inputs, outputs, and packet identity';
+COMMENT ON TABLE factory.harness_context_items IS
+    'Ordered typed durable references selected by one closed harness compiler';

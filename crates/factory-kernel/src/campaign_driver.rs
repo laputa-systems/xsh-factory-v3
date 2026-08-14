@@ -21,7 +21,7 @@ use crate::{
     durable_authority::{
         DeliverAcceptedCandidate, DurableAssignmentTarget, DurableAuthorityResolver,
     },
-    installed_runtime::{InstalledKernelBuildReceiptV1, InstalledKernelExecutionTools},
+    installed_runtime::{InstalledKernelBuildReceiptV2, InstalledKernelExecutionTools},
     local_transport::LocalDaemon,
     scheduler::{
         ClaimReadyTicketAction, CompleteCampaignAction, SchedulerConstraint, SchedulerNextAction,
@@ -100,7 +100,7 @@ pub enum CampaignDriverError {
 pub struct CampaignDriver {
     store: KernelStore,
     cas: CasStore,
-    installed: InstalledKernelBuildReceiptV1,
+    installed: InstalledKernelBuildReceiptV2,
     execution: InstalledKernelExecutionTools,
     resolver: Arc<DurableAuthorityResolver>,
     credential_lookup: Arc<dyn Fn(&str) -> Option<OsString> + Send + Sync>,
@@ -111,7 +111,7 @@ impl CampaignDriver {
     pub fn new(
         store: KernelStore,
         cas: CasStore,
-        installed: InstalledKernelBuildReceiptV1,
+        installed: InstalledKernelBuildReceiptV2,
         execution: InstalledKernelExecutionTools,
         resolver: Arc<DurableAuthorityResolver>,
     ) -> Self {
@@ -126,7 +126,7 @@ impl CampaignDriver {
     pub fn with_credential_lookup<F>(
         store: KernelStore,
         cas: CasStore,
-        installed: InstalledKernelBuildReceiptV1,
+        installed: InstalledKernelBuildReceiptV2,
         execution: InstalledKernelExecutionTools,
         resolver: Arc<DurableAuthorityResolver>,
         credential_lookup: F,

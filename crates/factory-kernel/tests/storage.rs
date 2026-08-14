@@ -8,7 +8,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use factory_kernel::cas::CasStore;
-use factory_kernel::process::StartCampaign;
+use factory_kernel::process::{CancelCampaign, StartCampaign};
 use factory_kernel::scheduler::{ClaimReadyTicketAction, SchedulerNextAction};
 use factory_kernel::storage::{
     ActivateApplicationRevision, AdmitCompiledApplication, InstallKernelBuild, KernelStore,
@@ -19,8 +19,8 @@ use factory_kernel::ticket_store::{
     ReleaseOutcome, ReleaseTicketAttempt, SponsorTicketRevision, SubmitTicketProposal,
 };
 use factory_protocol::{
-    AggregateRevision, ApplicationKey, ArchitectPrincipalV1, ContentDigest, ExpectedRevision,
-    MicroUsd, SealedArtifactReferenceV1,
+    AggregateRevision, ApplicationKey, ArchitectPrincipalV2, ContentDigest, ExpectedRevision,
+    MicroUsd, SealedArtifactReferenceV2,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -44,8 +44,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("canonical migration count");
         assert_eq!(
-            migration_count, 6,
-            "fresh V3 applies the canonical base, office, institutional, publication, and harness migrations"
+            migration_count, 1,
+            "fresh V3 applies one canonical squashed schema snapshot"
         );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
@@ -259,7 +259,7 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             .expect("compiled application admission");
         assert_eq!(accepted.resulting_revision.get(), 1);
         let activation_command = artifact_command(&build, "application-activation");
-        let activation_rationale = SealedArtifactReferenceV1 {
+        let activation_rationale = SealedArtifactReferenceV2 {
             artifact_id: store
                 .register_artifact(&build.cas, &activation_command)
                 .await
@@ -270,7 +270,7 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         };
         store
             .activate_application_revision(&ActivateApplicationRevision {
-                principal: ArchitectPrincipalV1::parse("architect").expect("principal"),
+                principal: ArchitectPrincipalV2::parse("architect").expect("principal"),
                 command_id: unique("application-activate"),
                 expected_revision: ExpectedRevision::new(accepted.resulting_revision),
                 application_key: ApplicationKey::parse(application_key).expect("application key"),
@@ -879,6 +879,25 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             Err(StoreError::ApplicationTemplateDigestMismatch { .. })
         ));
         assert!(repository.repository_id.get() > 0);
+        // The provider-free acceptance target deliberately runs every
+        // PostgreSQL authority judge against one fresh database.  Leave this
+        // fixture terminal so the next binary can exercise application
+        // activation without inheriting this test's global running campaign.
+        let campaign_status = store
+            .process_store()
+            .campaign_status(campaign.campaign_id)
+            .await
+            .expect("campaign status for fixture cleanup");
+        store
+            .process_store()
+            .cancel_campaign(&CancelCampaign {
+                principal: "architect".to_owned(),
+                command_id: unique("ticket-campaign-cleanup"),
+                expected_revision: ExpectedRevision::new(campaign_status.revision),
+                campaign_id: campaign.campaign_id,
+            })
+            .await
+            .expect("cancel completed storage fixture campaign");
         store.close().await;
     });
 }

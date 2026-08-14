@@ -11,9 +11,9 @@ use factory_protocol::{
     AssignmentEvidenceRoleV2, AssignmentEvidenceV2, AssignmentId, AssignmentPacketV2,
     AssignmentRole, CampaignId, CandidateId, ContentDigest, DurationMillis, ExpectedRevision,
     KernelBuildId, MicroUsd, ModelCapabilityV2, ModelProfileV2, PolicyEntrypointV2,
-    ProcessCustodyV1, ReadExactFileV2, RepositoryId, RepositoryRelativePath, RuntimeIdentityV2,
-    SessionId, SessionLimitsV2, SessionState, StopReasonV1, TerminalCostV1, TerminalOperationV1,
-    TerminalReportV1, ThinkingLevelV2, TicketAttemptId, UsageTotalsV1,
+    ProcessCustodyV2, ReadExactFileV2, RepositoryId, RepositoryRelativePath, RuntimeIdentityV2,
+    SessionId, SessionLimitsV2, SessionState, StopReasonV2, TerminalCostV2, TerminalOperationV2,
+    TerminalReportV2, ThinkingLevelV2, TicketAttemptId, UsageTotalsV2,
 };
 use sqlx::{PgPool, Postgres};
 
@@ -162,7 +162,7 @@ pub struct StartSession {
     pub expected_assignment_revision: ExpectedRevision,
     pub assignment_id: AssignmentId,
     pub packet_digest: ContentDigest,
-    pub custody: ProcessCustodyV1,
+    pub custody: ProcessCustodyV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,7 +178,7 @@ pub struct SessionReceipt {
 pub struct TerminalReceipt {
     pub session_id: SessionId,
     pub session_state: SessionState,
-    pub cost: TerminalCostV1,
+    pub cost: TerminalCostV2,
     pub resulting_revision: AggregateRevision,
     pub campaign_revision: AggregateRevision,
     pub audit_log_id: i64,
@@ -191,7 +191,7 @@ pub struct SessionStatus {
     pub assignment_id: AssignmentId,
     pub state: SessionState,
     pub revision: AggregateRevision,
-    pub cost: Option<TerminalCostV1>,
+    pub cost: Option<TerminalCostV2>,
 }
 
 /// Every durable fact needed to reconcile a live session after the daemon
@@ -202,7 +202,7 @@ pub struct SessionStatus {
 pub struct RestartRecoverySession {
     pub session_id: SessionId,
     pub expected_session_revision: AggregateRevision,
-    pub custody: ProcessCustodyV1,
+    pub custody: ProcessCustodyV2,
     pub packet: AssignmentPacketV2,
     pub packet_artifact: CasArtifact,
     pub canonical_packet_bytes: Vec<u8>,
@@ -216,7 +216,7 @@ pub struct CampaignStatus {
     pub application_revision_id: ApplicationRevisionId,
     pub repository_id: RepositoryId,
     pub aggregate_budget: MicroUsd,
-    pub measured_cost: TerminalCostV1,
+    pub measured_cost: TerminalCostV2,
     pub revision: AggregateRevision,
     pub deadline_unix_millis: u64,
     pub delivery_target: u32,
@@ -249,7 +249,7 @@ pub struct SessionCostBreakdown {
     pub model_provider: String,
     pub model_id: String,
     pub outcome: SessionState,
-    pub cost: Option<TerminalCostV1>,
+    pub cost: Option<TerminalCostV2>,
     /// Present only while this is the resident paid session.  The database
     /// derives it from its own clock, so a daemon restart cannot invent an
     /// elapsed duration or turn a status read into a write.
@@ -288,7 +288,7 @@ pub struct VerifiedTerminalEvidence {
     required_read_assertion_artifact_id: ArtifactId,
     required_read_expected_count: u32,
     required_read_satisfied_count: u32,
-    usage: Option<UsageTotalsV1>,
+    usage: Option<UsageTotalsV2>,
 }
 
 /// CAS seals produced by the directly-owned child before terminal admission.
@@ -613,7 +613,7 @@ impl ProcessStore {
             let session_id = SessionId::new(row.id)?;
             let expected_session_revision =
                 storage::aggregate_revision_from_sql_for_process(row.revision)?;
-            let custody = ProcessCustodyV1 {
+            let custody = ProcessCustodyV2 {
                 pid: u32::try_from(row.pid).map_err(|_| StoreError::InvalidProcessCommand {
                     field: "persisted PID",
                 })?,
@@ -1452,7 +1452,7 @@ impl ProcessStore {
         canonical_packet_bytes: &[u8],
         artifacts: TerminalArtifactSeals,
         assertion: SealedRequiredReadAssertion,
-        usage: Option<UsageTotalsV1>,
+        usage: Option<UsageTotalsV2>,
     ) -> Result<VerifiedTerminalEvidence, StoreError> {
         self.verify_packet_bytes(
             cas,
@@ -1482,7 +1482,7 @@ impl ProcessStore {
         packet_artifact: CasArtifact,
         artifacts: TerminalArtifactSeals,
         assertion: SealedRequiredReadAssertion,
-        usage: Option<UsageTotalsV1>,
+        usage: Option<UsageTotalsV2>,
         canonical_packet_bytes: Option<&[u8]>,
     ) -> Result<VerifiedTerminalEvidence, StoreError> {
         packet.validate()?;
@@ -1607,7 +1607,7 @@ impl ProcessStore {
         principal: &str,
         command_id: &str,
         session_id: SessionId,
-        report: &TerminalReportV1,
+        report: &TerminalReportV2,
         evidence: VerifiedTerminalEvidence,
     ) -> Result<TerminalReceipt, StoreError> {
         validate_command(principal, command_id)?;
@@ -1667,7 +1667,7 @@ impl ProcessStore {
             return Err(StoreError::PacketIdentityMismatch);
         }
         match report.stop_reason {
-            StopReasonV1::Completed => {
+            StopReasonV2::Completed => {
                 if report.operation.is_none()
                     || operation_mask_one(report.operation) & session.terminal_operations_mask == 0
                 {
@@ -1683,7 +1683,7 @@ impl ProcessStore {
                     return Err(StoreError::TerminalCostMismatch);
                 }
             }
-            StopReasonV1::UnknownCost => {
+            StopReasonV2::UnknownCost => {
                 if report.operation.is_some()
                     || evidence
                         .usage
@@ -1725,17 +1725,17 @@ impl ProcessStore {
                 cache_read_price,
                 cache_write_price,
             ) {
-                Ok(value) => TerminalCostV1::Known(value),
-                Err(_) => TerminalCostV1::Unknown,
+                Ok(value) => TerminalCostV2::Known(value),
+                Err(_) => TerminalCostV2::Unknown,
             },
-            None => TerminalCostV1::Unknown,
+            None => TerminalCostV2::Unknown,
         };
         let budget = u64::try_from(session.aggregate_budget_micro_usd)
             .map_err(|_| StoreError::CorruptCostColumn)?;
         let measured = u64::try_from(session.measured_cost_micro_usd)
             .map_err(|_| StoreError::CorruptCostColumn)?;
         let (next_cost_state, cost_value, next_measured, campaign_lifecycle) = match cost {
-            TerminalCostV1::Known(value) if session.campaign_cost_state == COST_KNOWN => {
+            TerminalCostV2::Known(value) if session.campaign_cost_state == COST_KNOWN => {
                 let total = measured
                     .checked_add(value.get())
                     .ok_or(StoreError::CorruptCostColumn)?;
@@ -1750,13 +1750,13 @@ impl ProcessStore {
                     )
                 }
             }
-            TerminalCostV1::Known(value) => (
+            TerminalCostV2::Known(value) => (
                 session.campaign_cost_state,
                 Some(value.get()),
                 measured,
                 session.campaign_lifecycle,
             ),
-            TerminalCostV1::Exceeded(value) => (
+            TerminalCostV2::Exceeded(value) => (
                 COST_EXCEEDED,
                 Some(value.get()),
                 measured.saturating_add(value.get()),
@@ -1767,14 +1767,14 @@ impl ProcessStore {
             // this brief bridge state running but cost-frozen so the scheduler
             // cannot admit another paid session before that typed command
             // completes. Other unknown-cost outcomes fail immediately.
-            TerminalCostV1::Unknown if report.stop_reason == StopReasonV1::Cancelled => {
+            TerminalCostV2::Unknown if report.stop_reason == StopReasonV2::Cancelled => {
                 (COST_UNKNOWN, None, measured, session.campaign_lifecycle)
             }
-            TerminalCostV1::Unknown => (COST_UNKNOWN, None, measured, FAILED),
+            TerminalCostV2::Unknown => (COST_UNKNOWN, None, measured, FAILED),
         };
         let state = session_state(report.stop_reason);
         let receipt_cost = match (next_cost_state, cost_value, cost) {
-            (COST_EXCEEDED, Some(value), _) => TerminalCostV1::Exceeded(MicroUsd::new(value)),
+            (COST_EXCEEDED, Some(value), _) => TerminalCostV2::Exceeded(MicroUsd::new(value)),
             (_, _, value) => value,
         };
         let campaign_failure_reason = match (campaign_lifecycle, next_cost_state) {
@@ -1890,9 +1890,9 @@ impl ProcessStore {
                 .map_err(|_| StoreError::CorruptCostColumn)?,
         );
         let measured_cost = match row.cost_state {
-            COST_KNOWN => TerminalCostV1::Known(measured),
-            COST_UNKNOWN => TerminalCostV1::Unknown,
-            COST_EXCEEDED => TerminalCostV1::Exceeded(measured),
+            COST_KNOWN => TerminalCostV2::Known(measured),
+            COST_UNKNOWN => TerminalCostV2::Unknown,
+            COST_EXCEEDED => TerminalCostV2::Exceeded(measured),
             _ => return Err(StoreError::CorruptCostColumn),
         };
         Ok(CampaignStatus {
@@ -2545,9 +2545,9 @@ fn assignment_packet_from_wire(
         .terminal_operations
         .iter()
         .map(|operation| match operation.as_str() {
-            "work_complete" => Ok(TerminalOperationV1::WorkComplete),
-            "candidate_submit" => Ok(TerminalOperationV1::CandidateSubmit),
-            "quality_submit_review" => Ok(TerminalOperationV1::QualitySubmitReview),
+            "work_complete" => Ok(TerminalOperationV2::WorkComplete),
+            "candidate_submit" => Ok(TerminalOperationV2::CandidateSubmit),
+            "quality_submit_review" => Ok(TerminalOperationV2::QualitySubmitReview),
             _ => Err(StoreError::PacketIdentityMismatch),
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -2978,7 +2978,7 @@ fn fingerprint_session_start(c: &StartSession) -> ContentDigest {
 }
 fn fingerprint_terminal(
     id: SessionId,
-    r: &TerminalReportV1,
+    r: &TerminalReportV2,
     evidence: &VerifiedTerminalEvidence,
 ) -> ContentDigest {
     let mut h = blake3::Hasher::new();
@@ -3048,11 +3048,11 @@ fn thinking_name(value: factory_protocol::ThinkingLevelV2) -> &'static str {
     }
 }
 
-fn terminal_operation_name(value: TerminalOperationV1) -> &'static str {
+fn terminal_operation_name(value: TerminalOperationV2) -> &'static str {
     match value {
-        TerminalOperationV1::WorkComplete => "work_complete",
-        TerminalOperationV1::CandidateSubmit => "candidate_submit",
-        TerminalOperationV1::QualitySubmitReview => "quality_submit_review",
+        TerminalOperationV2::WorkComplete => "work_complete",
+        TerminalOperationV2::CandidateSubmit => "candidate_submit",
+        TerminalOperationV2::QualitySubmitReview => "quality_submit_review",
     }
 }
 fn thinking_code(value: factory_protocol::ThinkingLevelV2) -> i16 {
@@ -3064,18 +3064,18 @@ fn thinking_code(value: factory_protocol::ThinkingLevelV2) -> i16 {
         factory_protocol::ThinkingLevelV2::XHigh => 4,
     }
 }
-fn operation_mask(ops: &[TerminalOperationV1]) -> i64 {
+fn operation_mask(ops: &[TerminalOperationV2]) -> i64 {
     ops.iter()
         .fold(0, |mask, op| mask | operation_mask_one(Some(*op)))
 }
-fn operation_mask_one(operation: Option<TerminalOperationV1>) -> i64 {
+fn operation_mask_one(operation: Option<TerminalOperationV2>) -> i64 {
     operation.map_or(0, |op| 1_i64 << terminal_operation_code(op))
 }
-fn session_state(reason: StopReasonV1) -> SessionState {
+fn session_state(reason: StopReasonV2) -> SessionState {
     match reason {
-        StopReasonV1::Completed => SessionState::Succeeded,
-        StopReasonV1::Cancelled => SessionState::Cancelled,
-        StopReasonV1::DaemonDisconnected | StopReasonV1::Deadline => SessionState::Interrupted,
+        StopReasonV2::Completed => SessionState::Succeeded,
+        StopReasonV2::Cancelled => SessionState::Cancelled,
+        StopReasonV2::DaemonDisconnected | StopReasonV2::Deadline => SessionState::Interrupted,
         _ => SessionState::Failed,
     }
 }
@@ -3117,21 +3117,21 @@ fn campaign_state_from_code(value: i16) -> Result<factory_protocol::CampaignStat
         _ => Err(StoreError::CorruptLifecycleColumn),
     }
 }
-fn stop_reason_code(value: StopReasonV1) -> i16 {
+fn stop_reason_code(value: StopReasonV2) -> i16 {
     value as i16
 }
-fn terminal_operation_code(value: TerminalOperationV1) -> i16 {
+fn terminal_operation_code(value: TerminalOperationV2) -> i16 {
     match value {
-        TerminalOperationV1::WorkComplete => 0,
-        TerminalOperationV1::CandidateSubmit => 1,
-        TerminalOperationV1::QualitySubmitReview => 2,
+        TerminalOperationV2::WorkComplete => 0,
+        TerminalOperationV2::CandidateSubmit => 1,
+        TerminalOperationV2::QualitySubmitReview => 2,
     }
 }
-fn failure_code(value: StopReasonV1) -> Option<i16> {
-    (value != StopReasonV1::Completed).then_some(value as i16)
+fn failure_code(value: StopReasonV2) -> Option<i16> {
+    (value != StopReasonV2::Completed).then_some(value as i16)
 }
 fn usage_sql(
-    value: UsageTotalsV1,
+    value: UsageTotalsV2,
 ) -> Result<(i64, i64, i64, i64, Option<i64>, Option<i64>), StoreError> {
     let range = |_| StoreError::InvalidProcessCommand {
         field: "usage total",
@@ -3153,14 +3153,14 @@ fn usage_sql(
             .map_err(range)?,
     ))
 }
-fn db_cost(state: Option<i16>, value: Option<i64>) -> Result<Option<TerminalCostV1>, StoreError> {
+fn db_cost(state: Option<i16>, value: Option<i64>) -> Result<Option<TerminalCostV2>, StoreError> {
     match (state, value) {
         (None, None) => Ok(None),
-        (Some(COST_KNOWN), Some(v)) => Ok(Some(TerminalCostV1::Known(MicroUsd::new(
+        (Some(COST_KNOWN), Some(v)) => Ok(Some(TerminalCostV2::Known(MicroUsd::new(
             u64::try_from(v).map_err(|_| StoreError::CorruptCostColumn)?,
         )))),
-        (Some(COST_UNKNOWN), None) => Ok(Some(TerminalCostV1::Unknown)),
-        (Some(COST_EXCEEDED), Some(v)) => Ok(Some(TerminalCostV1::Exceeded(MicroUsd::new(
+        (Some(COST_UNKNOWN), None) => Ok(Some(TerminalCostV2::Unknown)),
+        (Some(COST_EXCEEDED), Some(v)) => Ok(Some(TerminalCostV2::Exceeded(MicroUsd::new(
             u64::try_from(v).map_err(|_| StoreError::CorruptCostColumn)?,
         )))),
         _ => Err(StoreError::CorruptCostColumn),
@@ -3174,15 +3174,15 @@ mod tests {
     #[test]
     fn terminal_state_mapping_keeps_infrastructure_stops_interrupted() {
         assert_eq!(
-            session_state(StopReasonV1::Completed),
+            session_state(StopReasonV2::Completed),
             SessionState::Succeeded
         );
         assert_eq!(
-            session_state(StopReasonV1::DaemonDisconnected),
+            session_state(StopReasonV2::DaemonDisconnected),
             SessionState::Interrupted
         );
         assert_eq!(
-            session_state(StopReasonV1::UnknownCost),
+            session_state(StopReasonV2::UnknownCost),
             SessionState::Failed
         );
     }
@@ -3190,8 +3190,8 @@ mod tests {
     #[test]
     fn terminal_operation_mask_is_closed_and_bounded() {
         let mask = operation_mask(&[
-            TerminalOperationV1::WorkComplete,
-            TerminalOperationV1::QualitySubmitReview,
+            TerminalOperationV2::WorkComplete,
+            TerminalOperationV2::QualitySubmitReview,
         ]);
         assert_eq!(mask, 1 | (1 << 2));
         assert_eq!(operation_mask_one(None), 0);
@@ -3199,11 +3199,11 @@ mod tests {
 
     #[test]
     fn absent_provider_cost_is_not_synthesized_from_tokens() {
-        let usage = UsageTotalsV1 {
+        let usage = UsageTotalsV2 {
             input_tokens: 100,
             output_tokens: 100,
             reported_cost_micro_usd: None,
-            ..UsageTotalsV1::default()
+            ..UsageTotalsV2::default()
         };
         assert!(
             usage

@@ -28,9 +28,9 @@ use factory_protocol::{
     ArchitectReleaseTicketAttemptRequest, ArchitectSponsorTicketRevisionRequest, AssignmentId,
     AssignmentRole, AuditShowResponse, CampaignId, CampaignReceiptResponse, CampaignStatusResponse,
     CandidateShowResponse, ConflictResponse, ErrorResponse, FRAME_PREFIX_BYTES,
-    ForumListThreadsRequestV1, ForumListTopicsRequestV1, ForumPostsResponseV1,
-    ForumReadThreadRequestV1, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1,
-    ForumTopicsResponseV1, FrameError, InstitutionalSearchResponse, InstitutionalShowResponse,
+    ForumListThreadsRequestV2, ForumListTopicsRequestV2, ForumPostsResponseV2,
+    ForumReadThreadRequestV2, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadsResponseV2,
+    ForumTopicsResponseV2, FrameError, InstitutionalSearchResponse, InstitutionalShowResponse,
     OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
@@ -38,7 +38,7 @@ use factory_protocol::{
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
     OperatorPublicationCreateRequest, OperatorStartCampaignRequest, OperatorStatusRequest,
     OperatorStatusResponse, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V1, PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES,
+    PROTOCOL_VERSION_V2, PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES,
     RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId, TicketListResponse, TicketShowResponse,
     decode_frame, decode_json_frame, decode_routing_envelope, encode_frame, encode_json_frame,
 };
@@ -519,7 +519,7 @@ impl OperatorClient {
         }
         let mut stream = UnixStream::connect(&self.socket_path).await?;
         let request = OperatorStatusRequest {
-            protocol_version: PROTOCOL_VERSION_V1,
+            protocol_version: PROTOCOL_VERSION_V2,
             request_id,
             operation: OPERATOR_STATUS_OPERATION.to_owned(),
         };
@@ -534,7 +534,7 @@ impl OperatorClient {
             RESPONSE_FRAME_MAX_BYTES,
             OPERATOR_STATUS_OPERATION,
         )?;
-        if response.protocol_version != PROTOCOL_VERSION_V1 {
+        if response.protocol_version != PROTOCOL_VERSION_V2 {
             return Err(LocalTransportError::UnsupportedOperatorProtocol(
                 response.protocol_version,
             ));
@@ -737,29 +737,29 @@ impl OperatorClient {
     /// must use an anchored institutional publication.
     pub async fn forum_list_topics(
         &self,
-        request: ForumListTopicsRequestV1,
-    ) -> Result<ForumTopicsResponseV1, LocalTransportError> {
+        request: ForumListTopicsRequestV2,
+    ) -> Result<ForumTopicsResponseV2, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_FORUM_LIST_TOPICS)
             .await
     }
     pub async fn forum_list_threads(
         &self,
-        request: ForumListThreadsRequestV1,
-    ) -> Result<ForumThreadsResponseV1, LocalTransportError> {
+        request: ForumListThreadsRequestV2,
+    ) -> Result<ForumThreadsResponseV2, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_FORUM_LIST_THREADS)
             .await
     }
     pub async fn forum_read_thread(
         &self,
-        request: ForumReadThreadRequestV1,
-    ) -> Result<ForumPostsResponseV1, LocalTransportError> {
+        request: ForumReadThreadRequestV2,
+    ) -> Result<ForumPostsResponseV2, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_FORUM_READ_THREAD)
             .await
     }
     pub async fn forum_search(
         &self,
-        request: ForumSearchRequestV1,
-    ) -> Result<ForumSearchResponseV1, LocalTransportError> {
+        request: ForumSearchRequestV2,
+    ) -> Result<ForumSearchResponseV2, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_FORUM_SEARCH)
             .await
     }
@@ -782,7 +782,7 @@ impl OperatorClient {
             })
         })?;
         validate_request_id(&envelope.request_id)?;
-        if envelope.protocol_version != PROTOCOL_VERSION_V1 {
+        if envelope.protocol_version != PROTOCOL_VERSION_V2 {
             return Err(LocalTransportError::UnsupportedOperatorProtocol(
                 envelope.protocol_version,
             ));
@@ -894,7 +894,7 @@ impl OperatorClient {
             })
         })?;
         validate_request_id(&envelope.request_id)?;
-        if envelope.protocol_version != PROTOCOL_VERSION_V1 {
+        if envelope.protocol_version != PROTOCOL_VERSION_V2 {
             return Err(LocalTransportError::UnsupportedOperatorProtocol(
                 envelope.protocol_version,
             ));
@@ -994,7 +994,7 @@ impl OperatorClient {
             })
         })?;
         validate_request_id(&envelope.request_id)?;
-        if envelope.protocol_version != PROTOCOL_VERSION_V1 {
+        if envelope.protocol_version != PROTOCOL_VERSION_V2 {
             return Err(LocalTransportError::UnsupportedOperatorProtocol(
                 envelope.protocol_version,
             ));
@@ -1723,7 +1723,7 @@ async fn serve_operator_connection(
         "operator routing envelope",
     )?;
     validate_request_id(&envelope.request_id)?;
-    if envelope.protocol_version != PROTOCOL_VERSION_V1 {
+    if envelope.protocol_version != PROTOCOL_VERSION_V2 {
         return Err(LocalTransportError::UnsupportedOperatorProtocol(
             envelope.protocol_version,
         ));
@@ -1740,7 +1740,7 @@ async fn serve_operator_connection(
                 },
             };
             let response = OperatorStatusResponse {
-                protocol_version: PROTOCOL_VERSION_V1,
+                protocol_version: PROTOCOL_VERSION_V2,
                 request_id: request.request_id,
                 operation: OPERATOR_STATUS_OPERATION.to_owned(),
                 state: "ready".to_owned(),
@@ -2063,7 +2063,7 @@ fn validate_architect_response_identity(
     expected_request_id: &str,
     expected_operation: &'static str,
 ) -> Result<(), LocalTransportError> {
-    if protocol_version != PROTOCOL_VERSION_V1 {
+    if protocol_version != PROTOCOL_VERSION_V2 {
         return Err(LocalTransportError::UnsupportedOperatorProtocol(
             protocol_version,
         ));
@@ -2194,7 +2194,7 @@ mod tests {
                 write_stream_frame_json(
                     &mut stream,
                     &OperatorStatusResponse {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: "another-request".to_owned(),
                         operation: OPERATOR_STATUS_OPERATION.to_owned(),
                         state: "ready".to_owned(),
@@ -2241,7 +2241,7 @@ mod tests {
                 write_stream_frame_json(
                     &mut stream,
                     &ErrorResponse {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: request.request_id,
                         operation: factory_protocol::OP_ARCHITECT_RELEASE_TICKET_ATTEMPT.to_owned(),
                         error_code: "architect_transition_unavailable".to_owned(),
@@ -2254,13 +2254,13 @@ mod tests {
             });
             let error = OperatorClient::new(path.clone())
                 .release_ticket_attempt(ArchitectReleaseTicketAttemptRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "release-1".to_owned(),
                     operation: factory_protocol::OP_ARCHITECT_RELEASE_TICKET_ATTEMPT.to_owned(),
                     client_command_id: "release-command".to_owned(),
                     expected_revision: 4,
                     ticket_attempt_id: 7,
-                    rationale: factory_protocol::SealedArtifactReferenceWireV1 {
+                    rationale: factory_protocol::SealedArtifactReferenceWireV2 {
                         artifact_id: 1,
                         digest: "a".repeat(64),
                         byte_length: 12,
@@ -2304,7 +2304,7 @@ mod tests {
                 write_stream_frame_json(
                     &mut stream,
                     &CampaignStatusResponse {
-                        protocol_version: PROTOCOL_VERSION_V1,
+                        protocol_version: PROTOCOL_VERSION_V2,
                         request_id: request.request_id,
                         operation: factory_protocol::OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
                         campaign_id: 9,
@@ -2354,7 +2354,7 @@ mod tests {
             });
             let status = OperatorClient::new(path.clone())
                 .campaign_status(OperatorCampaignStatusRequest {
-                    protocol_version: PROTOCOL_VERSION_V1,
+                    protocol_version: PROTOCOL_VERSION_V2,
                     request_id: "campaign-status-1".to_owned(),
                     operation: factory_protocol::OP_OPERATOR_CAMPAIGN_STATUS.to_owned(),
                     campaign_id: 9,
@@ -2391,7 +2391,7 @@ mod tests {
                     })
                     .await
             });
-            let payload = br#"{"protocol_version":1,"request_id":"r","operation":"artifact.read","session_id":999,"assignment_id":999,"office":"quality"}"#;
+            let payload = br#"{"protocol_version":2,"request_id":"r","operation":"artifact.read","session_id":999,"assignment_id":999,"office":"quality"}"#;
             write_stream_frame(
                 &mut client,
                 payload,
@@ -2464,7 +2464,7 @@ mod tests {
                 smol::spawn(async move { server.serve(|_| async { Ok(br#"{}"#.to_vec()) }).await });
             write_stream_frame(
                 &mut client,
-                br#"{"protocol_version":1,"request_id":"unknown","operation":"no.such.operation"}"#,
+                br#"{"protocol_version":2,"request_id":"unknown","operation":"no.such.operation"}"#,
                 REQUEST_FRAME_MAX_BYTES,
                 Duration::from_secs(1),
             )
@@ -2698,7 +2698,7 @@ mod tests {
 
     async fn write_known_request(stream: &mut UnixStream, request_id: &str) {
         let payload = format!(
-            "{{\"protocol_version\":1,\"request_id\":\"{request_id}\",\"operation\":\"{OP_ARTIFACT_READ}\"}}"
+            "{{\"protocol_version\":2,\"request_id\":\"{request_id}\",\"operation\":\"{OP_ARTIFACT_READ}\"}}"
         );
         write_stream_frame(
             stream,

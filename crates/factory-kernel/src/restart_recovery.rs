@@ -24,7 +24,7 @@ use std::{
 };
 
 use factory_protocol::{
-    ContentDigest, ExpectedRevision, ProcessCustodyV1, StopReasonV1, TerminalReportV1,
+    ContentDigest, ExpectedRevision, ProcessCustodyV2, StopReasonV2, TerminalReportV2,
 };
 use rustix::{
     io::Errno,
@@ -259,11 +259,11 @@ async fn reconcile_one_session(
             None,
         )
         .await?;
-    let report = TerminalReportV1 {
+    let report = TerminalReportV2 {
         packet_digest: session.packet.packet_digest,
         expected_session_revision: ExpectedRevision::new(session.expected_session_revision),
         operation: None,
-        stop_reason: StopReasonV1::DaemonDisconnected,
+        stop_reason: StopReasonV2::DaemonDisconnected,
         report_digest: restart_report_digest(session),
     };
     process
@@ -469,7 +469,7 @@ fn restart_report_digest(session: &RestartRecoverySession) -> ContentDigest {
 /// The current leader's PGID is checked before any signal, which catches a
 /// reused PID bound to another group without process-name scanning.
 pub fn terminate_owned_process_group(
-    custody: ProcessCustodyV1,
+    custody: ProcessCustodyV2,
     policy: RestartRecoveryPolicy,
 ) -> Result<ProcessGroupObservation, RestartRecoveryError> {
     if custody.pid == 0 || custody.pgid == 0 || custody.pid != custody.pgid {
@@ -566,7 +566,7 @@ fn group_exists(group: Pid) -> Result<bool, RestartRecoveryError> {
 fn signal_exact_group(
     group: Pid,
     signal: Signal,
-    custody: ProcessCustodyV1,
+    custody: ProcessCustodyV2,
 ) -> Result<(), RestartRecoveryError> {
     match kill_process_group(group, signal) {
         Ok(()) | Err(Errno::SRCH) => Ok(()),
@@ -617,7 +617,7 @@ pub enum RestartRecoveryError {
     ZeroPollInterval,
 
     #[error("persisted process custody is not a direct-child process group: {custody:?}")]
-    InvalidCustody { custody: ProcessCustodyV1 },
+    InvalidCustody { custody: ProcessCustodyV2 },
 
     #[error("persisted process ID {value} cannot be represented on this host")]
     PidOutOfRange { value: u32 },
@@ -638,7 +638,7 @@ pub enum RestartRecoveryError {
 
     #[error("could not inspect persisted process custody {custody:?}: {source}")]
     InspectProcessGroup {
-        custody: ProcessCustodyV1,
+        custody: ProcessCustodyV2,
         source: Errno,
     },
 
@@ -727,7 +727,7 @@ mod tests {
         // Give the shell a moment to establish the group before probing it.
         thread::sleep(Duration::from_millis(10));
         let observation = terminate_owned_process_group(
-            ProcessCustodyV1 {
+            ProcessCustodyV2 {
                 pid,
                 pgid: pid,
                 started_at_unix_millis: 1,

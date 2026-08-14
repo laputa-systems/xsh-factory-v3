@@ -3,12 +3,12 @@ use factory_protocol::{
     ContentDigest, ContractError, Decision, DecisionId, DecisionKind, DecisionState, Experiment,
     ExperimentId, ExperimentRun, ExperimentRunId, ExperimentRunState, ExperimentState,
     InstitutionalReference, OfficeId, Project, ProjectId, ProjectState, Publication,
-    PublicationAttachment, PublicationId, PublicationKind, RepositoryObjectIdV1, Rfc, RfcId,
-    RfcRevision, RfcRevisionId, RfcState, SealedArtifactReferenceV1, SessionId,
+    PublicationAttachment, PublicationId, PublicationKind, RepositoryObjectIdV2, Rfc, RfcId,
+    RfcRevision, RfcRevisionId, RfcState, SealedArtifactReferenceV2, SessionId,
 };
 
-fn artifact(id: i64, bytes: u64) -> SealedArtifactReferenceV1 {
-    SealedArtifactReferenceV1 {
+fn artifact(id: i64, bytes: u64) -> SealedArtifactReferenceV2 {
+    SealedArtifactReferenceV2 {
         artifact_id: ArtifactId::new(id).expect("positive artifact ID"),
         digest: ContentDigest::from_bytes([id as u8; 32]),
         byte_length: bytes,
@@ -82,7 +82,7 @@ fn experiment_and_run_keep_execution_facts_separate() {
         question: "Does the typed resolver preserve replay?".to_owned(),
         summary: "A bounded replay experiment".to_owned(),
         intended_base: Some(
-            RepositoryObjectIdV1::parse("0123456789012345678901234567890123456789")
+            RepositoryObjectIdV2::parse("0123456789012345678901234567890123456789")
                 .expect("base commit"),
         ),
         intended_target: InstitutionalReference::RfcRevision(
@@ -100,9 +100,9 @@ fn experiment_and_run_keep_execution_facts_separate() {
         experiment_id: experiment.id,
         application_revision_id,
         owner_office_id,
-        base_commit: RepositoryObjectIdV1::parse("0123456789012345678901234567890123456789")
+        base_commit: RepositoryObjectIdV2::parse("0123456789012345678901234567890123456789")
             .expect("base commit"),
-        base_tree: RepositoryObjectIdV1::parse("abcdefabcdefabcdefabcdefabcdefabcdefabcd")
+        base_tree: RepositoryObjectIdV2::parse("abcdefabcdefabcdefabcdefabcdefabcdefabcd")
             .expect("base tree"),
         invocation: artifact(11, 20),
         candidate_id: None,

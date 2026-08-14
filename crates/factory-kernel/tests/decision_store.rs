@@ -26,17 +26,17 @@ use factory_kernel::ticket_store::{
 };
 use factory_protocol::{
     ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationBundleWireV2,
-    ApplicationRevisionId, ArchitectDecisionKindV1, ArchitectPrincipalV1, AssignmentEvidenceRoleV2,
+    ApplicationRevisionId, ArchitectDecisionKindV2, ArchitectPrincipalV2, AssignmentEvidenceRoleV2,
     AssignmentEvidenceV2, AssignmentEvidenceWireV2, AssignmentLimitsWireV2, AssignmentModelWireV2,
     AssignmentPacketV2, AssignmentPacketWireV2, AssignmentReadWireV2, AssignmentRole,
-    AssignmentRoleWireV2, AssignmentRuntimeWireV2, CandidateDecisionRequestV1, CandidateDecisionV1,
-    CandidateSubmissionV1, CommandWireV2, CommitMessageWireV2, ContentDigest, DurationMillis,
+    AssignmentRoleWireV2, AssignmentRuntimeWireV2, CandidateDecisionRequestV2, CandidateDecisionV2,
+    CandidateSubmissionV2, CommandWireV2, CommitMessageWireV2, ContentDigest, DurationMillis,
     ExecutableWireV2, ExpectedRevision, GitWireV2, KernelBuildId, LimitsWireV2, MicroUsd,
-    ModelProfileV2, ModelWireV2, PolicyEntrypointV2, PolicyWireV2, ProcessCustodyV1,
-    QualityReviewSubmissionV1, ReadExactFileV2, ReleaseDecisionV1, RepositoryObjectIdV1,
-    RepositoryRelativePath, RepositoryWireV2, RuntimeIdentityV2, SealedArtifactReferenceV1,
-    SessionLimitsV2, SponsorshipDecisionV1, StopReasonV1, TemplateWireV2, TerminalOperationV1,
-    TerminalReportV1, ThinkingLevelV2, TicketBoundsWireV2, TicketPolicyWireV2, UsageTotalsV1,
+    ModelProfileV2, ModelWireV2, PolicyEntrypointV2, PolicyWireV2, ProcessCustodyV2,
+    QualityReviewSubmissionV2, ReadExactFileV2, ReleaseDecisionV2, RepositoryObjectIdV2,
+    RepositoryRelativePath, RepositoryWireV2, RuntimeIdentityV2, SealedArtifactReferenceV2,
+    SessionLimitsV2, SponsorshipDecisionV2, StopReasonV2, TemplateWireV2, TerminalOperationV2,
+    TerminalReportV2, ThinkingLevelV2, TicketBoundsWireV2, TicketPolicyWireV2, UsageTotalsV2,
     ValidationWireV2, canonical_application_bundle_json_v2, canonical_assignment_packet_json_v2,
     unsigned_assignment_packet_digest_v2,
 };
@@ -102,7 +102,7 @@ fn failed_attempt_requires_an_explicit_architect_release() {
                     candidate.candidate_id,
                     factory_protocol::ReviewId::new(1).unwrap(),
                     failed.resulting_candidate_revision,
-                    CandidateDecisionV1::Deliver,
+                    CandidateDecisionV2::Deliver,
                     None,
                 )
                 .await,
@@ -113,7 +113,7 @@ fn failed_attempt_requires_an_explicit_architect_release() {
             command_id: unique("architect-release"),
             expected_attempt_revision: ExpectedRevision::new(fixture.attempt_revision),
             expected_ticket_revision: ExpectedRevision::new(fixture.ticket_revision),
-            decision: ReleaseDecisionV1 {
+            decision: ReleaseDecisionV2 {
                 ticket_attempt_id: fixture.attempt_id,
                 rationale: fixture.common.reference(),
                 principal: architect(),
@@ -130,7 +130,7 @@ fn failed_attempt_requires_an_explicit_architect_release() {
             released.outcome,
             factory_kernel::decision_store::ReleaseOutcome::Released
         );
-        assert_eq!(released.decision.kind, ArchitectDecisionKindV1::Release);
+        assert_eq!(released.decision.kind, ArchitectDecisionKindV2::Release);
         assert!(
             fixture
                 .store
@@ -183,6 +183,7 @@ fn candidate_submission_accepts_an_empty_checkpoint_patch_for_a_ticket_reproduce
             .expect("the sealed Product reproducer makes the empty checkpoint patch admissible");
         assert_eq!(candidate.state, factory_protocol::CandidateState::Submitted);
         fixture.finish_session(engineering).await;
+        fixture.cancel_running_campaign().await;
         fixture.store.close().await;
     });
 }
@@ -220,6 +221,8 @@ fn candidate_submission_accepts_controller_recovery_evidence_from_a_newer_build(
             .await
             .expect("exact recovered evidence remains admissible");
         assert_eq!(candidate.state, factory_protocol::CandidateState::Submitted);
+        fixture.finish_session(engineering).await;
+        fixture.cancel_running_campaign().await;
         fixture.store.close().await;
     });
 }
@@ -316,7 +319,7 @@ impl Fixture {
             .sponsor_ticket(&SponsorTicket {
                 command_id: unique("sponsor"),
                 expected_ticket_revision: ExpectedRevision::new(ticket.resulting_revision),
-                decision: SponsorshipDecisionV1 {
+                decision: SponsorshipDecisionV2 {
                     ticket_revision_id: ticket.ticket_revision_id,
                     rationale: common.reference(),
                     principal: architect(),
@@ -477,7 +480,7 @@ impl Fixture {
                 first.candidate_id,
                 accepted_review.review_id,
                 accepted_review.resulting_candidate_revision,
-                CandidateDecisionV1::Rework,
+                CandidateDecisionV2::Rework,
                 None,
             )
             .await
@@ -529,7 +532,7 @@ impl Fixture {
         // The retained extra-probe relation is checked exactly like every
         // other sealed review input. A forged digest must roll back before a
         // review or attempt revision can appear.
-        let forged_probes = SealedArtifactReferenceV1 {
+        let forged_probes = SealedArtifactReferenceV2 {
             artifact_id: self.probes.artifact_id,
             digest: ContentDigest::of_bytes(b"forged probe digest"),
             byte_length: self.probes.sealed.byte_length(),
@@ -564,7 +567,7 @@ impl Fixture {
                 second.candidate_id,
                 rejected_review.review_id,
                 rejected_review.resulting_candidate_revision,
-                CandidateDecisionV1::Rework,
+                CandidateDecisionV2::Rework,
                 None,
             )
             .await,
@@ -575,7 +578,7 @@ impl Fixture {
                 second.candidate_id,
                 rejected_review.review_id,
                 rejected_review.resulting_candidate_revision,
-                CandidateDecisionV1::Deliver,
+                CandidateDecisionV2::Deliver,
                 None,
             )
             .await,
@@ -586,7 +589,7 @@ impl Fixture {
                 second.candidate_id,
                 rejected_review.review_id,
                 rejected_review.resulting_candidate_revision,
-                CandidateDecisionV1::Deliver,
+                CandidateDecisionV2::Deliver,
                 Some(rejected_review.review_id),
             )
             .await
@@ -676,7 +679,7 @@ impl Fixture {
             candidate_patch: self.common.reference(),
             engineering_report: self.common.reference(),
             engineering_risks: self.common.reference(),
-            submission: CandidateSubmissionV1 {
+            submission: CandidateSubmissionV2 {
                 commit_subject: "Fix observable behavior".to_owned(),
                 commit_body: String::new(),
                 regression_test_identity: "cargo test visible_regression".to_owned(),
@@ -745,7 +748,7 @@ impl Fixture {
         quality_session_id: factory_protocol::SessionId,
         validation_id: factory_protocol::ValidationId,
         verdict: factory_protocol::ReviewVerdict,
-        additional_probes: SealedArtifactReferenceV1,
+        additional_probes: SealedArtifactReferenceV2,
     ) -> Result<factory_kernel::decision_store::ReviewReceipt, DecisionStoreError> {
         self.store
             .decision_store()
@@ -756,7 +759,7 @@ impl Fixture {
                 expected_candidate_revision: ExpectedRevision::new(candidate_revision),
                 expected_attempt_revision: ExpectedRevision::new(self.attempt_revision),
                 quality_session_id,
-                submission: QualityReviewSubmissionV1 {
+                submission: QualityReviewSubmissionV2 {
                     full_suite_validation_id: validation_id,
                     verdict,
                     rationale: self.common.reference(),
@@ -772,7 +775,7 @@ impl Fixture {
         candidate_id: factory_protocol::CandidateId,
         review_id: factory_protocol::ReviewId,
         candidate_revision: AggregateRevision,
-        decision: CandidateDecisionV1,
+        decision: CandidateDecisionV2,
         quality_rejection_override: Option<factory_protocol::ReviewId>,
     ) -> Result<factory_kernel::decision_store::CandidateDecisionReceipt, DecisionStoreError> {
         self.store
@@ -782,7 +785,7 @@ impl Fixture {
                 expected_candidate_revision: ExpectedRevision::new(candidate_revision),
                 expected_attempt_revision: ExpectedRevision::new(self.attempt_revision),
                 expected_ticket_revision: ExpectedRevision::new(self.ticket_revision),
-                request: CandidateDecisionRequestV1 {
+                request: CandidateDecisionRequestV2 {
                     candidate_id,
                     review_id,
                     decision,
@@ -866,7 +869,7 @@ impl Fixture {
             },
             runtime: runtime(),
             required_reads: vec![read],
-            terminal_operations: vec![TerminalOperationV1::WorkComplete],
+            terminal_operations: vec![TerminalOperationV2::WorkComplete],
             remaining_campaign_allowance: MicroUsd::new(100 - self.provider_cost_spent),
             revision: self.campaign_revision,
             packet_digest: digest(unique_number()),
@@ -905,7 +908,7 @@ impl Fixture {
                 expected_assignment_revision: ExpectedRevision::new(assignment.resulting_revision),
                 assignment_id: assignment.assignment_id,
                 packet_digest,
-                custody: ProcessCustodyV1 {
+                custody: ProcessCustodyV2 {
                     pid: std::process::id(),
                     pgid: std::process::id(),
                     started_at_unix_millis: unique_number(),
@@ -979,11 +982,11 @@ impl Fixture {
                     partial_transcript: None,
                 },
                 assertion,
-                Some(UsageTotalsV1 {
+                Some(UsageTotalsV2 {
                     input_tokens: 1,
                     output_tokens: 1,
                     reported_cost_micro_usd: Some(MicroUsd::new(1)),
-                    ..UsageTotalsV1::default()
+                    ..UsageTotalsV2::default()
                 }),
             )
             .await
@@ -993,11 +996,11 @@ impl Fixture {
                 "kernel",
                 &unique("terminal"),
                 session.session_id,
-                &TerminalReportV1 {
+                &TerminalReportV2 {
                     packet_digest: session.packet.packet_digest,
                     expected_session_revision: ExpectedRevision::new(session.session_revision),
-                    operation: Some(TerminalOperationV1::WorkComplete),
-                    stop_reason: StopReasonV1::Completed,
+                    operation: Some(TerminalOperationV2::WorkComplete),
+                    stop_reason: StopReasonV2::Completed,
                     report_digest: digest(unique_number()),
                 },
                 evidence,
@@ -1007,6 +1010,24 @@ impl Fixture {
         self.campaign_revision = terminal.campaign_revision;
         self.provider_cost_spent += 1;
         daemon.shutdown().await.expect("daemon shutdown");
+    }
+
+    /// Each ignored PostgreSQL judge shares one disposable authority.  A
+    /// fixture that does not deliver must explicitly close its campaign so a
+    /// later fixture can activate a different application revision.
+    async fn cancel_running_campaign(&mut self) {
+        let cancelled = self
+            .store
+            .process_store()
+            .cancel_campaign(&CancelCampaign {
+                principal: "operator".to_owned(),
+                command_id: unique("fixture-campaign-cleanup"),
+                expected_revision: ExpectedRevision::new(self.campaign_revision),
+                campaign_id: self.campaign_id,
+            })
+            .await
+            .expect("cancel provider-free fixture campaign");
+        self.campaign_revision = cancelled.resulting_revision;
     }
 }
 
@@ -1034,8 +1055,8 @@ struct RegisteredArtifact {
 }
 
 impl RegisteredArtifact {
-    fn reference(self) -> SealedArtifactReferenceV1 {
-        SealedArtifactReferenceV1 {
+    fn reference(self) -> SealedArtifactReferenceV2 {
+        SealedArtifactReferenceV2 {
             artifact_id: self.artifact_id,
             digest: self.sealed.digest(),
             byte_length: self.sealed.byte_length(),
@@ -1201,12 +1222,12 @@ fn requalification(actual: factory_protocol::ArtifactId) -> CurrentHeadRequalifi
     }
 }
 
-fn architect() -> ArchitectPrincipalV1 {
-    ArchitectPrincipalV1::parse("grand-architect").expect("principal")
+fn architect() -> ArchitectPrincipalV2 {
+    ArchitectPrincipalV2::parse("grand-architect").expect("principal")
 }
 
-fn object(character: char) -> RepositoryObjectIdV1 {
-    RepositoryObjectIdV1::parse(character.to_string().repeat(40)).expect("object ID")
+fn object(character: char) -> RepositoryObjectIdV2 {
+    RepositoryObjectIdV2::parse(character.to_string().repeat(40)).expect("object ID")
 }
 
 fn model() -> ModelProfileV2 {
