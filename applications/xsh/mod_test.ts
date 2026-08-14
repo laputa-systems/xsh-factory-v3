@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "85a98dea8f6d6fa9e47d151ee27a7dfc3ef8d39182a91042a85ffac6441290fb"
+      "04a414b7108a2be1180c4212513f5def8d85157fcf815ba827596533ab6564be"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
