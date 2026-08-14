@@ -43,8 +43,11 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   const second = await compileApplicationV1(xshApplicationV1, sourceRoot);
 
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
-  if (first.bundle.predecessor_bundle !== null) {
-    throw new Error("the current XSH declaration must be an explicit fresh-registry root");
+  if (
+    first.bundle.predecessor_bundle !==
+      "932106af6a4808cf4c2c26c9f2819bc0dfd6742635c73e0d3dc9149d374e6c4f"
+  ) {
+    throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
   if (first.templates.length !== 7 || second.templates.length !== 7) {
     throw new Error("XSH application must compile exactly its seven worker templates");
@@ -82,11 +85,15 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!/desired\s+direct XSH exit status `3`/u.test(productSystem)) {
     throw new Error("Product must hand off the direct structured-error expectation");
   }
-  if (!productSystem.includes("ordinary expression\n`9223372036854775807 + 1`")) {
-    throw new Error("Product must reproduce the ordinary-expression integer-overflow defect");
+  if (!productSystem.includes("Investigate only a `par-map` worker index failure")) {
+    throw new Error("Product must reproduce the bounded par-map worker failure");
   }
-  if (!/put only `9223372036854775807 \+ 1` in the\s+sealed\s+stdin/u.test(productSystem)) {
-    throw new Error("Product's sealed reproducer must match its investigated expression");
+  if (
+    !/put only the supplied two-line `par-map` program\s+in the sealed stdin artifact/u.test(
+      productSystem,
+    )
+  ) {
+    throw new Error("Product's sealed reproducer must match the bounded par-map failure");
   }
   if (!productSystem.includes("Do not search the host or switch to another")) {
     throw new Error("Product must use its assigned checkout instead of discovering another one");
@@ -104,7 +111,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       "Product must require one contract-read entry for each repository path",
     );
   }
-  if (!productSystem.includes("Set `contract_owner` to exactly `docs/TEST-MAP.md`")) {
+  if (!/Set\s+`contract_owner`\s+to exactly `docs\/TEST-MAP\.md`/u.test(productSystem)) {
     throw new Error(
       "Product must name the exact contract-owner path required by the proposal validator",
     );

@@ -12,11 +12,12 @@ Before any other action, call `workspace_read` once for each exact required path
 
 Reading through `bash` does not satisfy this proof. Your job is to establish one bounded public
 behavior defect, not to construct its eventual regression test or diagnose its implementation.
-Investigate only signed integer arithmetic overflow. Use the ordinary expression
-`9223372036854775807 + 1`. The public contract requires a structured runtime failure with exit
-status 3; an unchecked host panic with exit status 101 is the defect to report. In one shell
-command, run that exact expression twice and write the fixed evidence files. Run no other
-exploration.
+Investigate only a `par-map` worker index failure. The supplied program maps `[1, 2, 3]` over the
+one-item list `["only"]`, so every worker must fail with `index-out-of-range`. The public contract
+requires `par-map` to stop with a structured terminal failure, preserving the worker's cause and
+item identity, with exit status 3. Current behavior writes debug-shaped `par-map error` text and
+exits 0; that is the defect to report. In one shell command, run that exact program twice and write
+the fixed evidence files. Run no other exploration.
 
 Your shell already starts in the assigned checkout. Do not search the host or switch to another
 checkout; the one allowed shell command runs at that starting location.
@@ -30,14 +31,16 @@ surrounding whitespace or newline:
 {"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
 ```
 
-Set `reproducer_profile` to exactly `reproducer`; put only `9223372036854775807 + 1` in the sealed
-stdin artifact. That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin` and expects
-the desired direct XSH exit status `3`. The expected observation is the exact replay expectation. Do
-not write an outer helper program, inspect process-status syntax, invoke `target/debug/xsh`, or
-design a regression test. Engineering owns that detail. Each `contract_reads` path must be unique
-and each reason at most 240 UTF-8 bytes. Set `contract_owner` to exactly `docs/TEST-MAP.md`; it must
-be one of the `contract_reads` paths, not a prose description. Submit only a complete proposal
-through `product_submit_ticket`, including an exact duplicate search.
+Set `reproducer_profile` to exactly `reproducer`; put only the supplied two-line `par-map` program
+in the sealed stdin artifact. That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin`
+and expects the desired direct XSH exit status `3`. The expected observation is the exact replay
+expectation: empty stdout and a structured `par-map` failure that names `index-out-of-range` and an
+item index. Do not write an outer helper program, inspect process-status syntax, invoke
+`target/debug/xsh`, or design a regression test. Engineering owns that detail. Each
+`contract_reads` path must be unique and each reason at most 240 UTF-8 bytes. Set `contract_owner`
+to exactly `docs/TEST-MAP.md`; it must be one of the `contract_reads` paths, not a prose
+description. Submit only a complete proposal through `product_submit_ticket`, including an exact
+duplicate search.
 
 There is one fixed evidence set: narrative, evidence, command, stdin, expected stdout, expected
 stderr, first stdout, first stderr, second stdout, and second stderr. After the one shell command
@@ -59,15 +62,15 @@ seal any file outside this ten-file set:
 set +e
 mkdir -p .product-evidence
 printf '%s' '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/command.json
-printf '9223372036854775807 + 1' > .product-evidence/stdin
+printf '%s\n' 'let xs = ["only"]' 'let values = [1, 2, 3] |> par-map --jobs=2 { |index| xs[index] }' > .product-evidence/stdin
 : > .product-evidence/expected.stdout
-printf 'integer overflow' > .product-evidence/expected.stderr
+printf 'stream stage `par-map` item 0 failed: index-out-of-range' > .product-evidence/expected.stderr
 cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/first.stdout 2> .product-evidence/first.stderr
 first_status=$?
 cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/second.stdout 2> .product-evidence/second.stderr
 second_status=$?
-printf '%s' 'Signed integer overflow must produce a structured runtime failure with exit status 3; direct execution of 9223372036854775807 + 1 currently panics with exit status 101.' > .product-evidence/narrative
-printf '%s' 'Both direct overflow reproducer runs exit 101 and expose the unchecked host panic instead of the expected structured XSH failure.' > .product-evidence/evidence
+printf '%s' 'A failing par-map worker must terminate XSH with exit status 3 and preserve the worker error kind and item identity as structured error context.' > .product-evidence/narrative
+printf '%s' 'Both direct par-map reproducer runs exit 0 while printing debug-shaped par-map errors, rather than reporting one structured terminal index-out-of-range failure with the failed item index.' > .product-evidence/evidence
 printf '%s %s\n' "$first_status" "$second_status"
 ```
 

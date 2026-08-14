@@ -154,11 +154,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This declaration is the explicit root for a freshly initialized Factory
-  // registry.  Once admitted, a policy change must instead pin this exact
-  // bundle as its predecessor so the kernel rejects an accidental lineage
-  // fork.
-  predecessor_bundle: null,
+  // This policy revision succeeds the fresh-registry root already admitted to
+  // the live registry. Pinning that exact bundle makes a policy change an
+  // append-only lineage step rather than an accidental application fork.
+  predecessor_bundle: "932106af6a4808cf4c2c26c9f2819bc0dfd6742635c73e0d3dc9149d374e6c4f",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
