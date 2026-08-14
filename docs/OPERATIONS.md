@@ -54,6 +54,42 @@ Every mutation uses a client command ID and observed aggregate revision.
 show` are the navigation surface. The Architect must supply sealed rationale
 artifacts for sponsorship and final candidate decisions.
 
+## One-commit paid cycle
+
+The exact request for a bounded paid run is encoded by `make paid-cycle`. It
+admits one provider-backed campaign with `--delivery-target 1`, after checking
+that the installed `factoryctl` exists, the operator socket is live, the
+product checkout is clean, and the application revision, budget, and deadline
+were supplied explicitly. The target does not make the two Architect decisions
+or bypass Product, Engineering, or Quality; those remain durable lifecycle
+gates in the daemon.
+
+Supply the values read from the live daemon/application status and choose a
+fresh client command ID:
+
+```sh
+FACTORY_PAID_CYCLE_SOCKET=/absolute/path/to/factoryd.operator.sock \
+FACTORY_PAID_CYCLE_APPLICATION_REVISION_ID=<active-application-revision-id> \
+FACTORY_PAID_CYCLE_EXPECTED_APPLICATION_REVISION=<application-revision> \
+FACTORY_PAID_CYCLE_BUDGET_MICRO_USD=<aggregate-budget> \
+FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS=<future-absolute-deadline> \
+FACTORY_PAID_CYCLE_CLIENT_COMMAND_ID=paid-cycle-<unique-id> \
+make paid-cycle
+```
+
+The terminal proof is separate and explicit. After the Architect delivers,
+run `make paid-cycle-verify` with `FACTORY_PAID_CYCLE_SOCKET` and
+`FACTORY_PAID_CYCLE_ID`; it requires a completed campaign with exactly one
+delivered attempt, a nonempty delivered commit, and a clean `../xsh` `HEAD`
+matching that commit. A successful campaign admission alone is not a shipped
+commit. `factoryctl campaign status --format json` and
+`factoryctl candidate show --format json` expose the exact
+`*_factory_cost_micro_usd` value paired with the delivered commit; human
+readable output also prints the equivalent six-decimal USD amount.
+The kernel also writes the same amount into the delivered commit's
+`Factory-Cost: $0.000000` trailer, and `make paid-cycle-verify` checks that
+commit-visible proof.
+
 ## Runtime hygiene
 
 Never delete a live runtime root, broad worktree tree, or CAS object tree.

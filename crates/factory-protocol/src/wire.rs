@@ -1068,6 +1068,9 @@ pub struct CampaignStatusResponse {
     pub candidate_commit: Option<String>,
     /// Most recent immutable delivery result in this campaign.
     pub delivered_commit: Option<String>,
+    /// Factory's final known aggregate spend for `delivered_commit`, in
+    /// micro-USD. The two fields are both absent until a delivery exists.
+    pub delivered_factory_cost_micro_usd: Option<u64>,
     pub delivered_attempt_count: u32,
     pub ready_ticket_count: u32,
     pub proposed_ticket_count: u32,
@@ -1271,6 +1274,15 @@ pub struct CandidateDecisionNavigationResponse {
     pub rationale: EvidenceArtifactResponse,
 }
 
+/// Immutable delivery identity and the final known Factory spend attached to
+/// the delivered product commit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryNavigationResponse {
+    pub delivery_id: i64,
+    pub resulting_commit: String,
+    pub factory_cost_micro_usd: u64,
+}
+
 /// Full bounded candidate evidence view.  Its candidate/review revision IDs
 /// are the values required to form a later final Architect decision; no
 /// hidden lookup or inferred current revision is needed.
@@ -1293,6 +1305,7 @@ pub struct CandidateShowResponse {
     pub review: Option<CandidateReviewNavigationResponse>,
     pub latest_architect_decision: Option<CandidateDecisionNavigationResponse>,
     pub delivery_receipt: Option<EvidenceArtifactResponse>,
+    pub delivery: Option<DeliveryNavigationResponse>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

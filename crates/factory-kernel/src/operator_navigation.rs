@@ -8,12 +8,13 @@
 use factory_protocol::{
     AuditEntryResponse, AuditShowResponse, CandidateDecisionNavigationResponse,
     CandidateReviewNavigationResponse, CandidateShowResponse,
-    CandidateValidationNavigationResponse, ContentDigest, ContractError, ErrorResponse,
-    EvidenceArtifactResponse, FrameError, OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT,
-    OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest,
-    OperatorCandidateShowRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V1, TicketAttemptNavigationResponse, TicketListItemResponse,
-    TicketListResponse, TicketShowResponse, decode_operation_request, decode_routing_envelope,
+    CandidateValidationNavigationResponse, ContentDigest, ContractError,
+    DeliveryNavigationResponse, ErrorResponse, EvidenceArtifactResponse, FrameError,
+    OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT, OP_OPERATOR_SHOW_CANDIDATE,
+    OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest, OperatorCandidateShowRequest,
+    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1,
+    TicketAttemptNavigationResponse, TicketListItemResponse, TicketListResponse,
+    TicketShowResponse, decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
 use sqlx::PgPool;
@@ -424,8 +425,10 @@ impl OperatorNavigationRpc {
         })
         .transpose()
         .map_err(NavigationRejection::Navigation)?;
-        let delivery_receipt = sqlx::query!(
-            "SELECT receipt.id AS receipt_artifact_id, receipt.digest AS receipt_digest,
+        let delivery = sqlx::query!(
+            "SELECT delivery.id AS delivery_id, delivery.resulting_commit,
+                    delivery.factory_cost_micro_usd,
+                    receipt.id AS receipt_artifact_id, receipt.digest AS receipt_digest,
                     receipt.byte_length AS receipt_byte_length
              FROM factory.deliveries AS delivery
              JOIN factory.artifacts AS receipt ON receipt.id = delivery.receipt_artifact_id
@@ -434,17 +437,33 @@ impl OperatorNavigationRpc {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(navigation_database)?
-        .map(|row| {
-            artifact(
-                "delivery_receipt",
-                row.receipt_artifact_id,
-                row.receipt_digest,
-                row.receipt_byte_length,
-            )
-        })
-        .transpose()
-        .map_err(NavigationRejection::Navigation)?;
+        .map_err(navigation_database)?;
+        let delivery_receipt = delivery
+            .as_ref()
+            .map(|row| {
+                artifact(
+                    "delivery_receipt",
+                    row.receipt_artifact_id,
+                    row.receipt_digest.clone(),
+                    row.receipt_byte_length,
+                )
+            })
+            .transpose()
+            .map_err(NavigationRejection::Navigation)?;
+        let delivery = delivery
+            .map(|row| {
+                Ok(DeliveryNavigationResponse {
+                    delivery_id: positive(row.delivery_id, "delivery ID")?,
+                    resulting_commit: row.resulting_commit,
+                    factory_cost_micro_usd: u64::try_from(row.factory_cost_micro_usd).map_err(
+                        |_| NavigationError::Corrupt {
+                            field: "delivery Factory-Cost",
+                        },
+                    )?,
+                })
+            })
+            .transpose()
+            .map_err(NavigationRejection::Navigation)?;
         Ok(json::to_string(&CandidateShowResponse {
             protocol_version: PROTOCOL_VERSION_V1,
             request_id: request.request_id,
@@ -488,6 +507,7 @@ impl OperatorNavigationRpc {
             review,
             latest_architect_decision: decision,
             delivery_receipt,
+            delivery,
         })
         .into_bytes())
     }

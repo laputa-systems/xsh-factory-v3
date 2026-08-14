@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO factory.deliveries (\n                 candidate_id, candidate_commit, expected_old_commit, resulting_commit,\n                 resulting_tree, method, lifecycle, recovery_status, receipt_artifact_id\n             ) VALUES ($1, $2, $3, $4, $5, 0, 1, 0, $6) RETURNING id",
+  "query": "INSERT INTO factory.deliveries (\n                 candidate_id, candidate_commit, expected_old_commit, resulting_commit,\n                 resulting_tree, factory_cost_micro_usd, method, lifecycle,\n                 recovery_status, receipt_artifact_id\n             ) VALUES ($1, $2, $3, $4, $5, $6, 0, 1, 0, $7) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,7 @@
         "Text",
         "Text",
         "Text",
+        "Int8",
         "Int8"
       ]
     },
@@ -29,5 +30,5 @@
       false
     ]
   },
-  "hash": "e9d6d36e2c5b1a31636b3589f9d88ea7162a04dac3c34ff327902f6f27fe3b73"
+  "hash": "021fa85cd7b8ddc9ed0c809d24493d59dfb07bd9a5caa0fa6872f614f3d2eac1"
 }

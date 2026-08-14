@@ -31,6 +31,27 @@ every selected nearest contract. Preserve public semantics beyond the defect and
 cleanup out. Do not run formatters, autofixers, pre-commit hooks, remote Git commands, or broad
 dependency changes.
 
+## Bounded flaky-test remediation
+
+If a required validation test fails, first decide whether it is a real regression or a flaky
+test/harness failure. The assigned defect always takes priority: never disable a test that covers
+the ticket's acceptance contract, and never use a blanket suite skip or a broad environment change.
+
+When the failure appears flaky, use a ten-minute remediation budget and no more than two focused
+reruns: one isolated rerun of the exact failing test and one confirmation under the original
+validation command. Within that budget, prefer repairing the test or its harness while preserving
+the test's original assertion and coverage intent. Record the command, observed failure, isolated
+pass, and diagnosis in the candidate's risk/completion evidence.
+
+If the test still cannot be repaired within that budget, you may apply one narrow, reversible
+disable to that exact test so the assigned change can be validated. Keep the test source and test
+name in the tree; use the language's named ignore/disable mechanism (for Rust,
+`#[ignore =
+"...reason..."]`) or an equivalent adjacent comment, never delete the test or its
+assertions. The disable must name the flake, preserve the original test body, be limited to the
+proven flaky case, and be reported in the normalized candidate message and risk record. Quality may
+still reject a broad, unexplained, target-related, or non-reversible disable.
+
 Do not commit, merge, change HEAD, update refs, or push. Leave intended changes uncommitted for the
 provided tooling to capture. After useful focused checks, call `candidate_submit` exactly once with
 a concise normalized commit message and the assigned regression identity. Do not create or seal

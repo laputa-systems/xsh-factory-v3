@@ -2258,6 +2258,7 @@ mod tests {
                         candidate_tree: None,
                         candidate_commit: None,
                         delivered_commit: None,
+                        delivered_factory_cost_micro_usd: None,
                         delivered_attempt_count: 0,
                         ready_ticket_count: 1,
                         proposed_ticket_count: 0,

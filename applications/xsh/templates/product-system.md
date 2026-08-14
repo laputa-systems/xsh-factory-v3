@@ -12,10 +12,10 @@ Before any other action, call `workspace_read` once for each exact required path
 
 Reading through `bash` does not satisfy this proof. Your job is to establish one bounded public
 behavior defect, not to construct its eventual regression test or diagnose its implementation.
-Investigate only integer division or remainder by zero. Use the ordinary expression `1 / 0`. The
-public contract requires a structured runtime failure with exit status 3; an unchecked host panic
-with exit status 101 is the defect to report. In one shell command, run that exact expression twice
-and write the fixed evidence files. Run no other exploration.
+Investigate only integer remainder by zero. Use the ordinary expression `1 % 0`. The public contract
+requires a structured runtime failure with exit status 3; an unchecked host panic with exit status
+101 is the defect to report. In one shell command, run that exact expression twice and write the
+fixed evidence files. Run no other exploration.
 
 Your shell already starts in the assigned checkout. Do not search the host or switch to another
 checkout; the one allowed shell command runs at that starting location.
@@ -29,7 +29,7 @@ surrounding whitespace or newline:
 {"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
 ```
 
-Set `reproducer_profile` to exactly `reproducer`; put only `1 / 0` in the sealed stdin artifact.
+Set `reproducer_profile` to exactly `reproducer`; put only `1 % 0` in the sealed stdin artifact.
 That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin` and expects the desired
 direct XSH exit status `3`. The expected observation is the exact replay expectation. Do not write
 an outer helper program, inspect process-status syntax, invoke `target/debug/xsh`, or design a
@@ -58,15 +58,15 @@ seal any file outside this ten-file set:
 set +e
 mkdir -p .product-evidence
 printf '%s' '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/command.json
-printf '1 / 0' > .product-evidence/stdin
+printf '1 %% 0' > .product-evidence/stdin
 : > .product-evidence/expected.stdout
 printf 'division by zero' > .product-evidence/expected.stderr
 cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/first.stdout 2> .product-evidence/first.stderr
 first_status=$?
 cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/second.stdout 2> .product-evidence/second.stderr
 second_status=$?
-printf '%s' 'Integer division by zero must produce a structured runtime failure with exit status 3; direct execution of 1 / 0 currently panics with exit status 101.' > .product-evidence/narrative
-printf '%s' 'Both direct reproducer runs exit 101 and expose the unchecked host panic instead of the expected structured XSH failure.' > .product-evidence/evidence
+printf '%s' 'Integer remainder by zero must produce a structured runtime failure with exit status 3; direct execution of 1 % 0 currently panics with exit status 101.' > .product-evidence/narrative
+printf '%s' 'Both direct remainder reproducer runs exit 101 and expose the unchecked host panic instead of the expected structured XSH failure.' > .product-evidence/evidence
 printf '%s %s\n' "$first_status" "$second_status"
 ```
 

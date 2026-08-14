@@ -872,6 +872,7 @@ fn campaign_status_response(
         candidate_tree: product_identity.candidate_tree,
         candidate_commit: product_identity.candidate_commit,
         delivered_commit: product_identity.delivered_commit,
+        delivered_factory_cost_micro_usd: product_identity.delivered_factory_cost_micro_usd,
         delivered_attempt_count: buffer.delivered_attempt_count,
         ready_ticket_count: buffer.ready_count,
         proposed_ticket_count: buffer.proposed_count,

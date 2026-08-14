@@ -36,6 +36,24 @@ required-read manifests, sealed artifacts, reproducer observations, regression
 and validation logs, candidate patches, reviews, and delivery receipts. A
 transcript is diagnostic provenance, not the only source of accepted facts.
 
+## Factory-Cost on delivered commits
+
+Every immutable local delivery stores
+`factory.deliveries.factory_cost_micro_usd` with the resulting XSH commit. This
+is the campaign's final known aggregate provider cost at the delivery
+transaction, expressed in micro-USD so the authority never relies on
+floating-point currency values. The same value is included in the sealed local
+delivery receipt, exposed by campaign status and candidate navigation, and
+written by the kernel into the delivered Git commit as a
+`Factory-Cost: $0.000000` trailer.
+
+The reviewed candidate commit remains immutable; delivery constructs the
+resulting one-parent product commit from the exact candidate tree and appends
+the final cost trailer before the guarded fast-forward. A delivery cannot
+proceed with unknown or exceeded campaign cost, so a delivered commit always
+has an exact Factory-Cost. Human-readable operator output formats `1,000,000`
+micro-USD as `$1.000000`.
+
 ## Worktree evidence
 
 An Engineering candidate is not accepted from a reported tree identity. The

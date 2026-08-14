@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use factory_protocol::{
@@ -403,6 +403,34 @@ pub struct CandidateCommit {
     base_commit: GitCommitId,
     candidate_tree: GitTreeId,
     ref_was_present: bool,
+}
+
+/// A delivery-only commit with the same candidate tree and base parent but a
+/// final Factory-Cost trailer. The candidate commit remains the reviewed
+/// artifact; this resulting commit is the exact product commit fast-forwarded
+/// into the checkout after total cost is known.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeliveryCommit {
+    commit: GitCommitId,
+    base_commit: GitCommitId,
+    candidate_tree: GitTreeId,
+}
+
+impl DeliveryCommit {
+    #[must_use]
+    pub fn commit(&self) -> &GitCommitId {
+        &self.commit
+    }
+
+    #[must_use]
+    pub fn base_commit(&self) -> &GitCommitId {
+        &self.base_commit
+    }
+
+    #[must_use]
+    pub fn candidate_tree(&self) -> &GitTreeId {
+        &self.candidate_tree
+    }
 }
 
 impl CandidateCommit {
@@ -1021,6 +1049,55 @@ impl GitCustody {
         })
     }
 
+    /// Constructs a delivery-only commit from the reviewed candidate tree,
+    /// appending the final known Factory-Cost trailer before the guarded local
+    /// fast-forward. The candidate ref and reviewed candidate commit remain
+    /// unchanged; the resulting product commit is the cost-visible commit.
+    pub fn guarded_local_fast_forward_with_factory_cost(
+        &self,
+        repository: &QualifiedRepository,
+        candidate: &CandidateCommit,
+        factory_cost_micro_usd: u64,
+    ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
+        if candidate.base_commit != repository.snapshot.base_commit {
+            return Err(GitCustodyError::DeliveryBaseMismatch);
+        }
+        self.assert_snapshot_current(repository)?;
+        self.assert_candidate(repository, candidate)?;
+        let delivery =
+            self.construct_delivery_commit(repository, candidate, factory_cost_micro_usd)?;
+        self.fast_forward_delivery_commit(repository, &delivery)
+    }
+
+    /// Recovers a completed cost-visible delivery after the Git fast-forward
+    /// but before the durable delivery row was recorded.
+    pub fn recover_completed_local_fast_forward_with_factory_cost(
+        &self,
+        repository: &QualifiedRepository,
+        expected_old_commit: GitCommitId,
+        candidate: &CandidateCommit,
+        factory_cost_micro_usd: u64,
+    ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
+        self.assert_candidate(repository, candidate)?;
+        if repository.snapshot.base_tree != candidate.candidate_tree
+            || repository.snapshot.base_commit == expected_old_commit
+        {
+            return Err(GitCustodyError::DeliveryPostconditionMismatch);
+        }
+        self.assert_delivery_commit(
+            repository,
+            &repository.snapshot.base_commit,
+            &expected_old_commit,
+            &candidate.candidate_tree,
+            factory_cost_micro_usd,
+        )?;
+        Ok(LocalDeliveryReceipt {
+            previous_commit: expected_old_commit,
+            delivered_commit: repository.snapshot.base_commit.clone(),
+            delivered_tree: repository.snapshot.base_tree.clone(),
+        })
+    }
+
     /// Recovers the physical half of a delivery interrupted after the local
     /// fast-forward but before its durable receipt was recorded. The current
     /// checkout must already be the exact persisted candidate commit/tree;
@@ -1105,13 +1182,13 @@ impl GitCustody {
     pub fn cleanup_worktree(&self, worktree: OwnedWorktree) -> Result<(), GitCustodyError> {
         self.assert_owned_worktree_path(&worktree.path)?;
         let path = worktree.path.to_str().ok_or(GitCustodyError::NonUtf8Path)?;
-        require_success(self.run(
+        let remove = self.run(
             "remove owned worktree",
             &worktree.repository_root,
             &["worktree", "remove", "--force", path],
             None,
             None,
-        )?)?;
+        )?;
         let registrations = require_success(self.run(
             "verify owned worktree cleanup",
             &worktree.repository_root,
@@ -1120,12 +1197,17 @@ impl GitCustody {
             None,
         )?)?;
         let expected = worktree.path.to_str().ok_or(GitCustodyError::NonUtf8Path)?;
-        if registrations
+        let still_registered = registrations
             .stdout
             .split(|byte| *byte == b'\n')
             .filter_map(|line| line.strip_prefix(b"worktree "))
-            .any(|registered| registered == expected.as_bytes())
-        {
+            .any(|registered| registered == expected.as_bytes());
+        if !remove.status.success() && still_registered {
+            return Err(GitCustodyError::GitCommandFailed {
+                operation: "Git plumbing command",
+            });
+        }
+        if still_registered {
             return Err(GitCustodyError::WorktreeCleanupIncomplete);
         }
         // Git unregisters the worktree but may leave ignored build output
@@ -1223,6 +1305,142 @@ impl GitCustody {
             return Err(GitCustodyError::CandidateRefDoesNotBindCommit);
         }
         Ok(())
+    }
+
+    fn construct_delivery_commit(
+        &self,
+        repository: &QualifiedRepository,
+        candidate: &CandidateCommit,
+        factory_cost_micro_usd: u64,
+    ) -> Result<DeliveryCommit, GitCustodyError> {
+        let candidate_message =
+            self.commit_message_for_commit(&repository.root, &candidate.commit)?;
+        if candidate_message.contains("\nFactory-Cost:") {
+            return Err(GitCustodyError::FactoryCostTrailerAlreadyPresent);
+        }
+        let message = append_factory_cost_trailer(&candidate_message, factory_cost_micro_usd);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| GitCustodyError::InvalidDeliveryTimestamp)?
+            .as_secs();
+        let environment = kernel_commit_environment(
+            i64::try_from(timestamp).map_err(|_| GitCustodyError::InvalidDeliveryTimestamp)?,
+        );
+        let output = require_success(self.run_with_environment(
+            "construct Factory-Cost delivery commit",
+            &repository.root,
+            &[
+                "commit-tree",
+                candidate.candidate_tree.as_str(),
+                "-p",
+                repository.snapshot.base_commit.as_str(),
+            ],
+            None,
+            Some(message.as_bytes()),
+            &environment,
+        )?)?;
+        let commit = GitCommitId::parse(single_line(
+            "constructed Factory-Cost delivery commit",
+            &output.stdout,
+        )?)?;
+        self.assert_delivery_commit(
+            repository,
+            &commit,
+            &repository.snapshot.base_commit,
+            &candidate.candidate_tree,
+            factory_cost_micro_usd,
+        )?;
+        Ok(DeliveryCommit {
+            commit,
+            base_commit: repository.snapshot.base_commit.clone(),
+            candidate_tree: candidate.candidate_tree.clone(),
+        })
+    }
+
+    fn fast_forward_delivery_commit(
+        &self,
+        repository: &QualifiedRepository,
+        delivery: &DeliveryCommit,
+    ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
+        let merge = self.run(
+            "guarded local Factory-Cost fast-forward",
+            &repository.root,
+            &[
+                "merge",
+                "--ff-only",
+                "--no-edit",
+                "--no-stat",
+                "--no-verify",
+                delivery.commit.as_str(),
+            ],
+            None,
+            None,
+        )?;
+        if !merge.status.success() {
+            return Err(GitCustodyError::LocalFastForwardFailed);
+        }
+        let delivered = self.qualify_repository(&repository.root, repository.branch.clone())?;
+        if delivered.snapshot.base_commit != delivery.commit
+            || delivered.snapshot.base_tree != delivery.candidate_tree
+        {
+            return Err(GitCustodyError::DeliveryPostconditionMismatch);
+        }
+        Ok(LocalDeliveryReceipt {
+            previous_commit: delivery.base_commit.clone(),
+            delivered_commit: delivered.snapshot.base_commit,
+            delivered_tree: delivered.snapshot.base_tree,
+        })
+    }
+
+    fn assert_delivery_commit(
+        &self,
+        repository: &QualifiedRepository,
+        commit: &GitCommitId,
+        expected_parent: &GitCommitId,
+        expected_tree: &GitTreeId,
+        factory_cost_micro_usd: u64,
+    ) -> Result<(), GitCustodyError> {
+        let parents = self.line(
+            "read Factory-Cost delivery commit parents",
+            &repository.root,
+            &["rev-list", "--parents", "-n", "1", commit.as_str()],
+        )?;
+        let fields: Vec<_> = parents.split_ascii_whitespace().collect();
+        if fields.len() != 2
+            || fields[0] != commit.as_str()
+            || fields[1] != expected_parent.as_str()
+        {
+            return Err(GitCustodyError::CandidateIsNotExactOneParent);
+        }
+        if self.tree_for_commit(&repository.root, commit)? != *expected_tree {
+            return Err(GitCustodyError::CandidateCommitTreeMismatch {
+                expected: expected_tree.to_string(),
+                observed: self.tree_for_commit(&repository.root, commit)?.to_string(),
+            });
+        }
+        let message = self.commit_message_for_commit(&repository.root, commit)?;
+        let trailer = factory_cost_trailer(factory_cost_micro_usd);
+        if !message.lines().any(|line| line == trailer) {
+            return Err(GitCustodyError::FactoryCostTrailerMissing);
+        }
+        Ok(())
+    }
+
+    fn commit_message_for_commit(
+        &self,
+        root: &Path,
+        commit: &GitCommitId,
+    ) -> Result<String, GitCustodyError> {
+        let output = require_success(self.run(
+            "read commit message",
+            root,
+            &["show", "-s", "--format=%B", commit.as_str()],
+            None,
+            None,
+        )?)?;
+        String::from_utf8(output.stdout).map_err(|_| GitCustodyError::NonUtf8GitOutput {
+            operation: "read commit message",
+        })
     }
 
     fn bind_candidate_ref(
@@ -1977,15 +2195,49 @@ fn normalize_newlines(value: &str) -> String {
 }
 
 fn commit_environment(request: &ConstructCandidateCommit) -> Vec<(&'static str, String)> {
-    let timestamp = format!("{} +0000", request.timestamp_unix_seconds);
+    kernel_commit_environment_with_identity(
+        request.timestamp_unix_seconds,
+        &request.author,
+        &request.committer,
+    )
+}
+
+fn kernel_commit_environment(timestamp_unix_seconds: i64) -> Vec<(&'static str, String)> {
+    let identity = GitIdentity::new("Factory Kernel", "factory-kernel@local")
+        .expect("kernel delivery identity is valid");
+    kernel_commit_environment_with_identity(timestamp_unix_seconds, &identity, &identity)
+}
+
+fn kernel_commit_environment_with_identity(
+    timestamp_unix_seconds: i64,
+    author: &GitIdentity,
+    committer: &GitIdentity,
+) -> Vec<(&'static str, String)> {
+    let timestamp = format!("{} +0000", timestamp_unix_seconds);
     vec![
-        ("GIT_AUTHOR_NAME", request.author.name.clone()),
-        ("GIT_AUTHOR_EMAIL", request.author.email.clone()),
+        ("GIT_AUTHOR_NAME", author.name.clone()),
+        ("GIT_AUTHOR_EMAIL", author.email.clone()),
         ("GIT_AUTHOR_DATE", timestamp.clone()),
-        ("GIT_COMMITTER_NAME", request.committer.name.clone()),
-        ("GIT_COMMITTER_EMAIL", request.committer.email.clone()),
+        ("GIT_COMMITTER_NAME", committer.name.clone()),
+        ("GIT_COMMITTER_EMAIL", committer.email.clone()),
         ("GIT_COMMITTER_DATE", timestamp),
     ]
+}
+
+fn factory_cost_trailer(factory_cost_micro_usd: u64) -> String {
+    format!(
+        "Factory-Cost: ${}.{:06}",
+        factory_cost_micro_usd / 1_000_000,
+        factory_cost_micro_usd % 1_000_000
+    )
+}
+
+fn append_factory_cost_trailer(message: &str, factory_cost_micro_usd: u64) -> String {
+    format!(
+        "{}\n{}\n",
+        message.trim_end_matches('\n'),
+        factory_cost_trailer(factory_cost_micro_usd)
+    )
 }
 
 fn commit_message(repository: &QualifiedRepository, request: &ConstructCandidateCommit) -> String {
@@ -2027,6 +2279,12 @@ pub enum GitCustodyError {
     InvalidIdentity,
     #[error("commit message is invalid")]
     InvalidCommitMessage,
+    #[error("Factory-Cost trailer is already present")]
+    FactoryCostTrailerAlreadyPresent,
+    #[error("Factory-Cost trailer is missing or malformed")]
+    FactoryCostTrailerMissing,
+    #[error("delivery commit timestamp is invalid")]
+    InvalidDeliveryTimestamp,
     #[error("{field} is not a regular file at {path:?}")]
     NotRegularFile { field: &'static str, path: PathBuf },
     #[error("{field} is not a directory at {path:?}")]

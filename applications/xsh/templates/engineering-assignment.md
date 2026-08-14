@@ -11,6 +11,13 @@ normalized commit message and regression test identity; the provided tooling der
 patch, completion record, and risks record from controller-owned evidence. Do not commit, change
 HEAD, run a formatter/autofixer, invoke pre-commit, or contact a Git remote.
 
+If validation exposes a flaky test unrelated to the assigned contract, follow the bounded flaky-test
+policy in the Engineering system instructions: spend at most ten minutes and two focused reruns
+trying to repair it, then use one narrow reversible named disable only if the test passes in
+isolation. Never delete the test or its assertions. Include the failing command, isolated pass,
+timebox, diagnosis, and any disable rationale in the candidate evidence and normalized commit
+message. A target-related or unexplained disable is not permitted.
+
 For `candidate_checkpoint_regression`, use these exact fixed values:
 
 - `regression_command`: `${REGRESSION_COMMAND}`

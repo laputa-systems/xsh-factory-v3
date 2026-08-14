@@ -319,11 +319,19 @@ impl CampaignDriver {
                 Ok(CampaignDriverOutcome::HardValidationResumed)
             }
             DownstreamActionStage::CandidateCommitAttachRequired => {
-                self.resolver
-                    .resume_candidate_commit_attach(context)
-                    .await
-                    .map_err(CampaignDriverError::Durable)?;
-                Ok(CampaignDriverOutcome::CandidateCommitAttached)
+                match self.resolver.resume_candidate_commit_attach(context).await {
+                    Ok(_) => Ok(CampaignDriverOutcome::CandidateCommitAttached),
+                    Err(error) => {
+                        let reason = failure_reason("candidate-commit-attach", &error);
+                        self.fail_ticket_attempt(context.ticket_attempt_id, &reason)
+                            .await?;
+                        Ok(CampaignDriverOutcome::TicketAttemptFailed {
+                            campaign_id,
+                            ticket_attempt_id: context.ticket_attempt_id,
+                            failure_detail: reason,
+                        })
+                    }
+                }
             }
             DownstreamActionStage::Quality
             | DownstreamActionStage::QualityReviewRequired
@@ -433,6 +441,21 @@ impl CampaignDriver {
                 if assignment.session.terminal.session_state
                     == factory_protocol::SessionState::Succeeded =>
             {
+                if matches!(target, DurableAssignmentTarget::Product) {
+                    let buffer = self
+                        .store
+                        .ticket_store()
+                        .ticket_buffer_status(campaign_id)
+                        .await?;
+                    if !Self::product_assignment_made_progress(&buffer) {
+                        let reason = "product assignment completed without a ticket proposal";
+                        self.fail_running_campaign(campaign_id, reason).await?;
+                        return Ok(CampaignDriverOutcome::CampaignFailed {
+                            campaign_id,
+                            failure_detail: reason.to_owned(),
+                        });
+                    }
+                }
                 Ok(CampaignDriverOutcome::Assignment(assignment))
             }
             Ok(_) => {
@@ -447,6 +470,17 @@ impl CampaignDriver {
                     .await
             }
         }
+    }
+
+    /// A successful Product session must either create a proposal or leave
+    /// already-admitted work for the scheduler to advance. An empty Product
+    /// completion is terminal for this bounded delivery campaign; treating it
+    /// as replenishable work would spend indefinitely on an unchanged request.
+    fn product_assignment_made_progress(buffer: &crate::ticket_store::TicketBufferStatus) -> bool {
+        buffer.proposed_count > 0
+            || buffer.ready_count > 0
+            || buffer.in_flight_count > 0
+            || buffer.downstream_action.is_some()
     }
 
     async fn terminalize_failed_launch(

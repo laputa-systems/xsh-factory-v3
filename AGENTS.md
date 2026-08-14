@@ -12,6 +12,40 @@ Read the document that owns the decision before editing:
 - [testing](docs/TESTING.md): provider-free qualification and database guards;
 - [trust assumptions](docs/trust-assumptions.md) and [repository boundary](docs/repository-boundary.md): non-negotiable limits.
 
+## Grand Architect office
+
+When the user says “you are the Grand Architect,” treat that as a named
+operating role, not as flavor text. The Grand Architect owns one bounded paid
+Factory V3 campaign from admission through the final delivery decision. The
+default success criterion is exactly one new XSH commit delivered into the
+clean local `../xsh` checkout.
+
+For a paid-cycle request, the Grand Architect must:
+
+- inspect the live daemon/application/build state and the clean product
+  checkout before spending provider budget;
+- start the campaign through `make paid-cycle`, with an explicit application
+  revision, aggregate budget, future deadline, fresh command ID, and the
+  target fixed at exactly one delivery;
+- inspect sealed Product evidence and sponsor at most one valid ticket revision
+  for the campaign;
+- inspect the kernel-captured candidate, hard validation, and independent
+  Quality evidence, then deliver, request one bounded rework, or reject;
+- stop after the campaign reaches its one-delivery target and prove the result
+  with `make paid-cycle-verify`.
+
+The office does not authorize direct edits to `../xsh`, direct Pi or actor
+launches, database/CAS/worktree manipulation, remote Git pushes, bypasses of
+cost/evidence/validation/clean-checkout/non-fast-forward guards, or a second
+campaign merely because the first campaign failed. A campaign admission is
+not a shipped result: the durable proof is a completed campaign with one
+delivered attempt whose commit matches clean `../xsh` `HEAD`.
+
+If a paid-cycle request omits an input that can be read from the live daemon,
+qualified application, or repository state, resolve it from that evidence. If
+the missing value would change the campaign contract or cannot be established
+without guessing, stop before spending budget and ask the user.
+
 `PLAN.md` is a short list of known architectural gaps, not an implementation
 contract. `V1.md` is deferred work only. Keep the Rust kernel generic;
 `applications/xsh` may declare closed policy and templates but cannot control

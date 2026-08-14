@@ -404,7 +404,8 @@ impl DurableAuthorityResolver {
             "SELECT c.ticket_attempt_id, c.base_commit, c.candidate_tree, c.candidate_commit,
                     c.revision AS candidate_revision, ta.revision AS attempt_revision,
                     tr.revision AS ticket_revision, tr.ticket_id, tr.application_revision_id,
-                    camp.revision AS campaign_revision, kb.build_digest
+                    camp.revision AS campaign_revision, camp.cost_state,
+                    camp.measured_cost_micro_usd, kb.build_digest
                FROM factory.candidates c
                JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
@@ -436,6 +437,12 @@ impl DurableAuthorityResolver {
             .map_err(|error| format!("stored candidate base object is invalid: {error}"))?;
         let expected_old_commit = GitCommitId::parse(row.base_commit)
             .map_err(|error| format!("stored candidate base commit is invalid: {error}"))?;
+        let factory_cost_micro_usd = if row.cost_state == 0 {
+            u64::try_from(row.measured_cost_micro_usd)
+                .map_err(|_| "stored campaign Factory-Cost is invalid".to_owned())?
+        } else {
+            return Err("campaign Factory-Cost is not known".to_owned());
+        };
         let delivery = if repository.snapshot().base_commit() == &candidate_commit
             && repository.snapshot().base_tree() == &candidate_tree
         {
@@ -443,11 +450,33 @@ impl DurableAuthorityResolver {
                 .recover_completed_local_fast_forward(
                     &repository,
                     expected_old_commit,
-                    candidate_ref,
+                    candidate_ref.clone(),
                     candidate_commit,
                     candidate_tree,
                 )
                 .map_err(|error| format!("completed local delivery cannot be recovered: {error}"))?
+        } else if repository.snapshot().base_tree() == &candidate_tree
+            && repository.snapshot().base_commit() != &expected_old_commit
+        {
+            let recovered = self
+                .git
+                .recover_candidate_commit(
+                    &repository,
+                    candidate_ref.clone(),
+                    candidate_commit,
+                    candidate_tree,
+                )
+                .map_err(|error| format!("stored candidate commit cannot be recovered: {error}"))?;
+            self.git
+                .recover_completed_local_fast_forward_with_factory_cost(
+                    &repository,
+                    expected_old_commit,
+                    &recovered,
+                    factory_cost_micro_usd,
+                )
+                .map_err(|error| {
+                    format!("completed cost-visible delivery cannot be recovered: {error}")
+                })?
         } else {
             let recovered = self
                 .git
@@ -459,7 +488,11 @@ impl DurableAuthorityResolver {
                 )
                 .map_err(|error| format!("stored candidate commit cannot be delivered: {error}"))?;
             self.git
-                .guarded_local_fast_forward(&repository, &recovered)
+                .guarded_local_fast_forward_with_factory_cost(
+                    &repository,
+                    &recovered,
+                    factory_cost_micro_usd,
+                )
                 .map_err(|error| format!("guarded local delivery failed: {error}"))?
         };
         let kernel_build_id = kernel_build_id_bytes(row.build_digest, "build digest")?;
@@ -468,6 +501,7 @@ impl DurableAuthorityResolver {
             &delivery.previous_commit,
             &delivery.delivered_commit,
             &delivery.delivered_tree,
+            factory_cost_micro_usd,
         );
         let (seal, receipt) = self
             .store
@@ -510,6 +544,7 @@ impl DurableAuthorityResolver {
                 .map_err(|error| error.to_string())?,
                 resulting_tree: RepositoryObjectIdV1::parse(delivery.delivered_tree.to_string())
                     .map_err(|error| error.to_string())?,
+                factory_cost_micro_usd,
                 receipt: SealedArtifactReferenceV1 {
                     artifact_id: receipt.artifact_id,
                     digest: seal.digest(),
@@ -2148,6 +2183,7 @@ struct LocalDeliveryReceiptBytes<'a> {
     expected_old_commit: &'a str,
     resulting_commit: &'a str,
     resulting_tree: &'a str,
+    factory_cost_micro_usd: u64,
     method: &'static str,
 }
 
@@ -2156,12 +2192,14 @@ fn local_delivery_receipt_bytes(
     expected_old_commit: &GitCommitId,
     resulting_commit: &GitCommitId,
     resulting_tree: &GitTreeId,
+    factory_cost_micro_usd: u64,
 ) -> Vec<u8> {
     json::to_string(&LocalDeliveryReceiptBytes {
         candidate_id: candidate_id.get(),
         expected_old_commit: expected_old_commit.as_str(),
         resulting_commit: resulting_commit.as_str(),
         resulting_tree: resulting_tree.as_str(),
+        factory_cost_micro_usd,
         method: "guarded-local-fast-forward-v1",
     })
     .into_bytes()

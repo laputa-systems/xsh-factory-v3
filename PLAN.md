@@ -30,11 +30,15 @@ work.
    bundle lineage are correct but manually copied today. The compiler should
    derive and verify them from one declared source of truth so a harmless
    prompt edit does not require hand-editing opaque digests.
-6. **First accepted delivery.** The generic provider-free vertical is complete,
-   but the paid XSH Product → Engineering → Quality → Architect delivery path
-   has not yet produced its first durable XSH commit. Complete it only through
-   the controller, preserve the failed-session evidence, and use its measured
-   failures to close the gaps above.
+6. **Factory self-improvement lane.** Add a generic, non-product
+   `factory-engineer` assignment path that targets this repository's kernel,
+   SDK, host, daemon, migrations, and operational tooling without receiving
+   authority over `../xsh`. It needs its own repository binding, application
+   policy/templates, reproducible validation profile, budget accounting,
+   Architect gates, and local delivery target. The lane should be able to
+   address scheduler throughput, operator-socket reliability, worktree
+   cleanup, and terminal-cost recovery as durable Factory changes while
+   remaining separate from XSH Product → Engineering → Quality work.
 
 Deferred scope such as self-upgrade, concurrent campaigns, remote workers, and
 stronger sandboxing remains in `V1.md` and is not implicitly approved.

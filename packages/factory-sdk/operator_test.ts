@@ -60,6 +60,7 @@ class OperatorTransport implements FrameTransport {
             candidate_tree: "c".repeat(40),
             candidate_commit: null,
             delivered_commit: null,
+            delivered_factory_cost_micro_usd: null,
             delivered_attempt_count: 0,
             ready_ticket_count: 0,
             proposed_ticket_count: 0,
@@ -139,6 +140,7 @@ class OperatorTransport implements FrameTransport {
             review: null,
             latest_architect_decision: null,
             delivery_receipt: null,
+            delivery: null,
           };
         case OPERATION.operatorAuditShow:
           return { ...envelope, selector: request.selector, items: [] };

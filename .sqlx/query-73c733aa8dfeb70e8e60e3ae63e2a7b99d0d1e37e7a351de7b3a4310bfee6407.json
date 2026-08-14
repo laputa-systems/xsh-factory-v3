@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT candidate_id, factory_cost_micro_usd\n           FROM factory.deliveries WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.deliveries",
+            "name": "candidate_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "factory_cost_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.deliveries",
+            "name": "factory_cost_micro_usd"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "73c733aa8dfeb70e8e60e3ae63e2a7b99d0d1e37e7a351de7b3a4310bfee6407"
+}

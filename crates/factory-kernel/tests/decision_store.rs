@@ -607,6 +607,7 @@ impl Fixture {
             expected_old_commit: object('a'),
             resulting_commit: object('d'),
             resulting_tree: object('c'),
+            factory_cost_micro_usd: self.provider_cost_spent,
             receipt: self.common.reference(),
         };
         let receipt = self
@@ -616,6 +617,7 @@ impl Fixture {
             .await
             .expect("accepted candidate is deliverable only after all terminal evidence");
         assert!(receipt.campaign_completed);
+        assert_eq!(receipt.factory_cost_micro_usd, self.provider_cost_spent);
         assert_eq!(
             receipt.resulting_ticket_revision,
             self.ticket_revision.next().unwrap()

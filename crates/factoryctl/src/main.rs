@@ -503,7 +503,7 @@ fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
 fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
     if json {
         println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"failure_reason\":{},\"base_commit\":{},\"candidate_tree\":{},\"candidate_commit\":{},\"delivered_commit\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"downstream_evidence\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{},\"session_cost_aggregates\":{}}}",
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"campaign_id\":{},\"state\":\"{}\",\"aggregate_revision\":{},\"kernel_build_id\":\"{}\",\"application_revision_id\":{},\"repository_id\":{},\"aggregate_budget_micro_usd\":{},\"measured_cost_state\":\"{}\",\"measured_cost_micro_usd\":{},\"remaining_budget_micro_usd\":{},\"deadline_unix_millis\":{},\"delivery_target\":{},\"failure_reason\":{},\"base_commit\":{},\"candidate_tree\":{},\"candidate_commit\":{},\"delivered_commit\":{},\"delivered_factory_cost_micro_usd\":{},\"delivered_attempt_count\":{},\"ready_ticket_count\":{},\"proposed_ticket_count\":{},\"in_flight_ticket_count\":{},\"downstream_ticket_attempt_count\":{},\"downstream_action_stage\":{},\"downstream_ticket_attempt_id\":{},\"downstream_ticket_attempt_revision\":{},\"downstream_candidate_id\":{},\"downstream_candidate_revision\":{},\"downstream_evidence\":{},\"ready_low_water\":{},\"ready_target\":{},\"ready_maximum\":{},\"proposal_maximum\":{},\"oldest_sponsored_ticket_revision_id\":{},\"oldest_sponsored_ticket_revision\":{},\"scheduler_next_action\":\"{}\",\"scheduler_constraint\":{},\"session_costs\":{},\"session_cost_aggregates\":{}}}",
             status.protocol_version,
             status.request_id,
             status.operation,
@@ -524,6 +524,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             optional_json_string(status.candidate_tree.as_deref()),
             optional_json_string(status.candidate_commit.as_deref()),
             optional_json_string(status.delivered_commit.as_deref()),
+            optional_u64(status.delivered_factory_cost_micro_usd),
             status.delivered_attempt_count,
             status.ready_ticket_count,
             status.proposed_ticket_count,
@@ -657,11 +658,16 @@ fn product_identities_text(status: &CampaignStatusResponse) -> String {
         return String::new();
     }
     format!(
-        "\n  git: base {}; candidate tree {}; candidate commit {}; delivered commit {}",
+        "\n  git: base {}; candidate tree {}; candidate commit {}; delivered commit {}{}",
         status.base_commit.as_deref().unwrap_or("none"),
         status.candidate_tree.as_deref().unwrap_or("none"),
         status.candidate_commit.as_deref().unwrap_or("none"),
         status.delivered_commit.as_deref().unwrap_or("none"),
+        status
+            .delivered_factory_cost_micro_usd
+            .map_or_else(String::new, |cost| {
+                format!("; Factory-Cost {}", format_micro_usd(cost))
+            }),
     )
 }
 
@@ -978,7 +984,7 @@ fn print_ticket_show(response: &TicketShowResponse, json: bool) {
 fn print_candidate_show(response: &CandidateShowResponse, json: bool) {
     if json {
         println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"candidate_id\":{},\"candidate_revision\":{},\"state\":\"{}\",\"ticket_attempt_id\":{},\"ticket_revision_id\":{},\"ticket_revision\":{},\"base_commit\":\"{}\",\"candidate_tree\":\"{}\",\"candidate_commit\":{},\"evidence_count\":{},\"validation_count\":{},\"review_id\":{},\"architect_decision_id\":{}}}",
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"candidate_id\":{},\"candidate_revision\":{},\"state\":\"{}\",\"ticket_attempt_id\":{},\"ticket_revision_id\":{},\"ticket_revision\":{},\"base_commit\":\"{}\",\"candidate_tree\":\"{}\",\"candidate_commit\":{},\"evidence_count\":{},\"validation_count\":{},\"review_id\":{},\"architect_decision_id\":{},\"delivery_factory_cost_micro_usd\":{}}}",
             response.protocol_version,
             response.request_id,
             response.operation,
@@ -999,11 +1005,17 @@ fn print_candidate_show(response: &CandidateShowResponse, json: bool) {
                     .latest_architect_decision
                     .as_ref()
                     .map(|decision| decision.architect_decision_id)
-            )
+            ),
+            optional_u64(
+                response
+                    .delivery
+                    .as_ref()
+                    .map(|delivery| delivery.factory_cost_micro_usd)
+            ),
         );
     } else {
         println!(
-            "candidate #{} (revision {}): {}\n  ticket attempt: {}; ticket revision: {} (revision {})\n  base: {}; candidate tree: {}\n  evidence: {}; validations: {}{}{}",
+            "candidate #{} (revision {}): {}\n  ticket attempt: {}; ticket revision: {} (revision {})\n  base: {}; candidate tree: {}\n  evidence: {}; validations: {}{}{}{}",
             response.candidate_id,
             response.candidate_revision,
             response.state,
@@ -1029,6 +1041,17 @@ fn print_candidate_show(response: &CandidateShowResponse, json: bool) {
                     "\n  latest architect decision #{} ({})",
                     decision.architect_decision_id, decision.decision_kind
                 ))
+                .unwrap_or_default(),
+            response
+                .delivery
+                .as_ref()
+                .map(|delivery| {
+                    format!(
+                        "\n  delivered commit: {}; Factory-Cost {}",
+                        delivery.resulting_commit,
+                        format_micro_usd(delivery.factory_cost_micro_usd)
+                    )
+                })
                 .unwrap_or_default()
         );
     }
@@ -1198,6 +1221,10 @@ fn print_forum_receipt(receipt: &OperationReceiptResponse, json: bool) {
 
 fn optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn format_micro_usd(value: u64) -> String {
+    format!("${}.{:06}", value / 1_000_000, value % 1_000_000)
 }
 
 fn optional_i64(value: Option<i64>) -> String {

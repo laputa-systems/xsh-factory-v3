@@ -79,10 +79,10 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!/desired\s+direct XSH exit status `3`/u.test(productSystem)) {
     throw new Error("Product must hand off the direct structured-error expectation");
   }
-  if (!productSystem.includes("ordinary expression `1 / 0`")) {
-    throw new Error("Product must reproduce the ordinary-expression divide-by-zero defect");
+  if (!productSystem.includes("ordinary expression `1 % 0`")) {
+    throw new Error("Product must reproduce the ordinary-expression remainder-by-zero defect");
   }
-  if (!productSystem.includes("put only `1 / 0` in the sealed stdin")) {
+  if (!productSystem.includes("put only `1 % 0` in the sealed stdin")) {
     throw new Error("Product's sealed reproducer must match its investigated expression");
   }
   if (!productSystem.includes("Do not search the host or switch to another")) {
@@ -152,6 +152,18 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   }
   if (!/Do not create or seal\s+implementation-report or risk files/u.test(engineeringSystem)) {
     throw new Error("Engineering must leave completion evidence capture to the controller");
+  }
+  for (
+    const [label, requirement] of [
+      ["ten-minute remediation budget", /ten-minute remediation budget/u],
+      ["two focused reruns", /no more than two focused\s+reruns/u],
+      ["preserved test assertions", /never delete the test or its\s+assertions/u],
+      ["Rust named ignore", /#\[ignore =/u],
+    ] as const
+  ) {
+    if (!requirement.test(engineeringSystem)) {
+      throw new Error(`Engineering must include bounded flaky-test policy: ${label}`);
+    }
   }
   const engineeringProfile = xshApplicationV1.office_profiles.find((profile) =>
     profile.office === "engineering"

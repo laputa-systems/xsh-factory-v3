@@ -20,13 +20,18 @@
 6. Engineering submits its candidate using only a normalized commit message
    and checkpoint identity. The kernel captures the final tree, changed paths,
    binary patch, completion record, and risk record; runs the reproducer and
-   full suite on a pristine materialization; and records the result. A passing
-   candidate is not yet delivered.
+   full suite on a pristine materialization; and records the result. If an
+   unrelated validation test is proven flaky, Engineering has a ten-minute,
+   two-rerun remediation budget; a narrowly named reversible disable may be
+   used only after an isolated pass, with the original test body retained and
+   the rationale recorded. This is a candidate change, not a validation
+   waiver. A passing candidate is not yet delivered.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery
-   constructs provenance-bearing local Git history and guardedly
-   fast-forwards `../xsh`; it never pushes.
+   constructs provenance-bearing local Git history, appends the final known
+   Factory-Cost trailer to the resulting commit, and guardedly fast-forwards
+   `../xsh`; it never pushes.
 
 ## What an actor cannot decide
 

@@ -64,6 +64,9 @@ const OFFICE_ENGINEERING: i16 = 1;
 const OFFICE_QUALITY: i16 = 2;
 const CAMPAIGN_RUNNING: i16 = 0;
 const CAMPAIGN_COMPLETED: i16 = 1;
+const COST_KNOWN: i16 = 0;
+const COST_UNKNOWN: i16 = 1;
+const COST_EXCEEDED: i16 = 2;
 
 const REQUALIFICATION_REPRODUCED: i16 = 0;
 const REQUALIFICATION_RESOLVED: i16 = 1;
@@ -326,6 +329,7 @@ pub struct RecordDelivery {
     pub expected_old_commit: RepositoryObjectIdV1,
     pub resulting_commit: RepositoryObjectIdV1,
     pub resulting_tree: RepositoryObjectIdV1,
+    pub factory_cost_micro_usd: u64,
     pub receipt: SealedArtifactReferenceV1,
 }
 
@@ -333,6 +337,7 @@ pub struct RecordDelivery {
 pub struct DeliveryReceipt {
     pub delivery_id: factory_protocol::DeliveryId,
     pub candidate_id: CandidateId,
+    pub factory_cost_micro_usd: u64,
     pub resulting_candidate_revision: AggregateRevision,
     pub resulting_attempt_revision: AggregateRevision,
     pub resulting_ticket_revision: AggregateRevision,
@@ -1343,6 +1348,7 @@ impl DecisionStore {
             return Ok(DeliveryReceipt {
                 delivery_id: factory_protocol::DeliveryId::new(receipt.subject_id)?,
                 candidate_id: candidate.id,
+                factory_cost_micro_usd: delivery.factory_cost_micro_usd,
                 resulting_candidate_revision: candidate.revision,
                 resulting_attempt_revision: attempt.attempt_revision,
                 resulting_ticket_revision: attempt.ticket_revision,
@@ -1387,6 +1393,12 @@ impl DecisionStore {
         if campaign.lifecycle != CAMPAIGN_RUNNING {
             return Err(DecisionStoreError::CampaignNotRunning);
         }
+        if campaign.cost_state != COST_KNOWN {
+            return Err(DecisionStoreError::CampaignCostNotKnown);
+        }
+        if command.factory_cost_micro_usd != campaign.factory_cost_micro_usd {
+            return Err(DecisionStoreError::DeliveryFactoryCostMismatch);
+        }
         if paid_session_active(&mut tx).await? {
             return Err(DecisionStoreError::PaidSessionStillRunning);
         }
@@ -1406,13 +1418,16 @@ impl DecisionStore {
         let row = sqlx::query!(
             "INSERT INTO factory.deliveries (
                  candidate_id, candidate_commit, expected_old_commit, resulting_commit,
-                 resulting_tree, method, lifecycle, recovery_status, receipt_artifact_id
-             ) VALUES ($1, $2, $3, $4, $5, 0, 1, 0, $6) RETURNING id",
+                 resulting_tree, factory_cost_micro_usd, method, lifecycle,
+                 recovery_status, receipt_artifact_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, 0, 1, 0, $7) RETURNING id",
             command.candidate_id.get(),
             candidate_commit,
             command.expected_old_commit.as_str(),
             command.resulting_commit.as_str(),
             command.resulting_tree.as_str(),
+            i64::try_from(command.factory_cost_micro_usd)
+                .map_err(|_| DecisionStoreError::IntegerOutOfRange)?,
             command.receipt.artifact_id.get(),
         )
         .fetch_one(&mut *tx)
@@ -1460,6 +1475,7 @@ impl DecisionStore {
         Ok(DeliveryReceipt {
             delivery_id,
             candidate_id: command.candidate_id,
+            factory_cost_micro_usd: command.factory_cost_micro_usd,
             resulting_candidate_revision: next_candidate,
             resulting_attempt_revision: next_attempt,
             resulting_ticket_revision: next_ticket,
@@ -1557,6 +1573,10 @@ pub enum DecisionStoreError {
     ArchitectDeliveryDecisionMissing,
     #[error("campaign is no longer running")]
     CampaignNotRunning,
+    #[error("campaign Factory-Cost is not known")]
+    CampaignCostNotKnown,
+    #[error("delivery Factory-Cost does not match the campaign aggregate")]
+    DeliveryFactoryCostMismatch,
     #[error("a paid session is still running")]
     PaidSessionStillRunning,
     #[error("a stored closed-state value is corrupt")]
@@ -1632,6 +1652,7 @@ struct DecisionRow {
 #[derive(Clone, Debug)]
 struct DeliveryRow {
     candidate_id: CandidateId,
+    factory_cost_micro_usd: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -1639,6 +1660,8 @@ struct CampaignRow {
     lifecycle: i16,
     revision: AggregateRevision,
     delivery_target: i32,
+    cost_state: i16,
+    factory_cost_micro_usd: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1950,7 +1973,8 @@ async fn load_delivery(
     delivery_id: i64,
 ) -> Result<DeliveryRow, DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT candidate_id FROM factory.deliveries WHERE id = $1",
+        "SELECT candidate_id, factory_cost_micro_usd
+           FROM factory.deliveries WHERE id = $1",
         delivery_id,
     )
     .fetch_optional(&mut **tx)
@@ -1958,6 +1982,8 @@ async fn load_delivery(
     .ok_or(DecisionStoreError::CorruptState)?;
     Ok(DeliveryRow {
         candidate_id: CandidateId::new(row.candidate_id)?,
+        factory_cost_micro_usd: u64::try_from(row.factory_cost_micro_usd)
+            .map_err(|_| DecisionStoreError::IntegerOutOfRange)?,
     })
 }
 
@@ -1966,13 +1992,21 @@ async fn lock_campaign(
     campaign_id: factory_protocol::CampaignId,
 ) -> Result<CampaignRow, DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+        "SELECT lifecycle, revision, delivery_target, cost_state,
+                measured_cost_micro_usd
+           FROM factory.campaigns WHERE id = $1 FOR UPDATE",
         campaign_id.get(),
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::CampaignNotRunning)?;
-    campaign_from_fields(row.lifecycle, row.revision, row.delivery_target)
+    campaign_from_fields(
+        row.lifecycle,
+        row.revision,
+        row.delivery_target,
+        row.cost_state,
+        row.measured_cost_micro_usd,
+    )
 }
 
 async fn load_campaign(
@@ -1980,24 +2014,40 @@ async fn load_campaign(
     campaign_id: factory_protocol::CampaignId,
 ) -> Result<CampaignRow, DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1",
+        "SELECT lifecycle, revision, delivery_target, cost_state,
+                measured_cost_micro_usd
+           FROM factory.campaigns WHERE id = $1",
         campaign_id.get(),
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::CampaignNotRunning)?;
-    campaign_from_fields(row.lifecycle, row.revision, row.delivery_target)
+    campaign_from_fields(
+        row.lifecycle,
+        row.revision,
+        row.delivery_target,
+        row.cost_state,
+        row.measured_cost_micro_usd,
+    )
 }
 
 fn campaign_from_fields(
     lifecycle: i16,
     revision: i64,
     delivery_target: i32,
+    cost_state: i16,
+    measured_cost_micro_usd: i64,
 ) -> Result<CampaignRow, DecisionStoreError> {
+    if !matches!(cost_state, COST_KNOWN | COST_UNKNOWN | COST_EXCEEDED) {
+        return Err(DecisionStoreError::CorruptState);
+    }
     Ok(CampaignRow {
         lifecycle,
         revision: revision_from_sql(revision)?,
         delivery_target,
+        cost_state,
+        factory_cost_micro_usd: u64::try_from(measured_cost_micro_usd)
+            .map_err(|_| DecisionStoreError::IntegerOutOfRange)?,
     })
 }
 
@@ -2868,6 +2918,7 @@ fn delivery_fingerprint(command: &RecordDelivery) -> ContentDigest {
     hash_object(&mut hasher, &command.expected_old_commit);
     hash_object(&mut hasher, &command.resulting_commit);
     hash_object(&mut hasher, &command.resulting_tree);
+    hasher.update(&command.factory_cost_micro_usd.to_le_bytes());
     hash_artifact(&mut hasher, &command.receipt);
     finish_hash(hasher)
 }

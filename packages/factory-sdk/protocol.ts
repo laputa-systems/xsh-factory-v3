@@ -587,6 +587,7 @@ export function validateProtocolResponse(
           "candidate_tree",
           "candidate_commit",
           "delivered_commit",
+          "delivered_factory_cost_micro_usd",
           "delivered_attempt_count",
           "ready_ticket_count",
           "proposed_ticket_count",
@@ -670,6 +671,15 @@ export function validateProtocolResponse(
             `response for ${expectedOperation} has invalid ${field}`,
           );
         }
+      }
+      if (
+        response.delivered_factory_cost_micro_usd !== null &&
+        !Number.isSafeInteger(response.delivered_factory_cost_micro_usd)
+      ) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} has invalid delivered Factory-Cost`,
+        );
       }
       if (
         response.downstream_evidence !== null &&
@@ -809,13 +819,40 @@ export function validateProtocolResponse(
     case "candidate_show":
       requiredResponseFields(
         response,
-        ["candidate_id", "candidate_revision", "state", "ticket_attempt_id", "evidence"],
+        [
+          "candidate_id",
+          "candidate_revision",
+          "state",
+          "ticket_attempt_id",
+          "evidence",
+          "delivery",
+        ],
         expectedOperation,
       );
       responseInteger(response, "candidate_id", expectedOperation);
       responseInteger(response, "candidate_revision", expectedOperation);
       responseInteger(response, "ticket_attempt_id", expectedOperation);
       responseString(response, "state", expectedOperation);
+      if (
+        response.delivery !== null &&
+        (typeof response.delivery !== "object" || Array.isArray(response.delivery))
+      ) {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} has invalid delivery`,
+        );
+      }
+      if (response.delivery !== null) {
+        const delivery = response.delivery as Record<string, unknown>;
+        requiredResponseFields(
+          delivery,
+          ["delivery_id", "resulting_commit", "factory_cost_micro_usd"],
+          expectedOperation,
+        );
+        responseInteger(delivery, "delivery_id", expectedOperation);
+        responseString(delivery, "resulting_commit", expectedOperation);
+        responseInteger(delivery, "factory_cost_micro_usd", expectedOperation);
+      }
       break;
     case "audit_show":
       requiredResponseFields(response, ["selector", "items"], expectedOperation);
@@ -1239,6 +1276,7 @@ export interface CampaignStatusResponse {
   readonly candidate_tree: string | null;
   readonly candidate_commit: string | null;
   readonly delivered_commit: string | null;
+  readonly delivered_factory_cost_micro_usd: number | null;
   readonly delivered_attempt_count: number;
   readonly ready_ticket_count: number;
   readonly proposed_ticket_count: number;
@@ -1397,6 +1435,12 @@ export interface CandidateDecisionNavigationResponse {
   readonly rationale: EvidenceArtifactResponse;
 }
 
+export interface DeliveryNavigationResponse {
+  readonly delivery_id: number;
+  readonly resulting_commit: string;
+  readonly factory_cost_micro_usd: number;
+}
+
 export interface CandidateShowResponse {
   readonly protocol_version: number;
   readonly request_id: string;
@@ -1415,6 +1459,7 @@ export interface CandidateShowResponse {
   readonly review: CandidateReviewNavigationResponse | null;
   readonly latest_architect_decision: CandidateDecisionNavigationResponse | null;
   readonly delivery_receipt: EvidenceArtifactResponse | null;
+  readonly delivery: DeliveryNavigationResponse | null;
 }
 
 export interface AuditEntryResponse {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT lifecycle, revision, delivery_target FROM factory.campaigns WHERE id = $1 FOR UPDATE",
+  "query": "SELECT lifecycle, revision, delivery_target, cost_state,\n                measured_cost_micro_usd\n           FROM factory.campaigns WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,28 @@
             "name": "delivery_target"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "cost_state",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "cost_state"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "measured_cost_micro_usd",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "factory.campaigns",
+            "name": "measured_cost_micro_usd"
+          }
+        }
       }
     ],
     "parameters": {
@@ -45,8 +67,10 @@
     "nullable": [
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "985ce942407d595d97787f295da96511db307d97e3dc9fb76628d381dc9fb806"
+  "hash": "2eec112723bcf3c41e9e6ff87f1c73358d243fb12896d63951ae2c2639523c09"
 }

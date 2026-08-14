@@ -231,6 +231,7 @@ pub struct CampaignProductIdentity {
     pub candidate_tree: Option<String>,
     pub candidate_commit: Option<String>,
     pub delivered_commit: Option<String>,
+    pub delivered_factory_cost_micro_usd: Option<u64>,
 }
 
 /// One bounded, read-only row in a campaign's provider-cost breakdown.
@@ -1921,7 +1922,7 @@ impl ProcessStore {
                  ORDER BY candidate.id DESC
                  LIMIT 1
              ), latest_delivery AS (
-                 SELECT delivery.resulting_commit
+                 SELECT delivery.resulting_commit, delivery.factory_cost_micro_usd
                  FROM factory.deliveries AS delivery
                  JOIN factory.candidates AS candidate
                    ON candidate.id = delivery.candidate_id
@@ -1937,7 +1938,9 @@ impl ProcessStore {
                     ) AS \"base_commit?\",
                     (SELECT candidate_tree FROM latest_candidate) AS \"candidate_tree?\",
                     (SELECT candidate_commit FROM latest_candidate) AS \"candidate_commit?\",
-                    (SELECT resulting_commit FROM latest_delivery) AS \"delivered_commit?\"",
+                    (SELECT resulting_commit FROM latest_delivery) AS \"delivered_commit?\",
+                    (SELECT factory_cost_micro_usd FROM latest_delivery)
+                        AS \"delivered_factory_cost_micro_usd?\"",
             campaign_id.get(),
         )
         .fetch_one(&self.pool)
@@ -1947,6 +1950,10 @@ impl ProcessStore {
             candidate_tree: row.candidate_tree,
             candidate_commit: row.candidate_commit,
             delivered_commit: row.delivered_commit,
+            delivered_factory_cost_micro_usd: row
+                .delivered_factory_cost_micro_usd
+                .map(|value| u64::try_from(value).map_err(|_| StoreError::CorruptCostColumn))
+                .transpose()?,
         })
     }
 

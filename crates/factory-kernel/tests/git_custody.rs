@@ -272,6 +272,75 @@ fn cleanup_removes_ignored_build_residue_after_git_unregisters_worktree() {
 }
 
 #[test]
+fn cleanup_reconciles_an_already_unregistered_worktree_and_removes_residue() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let worktree = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("already-unregistered").unwrap(),
+        )
+        .unwrap();
+    let path = worktree.path().to_owned();
+    run_in(
+        &fixture.repository,
+        &fixture.git,
+        &["worktree", "remove", "--force", path.to_str().unwrap()],
+    );
+    fs::create_dir_all(path.join("target/debug")).unwrap();
+    fs::write(path.join("target/debug/orphaned"), b"residual output").unwrap();
+
+    fixture.custody.cleanup_worktree(worktree).unwrap();
+
+    assert!(!path.exists());
+}
+
+#[test]
+fn delivery_commit_contains_the_final_factory_cost_trailer() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("cost-visible-delivery").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("fix.txt"), b"fixed\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+    let candidate = fixture
+        .custody
+        .construct_candidate_commit(&repository, &commit_request(&capture, 31))
+        .unwrap();
+
+    let receipt = fixture
+        .custody
+        .guarded_local_fast_forward_with_factory_cost(&repository, &candidate, 59_108)
+        .unwrap();
+    let message = git_stdout(
+        &fixture.repository,
+        &fixture.git,
+        &[
+            "show",
+            "-s",
+            "--format=%B",
+            receipt.delivered_commit.as_str(),
+        ],
+    );
+
+    assert_ne!(receipt.delivered_commit, *candidate.commit());
+    assert!(message.contains("Factory-Cost: $0.059108"));
+    assert_eq!(
+        git_stdout(&fixture.repository, &fixture.git, &["rev-parse", "HEAD"]).trim(),
+        receipt.delivered_commit.as_str()
+    );
+}
+
+#[test]
 fn temporary_index_capture_preserves_binary_symlink_and_exact_tree() {
     let fixture = Fixture::new();
     let repository = fixture.qualify();

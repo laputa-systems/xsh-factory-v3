@@ -594,6 +594,7 @@
       "candidate_tree": "dddddddddddddddddddddddddddddddddddddddd",
       "candidate_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "delivered_commit": null,
+      "delivered_factory_cost_micro_usd": null,
       "delivered_attempt_count": 0,
       "ready_ticket_count": 0,
       "proposed_ticket_count": 0,
@@ -779,7 +780,8 @@
       }],
       "review": null,
       "latest_architect_decision": null,
-      "delivery_receipt": null
+      "delivery_receipt": null,
+      "delivery": null
     },
     "operator.audit.show": {
       "protocol_version": 1,

@@ -159,7 +159,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
   // The installed V1 bundle is the explicit lineage parent for this
   // validation-profile and prompt revision. Admission rejects an accidental
   // fork from any other active application bundle.
-  predecessor_bundle: "55578f0f41072ce4d47dff7d968a96c5e225175035ec4fbe52831fe571e1a877",
+  predecessor_bundle: "d5864298747a7badbdabb5b75c87855f357e4518ee3d0b8ace33a6ef85c57cc8",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",

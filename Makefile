@@ -5,6 +5,8 @@ PI_HEADLESS_RUNTIME := $(CURDIR)/packages/factory-pi-host/headless
 PI_HEADLESS_SDK := $(PI_HEADLESS_RUNTIME)/headless-sdk.mjs
 PI_HEADLESS_AI := $(PI_HEADLESS_RUNTIME)/headless-ai.mjs
 FACTORY_OPERATION_DEADLINE_MS ?= 900000
+FACTORYCTL ?= $(CURDIR)/target/release/factoryctl
+FACTORY_PAID_CYCLE_PRINCIPAL ?= grand-architect
 
 # The factory keeps Clippy's correctness and default quality groups strict.
 # Pedantic documentation/style heuristics and these boundary-shape
@@ -16,7 +18,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint deno-version pi-headless-cache pi-headless-build factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
+.PHONY: cache lint deno-version pi-headless-cache pi-headless-build factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
 
 pi-headless-cache:
 	test -f "$(PI_HEADLESS_ROOT)/package-lock.json"
@@ -64,6 +66,57 @@ factoryd-serve:
 		--database-url "$$FACTORY_DATABASE_URL" \
 		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
 		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
+
+# Admit one provider-backed campaign whose terminal objective is exactly one
+# locally delivered XSH commit. Product discovery, Architect sponsorship,
+# Engineering, Quality, and the final Architect decision remain explicit
+# daemon/operator lifecycle steps; this target only creates the campaign.
+#
+# Required inputs are deliberately explicit because the campaign pins the
+# active application revision, aggregate budget, deadline, and idempotency
+# identity at admission time. The delivery target is fixed at one here rather
+# than exposed as a tunable variable.
+paid-cycle:
+	test -x "$(FACTORYCTL)"
+	test -S "$(FACTORY_PAID_CYCLE_SOCKET)"
+	test -d "$(CURDIR)/../xsh"
+	test -z "$$(git -C "$(CURDIR)/../xsh" status --porcelain)"
+	test -n "$(FACTORY_PAID_CYCLE_CLIENT_COMMAND_ID)"
+	test -n "$(FACTORY_PAID_CYCLE_PRINCIPAL)"
+	printf '%s\n' "$(FACTORY_PAID_CYCLE_EXPECTED_APPLICATION_REVISION)" | grep -Eq '^[0-9]+$$'
+	printf '%s\n' "$(FACTORY_PAID_CYCLE_APPLICATION_REVISION_ID)" | grep -Eq '^[1-9][0-9]*$$'
+	printf '%s\n' "$(FACTORY_PAID_CYCLE_BUDGET_MICRO_USD)" | grep -Eq '^[1-9][0-9]*$$'
+	printf '%s\n' "$(FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS)" | grep -Eq '^[1-9][0-9]*$$'
+	test "$(FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS)" -gt "$$(date +%s000)"
+	"$(FACTORYCTL)" campaign start \
+		--application-revision-id "$(FACTORY_PAID_CYCLE_APPLICATION_REVISION_ID)" \
+		--expected-application-revision "$(FACTORY_PAID_CYCLE_EXPECTED_APPLICATION_REVISION)" \
+		--aggregate-budget-micro-usd "$(FACTORY_PAID_CYCLE_BUDGET_MICRO_USD)" \
+		--deadline-unix-millis "$(FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS)" \
+		--delivery-target 1 \
+		--socket "$(FACTORY_PAID_CYCLE_SOCKET)" \
+		--client-command-id "$(FACTORY_PAID_CYCLE_CLIENT_COMMAND_ID)" \
+		--principal "$(FACTORY_PAID_CYCLE_PRINCIPAL)" \
+		--format json
+
+# Verify the exact terminal proof for `paid-cycle`: the daemon must report a
+# completed campaign with one delivery, and the delivered commit must be the
+# current clean HEAD of the product checkout. This target never writes either
+# repository; delivery itself is kernel-owned.
+paid-cycle-verify:
+	test -x "$(FACTORYCTL)"
+	test -S "$(FACTORY_PAID_CYCLE_SOCKET)"
+	test -d "$(CURDIR)/../xsh"
+	printf '%s\n' "$(FACTORY_PAID_CYCLE_ID)" | grep -Eq '^[1-9][0-9]*$$'
+	@set -eu; \
+	status_json="$$("$(FACTORYCTL)" campaign status "$(FACTORY_PAID_CYCLE_ID)" --socket "$(FACTORY_PAID_CYCLE_SOCKET)" --format json)"; \
+	delivery_proof="$$(printf '%s\n' "$$status_json" | deno eval 'const text = await new Response(Deno.stdin.readable).text(); const status = JSON.parse(text); if (status.state !== "completed" || status.delivery_target !== 1 || status.delivered_attempt_count !== 1 || typeof status.delivered_commit !== "string" || status.delivered_commit.length === 0 || !Number.isSafeInteger(status.delivered_factory_cost_micro_usd)) Deno.exit(1); console.log(status.delivered_commit + "|" + (status.delivered_factory_cost_micro_usd / 1000000).toFixed(6));')"; \
+	delivered_commit="$${delivery_proof%%|*}"; \
+	factory_cost_usd="$${delivery_proof#*|}"; \
+	test "$$delivered_commit" = "$$(git -C "$(CURDIR)/../xsh" rev-parse HEAD)"; \
+	test -z "$$(git -C "$(CURDIR)/../xsh" status --porcelain)"; \
+	git -C "$(CURDIR)/../xsh" log -1 --format='%B' | grep -F -- "Factory-Cost: $$factory_cost_usd"; \
+	printf 'paid cycle %s delivered XSH commit %s; Factory-Cost $$%s\n' "$(FACTORY_PAID_CYCLE_ID)" "$$delivered_commit" "$$factory_cost_usd"
 
 postgres-test:
 	test -n "$$FACTORY_TEST_DATABASE_URL"
