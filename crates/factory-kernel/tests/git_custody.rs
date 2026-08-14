@@ -462,6 +462,52 @@ fn quality_review_worktree_edits_are_discarded_and_cannot_change_candidate_tree(
 }
 
 #[test]
+fn quality_review_worktree_checks_out_the_exact_candidate_commit() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("quality-reviewed-commit").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("candidate.txt"), b"candidate tree\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+    let candidate = fixture
+        .custody
+        .construct_candidate_commit(&repository, &commit_request(&capture, 32))
+        .unwrap();
+
+    let review = fixture
+        .custody
+        .create_candidate_review_worktree(
+            &repository,
+            candidate.commit().clone(),
+            capture.tree().clone(),
+            WorktreeName::parse("quality-review-commit").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        git_stdout(review.path(), &fixture.git, &["rev-parse", "HEAD"]).trim(),
+        candidate.commit().as_str(),
+        "Quality must inspect the same commit that the kernel captured"
+    );
+    assert_eq!(
+        git_stdout(review.path(), &fixture.git, &["rev-parse", "HEAD^{tree}"]).trim(),
+        capture.tree().as_str(),
+        "Quality HEAD must resolve to the captured candidate tree"
+    );
+    assert_eq!(
+        fs::read(review.path().join("candidate.txt")).unwrap(),
+        b"candidate tree\n"
+    );
+    fixture.custody.cleanup_worktree(review).unwrap();
+}
+
+#[test]
 fn empty_tree_and_tree_patch_mismatch_fail_closed() {
     let fixture = Fixture::new();
     let repository = fixture.qualify();

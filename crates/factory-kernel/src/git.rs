@@ -196,7 +196,14 @@ pub struct OwnedWorktree {
     path: PathBuf,
     repository_root: PathBuf,
     branch: DefaultBranchName,
+    /// The qualified default-branch head used for candidate capture and
+    /// delivery move fences. This remains the product base even when Quality
+    /// is inspecting an already-constructed candidate commit.
     base_commit: GitCommitId,
+    /// The detached commit this exact workspace must keep checked out. For
+    /// ordinary actor and validation worktrees this equals `base_commit`; a
+    /// Quality review workspace instead binds the captured candidate commit.
+    checkout_commit: GitCommitId,
     base_tree: GitTreeId,
     materialized_tree: GitTreeId,
 }
@@ -635,6 +642,55 @@ impl GitCustody {
         Ok(worktree)
     }
 
+    /// Allocates a detached Quality worktree at the kernel-captured candidate
+    /// commit. Unlike exact-tree validation materialization, this gives normal
+    /// Git inspection a truthful `HEAD` while independently proving the
+    /// candidate commit resolves to the sealed candidate tree.
+    pub fn create_candidate_review_worktree(
+        &self,
+        repository: &QualifiedRepository,
+        candidate_commit: GitCommitId,
+        candidate_tree: GitTreeId,
+        name: WorktreeName,
+    ) -> Result<OwnedWorktree, GitCustodyError> {
+        self.assert_snapshot_current(repository)?;
+        let observed_tree = self.tree_for_commit(&repository.root, &candidate_commit)?;
+        if observed_tree != candidate_tree {
+            return Err(GitCustodyError::CandidateCommitTreeMismatch {
+                expected: candidate_tree.to_string(),
+                observed: observed_tree.to_string(),
+            });
+        }
+        let mut worktree = self.add_no_checkout(repository, WorktreeKind::Review, name)?;
+        let result = (|| {
+            require_success(self.run(
+                "checkout captured candidate commit for Quality review",
+                &worktree.path,
+                &["checkout", "--detach", "--force", candidate_commit.as_str()],
+                None,
+                None,
+            )?)?;
+            worktree.checkout_commit = candidate_commit;
+            self.assert_worktree_head(&worktree)?;
+            let observed =
+                self.write_tree("verify Quality candidate review tree", &worktree.path, None)?;
+            if observed != candidate_tree {
+                return Err(GitCustodyError::MaterializedTreeMismatch {
+                    expected: candidate_tree.to_string(),
+                    observed: observed.to_string(),
+                });
+            }
+            self.assert_clean(&worktree.path)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.cleanup_failed_worktree(&worktree.repository_root, &worktree.path);
+            return Err(error);
+        }
+        worktree.materialized_tree = candidate_tree;
+        Ok(worktree)
+    }
+
     /// Recovers the custody handle for the Engineering workspace allocated by
     /// the daemon before the actor host was launched.  This never accepts an
     /// arbitrary checkout: the path must be one of this runtime's actor
@@ -674,6 +730,7 @@ impl GitCustody {
             repository_root: repository.root.clone(),
             branch: repository.branch.clone(),
             base_commit: repository.snapshot.base_commit.clone(),
+            checkout_commit: repository.snapshot.base_commit.clone(),
             base_tree: repository.snapshot.base_tree.clone(),
             materialized_tree: repository.snapshot.base_tree.clone(),
         };
@@ -1181,6 +1238,7 @@ impl GitCustody {
             repository_root: repository.root.clone(),
             branch: repository.branch.clone(),
             base_commit: repository.snapshot.base_commit.clone(),
+            checkout_commit: repository.snapshot.base_commit.clone(),
             base_tree: repository.snapshot.base_tree.clone(),
             materialized_tree: repository.snapshot.base_tree.clone(),
         })
@@ -1264,14 +1322,14 @@ impl GitCustody {
         )?;
         if symbolic.status.success() {
             return Err(GitCustodyError::ActorHeadChanged {
-                expected: worktree.base_commit.to_string(),
+                expected: worktree.checkout_commit.to_string(),
                 observed: single_line("attached worktree HEAD", &symbolic.stdout)?,
             });
         }
         let head = self.commit(&worktree.path, "HEAD")?;
-        if head != worktree.base_commit {
+        if head != worktree.checkout_commit {
             return Err(GitCustodyError::ActorHeadChanged {
-                expected: worktree.base_commit.to_string(),
+                expected: worktree.checkout_commit.to_string(),
                 observed: head.to_string(),
             });
         }

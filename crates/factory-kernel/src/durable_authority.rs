@@ -685,7 +685,7 @@ impl DurableAuthorityResolver {
                 candidate_id,
             } => {
                 let row = sqlx::query!(
-                    "SELECT c.base_commit, c.candidate_tree, tr.proposal_artifact_id,
+                    "SELECT c.candidate_tree, c.candidate_commit, tr.proposal_artifact_id,
                             tr.ticket_id, tr.id AS ticket_revision_id, v.id AS validation_id
                        FROM factory.candidates c
                        JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
@@ -709,6 +709,11 @@ impl DurableAuthorityResolver {
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| "Quality candidate is not launchable".to_owned())?;
+                let candidate_commit =
+                    GitCommitId::parse(row.candidate_commit.ok_or_else(|| {
+                        "Quality candidate is missing its attached commit".to_owned()
+                    })?)
+                    .map_err(|error| error.to_string())?;
                 Ok(DurableAssignmentLaunchContext {
                     application_revision_id: assignment.application_revision_id,
                     target: DurableAssignmentTarget::Quality {
@@ -716,8 +721,7 @@ impl DurableAuthorityResolver {
                         candidate_id,
                     },
                     repository: application.repository,
-                    materialize_commit: GitCommitId::parse(row.base_commit)
-                        .map_err(|error| error.to_string())?,
+                    materialize_commit: candidate_commit,
                     materialize_tree: GitTreeId::parse(row.candidate_tree)
                         .map_err(|error| error.to_string())?,
                     ticket_id: Some(
@@ -2088,9 +2092,11 @@ struct ApplicationContext {
 }
 
 /// Exact daemon-owned materialization input for one non-Product assignment.
-/// `materialize_commit` remains the detached worktree `HEAD`; the selected
-/// tree is written with Git's temporary-index custody rather than checked out
-/// as an actor-controlled branch.
+/// Engineering retains the qualified base as its detached `HEAD`; Quality
+/// receives the kernel-captured candidate commit as its detached `HEAD`, whose
+/// tree must equal `materialize_tree`. Validation-only materialization may
+/// still write an exact tree under the qualified base without creating a new
+/// commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableAssignmentLaunchContext {
     pub application_revision_id: ApplicationRevisionId,

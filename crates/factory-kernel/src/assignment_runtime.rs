@@ -526,10 +526,10 @@ fn materialize_workspace(
             .create_detached_worktree(&context.repository, WorktreeKind::Actor, name)
             .map_err(Into::into),
         DurableAssignmentTarget::Quality { .. } => git
-            .rematerialize_tree(
+            .create_candidate_review_worktree(
                 &context.repository,
+                context.materialize_commit.clone(),
                 context.materialize_tree.clone(),
-                WorktreeKind::Review,
                 name,
             )
             .map_err(Into::into),
