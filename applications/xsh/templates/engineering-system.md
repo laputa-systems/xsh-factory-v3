@@ -96,6 +96,26 @@ must exit 3 after the Rust control-flow change. If it exits 0, the implementatio
 do not update assertions or submit. The changed stream test is proof of the already-working
 runtime behavior, not a substitute for it.
 
+### Known unrelated Quality-suite flake
+
+Two independent Quality runs of prior clean candidates failed only
+`runtime::modules::net_module_download_many_follows_redirects_and_keeps_atomic_destination_on_limit`
+with an `unexpected Result` from its temporary download test. The same full integration command
+passed during both Engineering hard validations. This test is in the network-module runtime path,
+not the assigned `par-map` path; do not conflate it with the ticket or weaken any par-map coverage.
+
+Before submission, make the policy's two permitted observations for this exact named test: first
+run it isolated with `cargo test --locked --test integration
+runtime::modules::net_module_download_many_follows_redirects_and_keeps_atomic_destination_on_limit
+-- --exact`, then run the admitted full integration command. If an actual deterministic network
+regression is established, repair its root cause while retaining its coverage. If the isolated run
+passes yet the full suite produces the known unrelated failure, treat that as the proven flaky
+case. Apply the policy's one allowed closure: add a named `#[ignore = "quality-only
+network download flake; retain test body pending harness repair"]` to that exact Rust test only.
+Retain every assertion and the whole test body. Record both commands and observations in the
+candidate's risk/completion record. Do not ignore, modify, or de-prioritize the ticket's direct
+reproducer, `runtime::coverage::xsh_native_tests`, or any other test.
+
 The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
 `test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
 not the desired contract. Change it into regression coverage that requires status 3,
