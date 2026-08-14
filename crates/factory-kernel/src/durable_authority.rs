@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use factory_protocol::{
     AggregateRevision, ApplicationBundleV1, ApplicationRevisionId, ArtifactId, AssignmentPacketV1,
-    CandidateId, CandidatePacketV1, ContentDigest, ExpectedRevision, KernelBuildId, Office,
+    AssignmentRole, CandidateId, CandidatePacketV1, ContentDigest, ExpectedRevision, KernelBuildId,
     RepositoryObjectIdV1, RequiredReadV1, ReviewId, SealedArtifactReferenceV1, SessionId,
     TicketAttemptId, TicketContractReadV1, TicketId, TicketRevisionId, parse_application_bundle_v1,
     parse_command_profile_v1, parse_product_ticket_proposal_v1,
@@ -88,15 +88,21 @@ pub enum DurableAssignmentTarget {
 
 impl DurableAssignmentTarget {
     fn from_packet(packet: &AssignmentPacketV1) -> Result<Self, String> {
-        match (packet.office, packet.ticket_attempt_id, packet.candidate_id) {
-            (Office::ProductResearch, None, None) => Ok(Self::Product),
-            (Office::Engineering, Some(ticket_attempt_id), None) => {
+        match (
+            packet.assignment_role,
+            packet.ticket_attempt_id,
+            packet.candidate_id,
+        ) {
+            (AssignmentRole::ProductResearch, None, None) => Ok(Self::Product),
+            (AssignmentRole::Engineering, Some(ticket_attempt_id), None) => {
                 Ok(Self::Engineering { ticket_attempt_id })
             }
-            (Office::Quality, Some(ticket_attempt_id), Some(candidate_id)) => Ok(Self::Quality {
-                ticket_attempt_id,
-                candidate_id,
-            }),
+            (AssignmentRole::Quality, Some(ticket_attempt_id), Some(candidate_id)) => {
+                Ok(Self::Quality {
+                    ticket_attempt_id,
+                    candidate_id,
+                })
+            }
             _ => Err("assignment packet has an invalid durable target shape".to_owned()),
         }
     }
@@ -783,7 +789,7 @@ impl DurableAuthorityResolver {
         session_id: SessionId,
         packet: &AssignmentPacketV1,
     ) -> Result<ResolvedEngineeringCandidateAuthority, String> {
-        if packet.office != Office::Engineering {
+        if packet.assignment_role != AssignmentRole::Engineering {
             return Err("Engineering resolver received a non-Engineering packet".to_owned());
         }
         let ticket_attempt_id = packet
@@ -873,7 +879,7 @@ impl DurableAuthorityResolver {
         session_id: SessionId,
         packet: &AssignmentPacketV1,
     ) -> Result<ResolvedQualityCandidateAuthority, String> {
-        if packet.office != Office::Quality {
+        if packet.assignment_role != AssignmentRole::Quality {
             return Err("Quality resolver received a non-Quality packet".to_owned());
         }
         let ticket_attempt_id = packet
@@ -954,7 +960,7 @@ impl DurableAuthorityResolver {
         packet: &AssignmentPacketV1,
     ) -> Result<AssignmentContext, String> {
         let row = sqlx::query!(
-            "SELECT campaign_id, application_revision_id, office, ticket_attempt_id, candidate_id
+            "SELECT campaign_id, application_revision_id, assignment_role, ticket_attempt_id, candidate_id
                FROM factory.assignments
               WHERE id = $1",
             packet.assignment_id.get(),
@@ -966,7 +972,7 @@ impl DurableAuthorityResolver {
         let campaign_id = row.campaign_id;
         let application_revision_id = ApplicationRevisionId::new(row.application_revision_id)
             .map_err(|error| error.to_string())?;
-        let office = row.office;
+        let assignment_role = row.assignment_role;
         let ticket_attempt_id = row
             .ticket_attempt_id
             .map(TicketAttemptId::new)
@@ -977,14 +983,14 @@ impl DurableAuthorityResolver {
             .map(CandidateId::new)
             .transpose()
             .map_err(|error| error.to_string())?;
-        let expected_office = match packet.office {
-            Office::ProductResearch => 0,
-            Office::Engineering => 1,
-            Office::Quality => 2,
+        let expected_office = match packet.assignment_role {
+            AssignmentRole::ProductResearch => 0,
+            AssignmentRole::Engineering => 1,
+            AssignmentRole::Quality => 2,
         };
         if campaign_id != packet.campaign_id.get()
             || application_revision_id != packet.application_revision_id
-            || office != expected_office
+            || assignment_role != expected_office
             || ticket_attempt_id != packet.ticket_attempt_id
             || candidate_id != packet.candidate_id
         {
@@ -1206,7 +1212,7 @@ impl DurableAuthorityResolver {
                JOIN factory.assignments a ON a.id = s.assignment_id
                JOIN factory.artifacts artifact ON artifact.id = s.transcript_artifact_id
               WHERE s.id = $1 AND s.campaign_id = $2 AND s.application_revision_id = $3
-                AND s.office = 1 AND a.office = 1 AND a.campaign_id = $2
+                AND s.assignment_role = 1 AND a.assignment_role = 1 AND a.campaign_id = $2
                 AND a.application_revision_id = $3
                 AND s.lifecycle = 2 AND s.cost_state = 0
                 AND s.terminal_operation = 1
@@ -1271,7 +1277,7 @@ impl DurableAuthorityResolver {
                 AND c.lifecycle = $3 AND ta.stage = $4
                 AND c.candidate_commit IS NULL
                 AND camp.lifecycle = 0 AND es.campaign_id = camp.id
-                AND es.office = 1 AND a.office = 1
+                AND es.assignment_role = 1 AND a.assignment_role = 1
                 AND a.campaign_id = camp.id
                 AND a.application_revision_id = tr.application_revision_id",
             action.candidate_id.get(),

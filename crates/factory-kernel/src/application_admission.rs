@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use factory_protocol::{
-    ApplicationBundleV1, ApplicationRelativePath, ContentDigest, ExpectedRevision, Office,
+    ApplicationBundleV1, ApplicationRelativePath, AssignmentRole, ContentDigest, ExpectedRevision,
 };
 use sqlx::{Postgres, Transaction};
 
@@ -299,6 +299,25 @@ impl KernelStore {
         )
         .fetch_one(&mut *transaction)
         .await?;
+        // Every admitted application revision receives its three fixed root
+        // offices in the same transaction as the immutable bundle identity.
+        // The office row is the durable owner; the role remains the closed
+        // packet capability selected by the kernel.
+        sqlx::query!(
+            "INSERT INTO factory.offices (
+                 application_revision_id, assignment_role, charter_artifact_id, authority_mask
+             ) VALUES
+                 ($1, 0, $2, 1),
+                 ($1, 1, $3, 2),
+                 ($1, 2, $4, 4)
+             ON CONFLICT (application_revision_id, assignment_role) DO NOTHING",
+            application_revision_id,
+            product_system,
+            engineering_system,
+            quality_system,
+        )
+        .execute(&mut *transaction)
+        .await?;
         let audit_log_id = insert_audit_receipt(
             &mut transaction,
             &command.principal,
@@ -336,11 +355,11 @@ fn seal_application_inputs(
     let mission_seal =
         adopt_declared_template(cas, &command.source_root, &bundle.mission_template, None)?;
     let mut seals = Vec::with_capacity(6);
-    for office in Office::ALL {
+    for office in AssignmentRole::ALL {
         let profile = bundle
-            .office_profiles
+            .assignment_role_profiles
             .iter()
-            .find(|profile| profile.office == office)
+            .find(|profile| profile.assignment_role == office)
             .ok_or(StoreError::ApplicationTemplateCountMismatch)?;
         seals.push(adopt_declared_template(
             cas,
@@ -367,7 +386,7 @@ fn adopt_declared_template(
     cas: &CasStore,
     source_root: &std::path::Path,
     template: &factory_protocol::TemplateArtifactV1,
-    office: Option<Office>,
+    assignment_role: Option<AssignmentRole>,
 ) -> Result<CasArtifact, StoreError> {
     let seal = cas.adopt(source_root, template.source_path.as_str())?;
     if seal.digest() != template.digest {
@@ -376,14 +395,14 @@ fn adopt_declared_template(
         });
     }
     let bytes = cas.read_verified(seal.digest())?;
-    validate_template_bytes(&bytes, template, office)?;
+    validate_template_bytes(&bytes, template, assignment_role)?;
     Ok(seal)
 }
 
 fn validate_template_bytes(
     bytes: &[u8],
     template: &factory_protocol::TemplateArtifactV1,
-    office: Option<Office>,
+    assignment_role: Option<AssignmentRole>,
 ) -> Result<(), StoreError> {
     let source = std::str::from_utf8(bytes).map_err(|_| StoreError::InvalidTemplateUtf8 {
         path: template.source_path.as_str().to_owned(),
@@ -393,7 +412,7 @@ fn validate_template_bytes(
         .iter()
         .map(|placeholder| placeholder.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    let allowed = allowed_placeholders(office);
+    let allowed = allowed_placeholders(assignment_role);
     let mut found = std::collections::BTreeSet::new();
     let mut cursor = 0;
     while let Some(offset) = source[cursor..].find("${") {
@@ -428,18 +447,20 @@ fn validate_template_bytes(
     Ok(())
 }
 
-fn allowed_placeholders(office: Option<Office>) -> std::collections::BTreeSet<&'static str> {
+fn allowed_placeholders(
+    assignment_role: Option<AssignmentRole>,
+) -> std::collections::BTreeSet<&'static str> {
     let mut allowed: std::collections::BTreeSet<&'static str> =
         ["ASSIGNMENT_ID", "MISSION", "TARGET"].into_iter().collect();
-    match office {
-        Some(Office::ProductResearch) => {}
-        Some(Office::Engineering) => allowed.extend([
+    match assignment_role {
+        Some(AssignmentRole::ProductResearch) => {}
+        Some(AssignmentRole::Engineering) => allowed.extend([
             "TICKET_ID",
             "TICKET_REVISION_ID",
             "REGRESSION_COMMAND",
             "REGRESSION_EXPECTED_FAILURE",
         ]),
-        Some(Office::Quality) => allowed.extend([
+        Some(AssignmentRole::Quality) => allowed.extend([
             "TICKET_ID",
             "TICKET_REVISION_ID",
             "CANDIDATE_ID",
@@ -596,33 +617,33 @@ mod tests {
     fn template_cannot_require_unavailable_assignment_identity() {
         for (office, source, placeholder) in [
             (
-                Office::ProductResearch,
+                AssignmentRole::ProductResearch,
                 b"${SESSION_ID}".as_slice(),
                 "SESSION_ID",
             ),
             (
-                Office::ProductResearch,
+                AssignmentRole::ProductResearch,
                 b"${CAMPAIGN_ID}".as_slice(),
                 "CAMPAIGN_ID",
             ),
             (
-                Office::Engineering,
+                AssignmentRole::Engineering,
                 b"${APPLICATION_REVISION_ID}".as_slice(),
                 "APPLICATION_REVISION_ID",
             ),
-            (Office::Quality, b"${OFFICE}".as_slice(), "OFFICE"),
+            (AssignmentRole::Quality, b"${OFFICE}".as_slice(), "OFFICE"),
             (
-                Office::ProductResearch,
+                AssignmentRole::ProductResearch,
                 b"${TICKET_ID}".as_slice(),
                 "TICKET_ID",
             ),
             (
-                Office::ProductResearch,
+                AssignmentRole::ProductResearch,
                 b"${TICKET_REVISION_ID}".as_slice(),
                 "TICKET_REVISION_ID",
             ),
             (
-                Office::Engineering,
+                AssignmentRole::Engineering,
                 b"${CANDIDATE_ID}".as_slice(),
                 "CANDIDATE_ID",
             ),

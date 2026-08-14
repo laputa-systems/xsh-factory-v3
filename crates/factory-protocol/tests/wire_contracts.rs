@@ -193,8 +193,8 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         wall_limit_millis: 1,
         output_byte_limit: 4096,
     };
-    let office = |office: &str, tool: &str| wire::OfficeWireV1 {
-        office: office.to_owned(),
+    let assignment_role_profile = |assignment_role: &str, tool: &str| wire::AssignmentRoleWireV1 {
+        assignment_role: assignment_role.to_owned(),
         system_template: template(vec!["ASSIGNMENT_ID".to_owned()]),
         assignment_template: template(vec!["ASSIGNMENT_ID".to_owned()]),
         tools: vec!["workspace_read".to_owned(), tool.to_owned()],
@@ -217,10 +217,10 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
             placeholders: Vec::new(),
             rendered_byte_limit: 4096,
         },
-        office_profiles: vec![
-            office("product_research", "product_submit_ticket"),
-            office("engineering", "candidate_submit"),
-            office("quality", "quality_submit_review"),
+        assignment_role_profiles: vec![
+            assignment_role_profile("product_research", "product_submit_ticket"),
+            assignment_role_profile("engineering", "candidate_submit"),
+            assignment_role_profile("quality", "quality_submit_review"),
         ],
         ticket_policy: wire::TicketPolicyWireV1 {
             low_water: 1,
@@ -263,13 +263,15 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
     assert_eq!(admitted.application_key.as_str(), "example");
 
     let mut xhigh_bundle = bundle.clone();
-    xhigh_bundle.office_profiles[1].model.thinking_level = "xhigh".to_owned();
+    xhigh_bundle.assignment_role_profiles[1]
+        .model
+        .thinking_level = "xhigh".to_owned();
     let xhigh_payload =
         wire::canonical_application_bundle_json_v1(&xhigh_bundle).expect("xhigh canonical bundle");
     let xhigh =
         wire::parse_application_bundle_v1(xhigh_payload.as_bytes()).expect("xhigh closed bundle");
     assert_eq!(
-        xhigh.office_profiles[1].model.thinking_level,
+        xhigh.assignment_role_profiles[1].model.thinking_level,
         ThinkingLevelV1::XHigh
     );
 

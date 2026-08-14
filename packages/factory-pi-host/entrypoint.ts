@@ -41,7 +41,7 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
     "kernel_build_id",
     "repository_base_identity",
     "factory_base_identity",
-    "office",
+    "assignment_role",
     "target",
     "ticket_attempt_id",
     "candidate_id",
@@ -111,7 +111,7 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
   const packet: PiAssignmentPacket = {
     format_version: 1,
     assignment_id: numericIdentity(root.assignment_id, "assignment_id"),
-    office: string(root.office, "office"),
+    assignment_role: string(root.assignment_role, "assignment_role"),
     campaign_id: numericIdentity(root.campaign_id, "campaign_id"),
     application_revision_id: numericIdentity(
       root.application_revision_id,
@@ -194,7 +194,7 @@ export function decodeAssignmentPacketV1(bytes: Uint8Array): PiAssignmentPacket 
     required_reads: requiredReads(root.required_reads),
     assignment_evidence: assignmentEvidence(
       root.assignment_evidence,
-      string(root.office, "office"),
+      string(root.assignment_role, "assignment_role"),
     ),
     runtime: {
       deno_executable: string(runtime.deno_executable, "runtime.deno_executable"),
@@ -436,15 +436,15 @@ function requiredReads(value: unknown): PiAssignmentPacket["required_reads"] {
 
 function assignmentEvidence(
   value: unknown,
-  office: string,
+  assignment_role: string,
 ): PiAssignmentPacket["assignment_evidence"] {
   if (!Array.isArray(value) || value.length > 24) {
     throw new Error("assignment_evidence must contain at most 24 references");
   }
-  if (office === "product_research" && value.length !== 0) {
+  if (assignment_role === "product_research" && value.length !== 0) {
     throw new Error("Product assignment_evidence must be empty");
   }
-  if (office !== "product_research" && value.length === 0) {
+  if (assignment_role !== "product_research" && value.length === 0) {
     throw new Error("Engineering and Quality assignment_evidence is required");
   }
   const known = new Set<string>();

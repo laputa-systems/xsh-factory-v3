@@ -1,6 +1,6 @@
 import {
   compileApplicationV1,
-  type OfficeV1,
+  type AssignmentRoleV1,
   renderTemplateV1,
   type TemplateDeclarationV1,
 } from "@factory/sdk";
@@ -32,7 +32,7 @@ const expectedTemplatePaths = [
   "templates/quality-system.md",
 ] as const;
 
-const expectedOfficeTemplates: Readonly<Record<OfficeV1, readonly [string, string]>> = {
+const expectedOfficeTemplates: Readonly<Record<AssignmentRoleV1, readonly [string, string]>> = {
   product_research: ["templates/product-system.md", "templates/product-assignment.md"],
   engineering: ["templates/engineering-system.md", "templates/engineering-assignment.md"],
   quality: ["templates/quality-system.md", "templates/quality-assignment.md"],
@@ -124,8 +124,8 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!productSystem.includes("first_observation` and `second_observation` artifact identities")) {
     throw new Error("Product must keep its closed two-run observation references identical");
   }
-  const productProfile = xshApplicationV1.office_profiles.find((profile) =>
-    profile.office === "product_research"
+  const productProfile = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "product_research"
   );
   if (productProfile?.limits.turn_limit !== 12) {
     throw new Error("Product must stay within the bounded discovery allowance");
@@ -165,14 +165,14 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       throw new Error(`Engineering must include bounded flaky-test policy: ${label}`);
     }
   }
-  const engineeringProfile = xshApplicationV1.office_profiles.find((profile) =>
-    profile.office === "engineering"
+  const engineeringProfile = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "engineering"
   );
   if (engineeringProfile?.tools.includes("artifact_seal")) {
     throw new Error("Engineering must not own report or risk artifact sealing");
   }
 
-  for (const profile of xshApplicationV1.office_profiles) {
+  for (const profile of xshApplicationV1.assignment_role_profiles) {
     for (const artifact of [profile.system_template, profile.assignment_template]) {
       const source = templateText(first, artifact.source_path);
       assertNeutral(artifact.source_path, source);
@@ -184,7 +184,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
         source,
         artifact,
         templateValues(artifact, mission),
-        profile.office,
+        profile.assignment_role,
       );
     }
   }
@@ -206,7 +206,7 @@ function assertExactTemplateDeclaration(
 ): void {
   const declared = [
     xshApplicationV1.mission_template,
-    ...xshApplicationV1.office_profiles.flatMap((profile) => [
+    ...xshApplicationV1.assignment_role_profiles.flatMap((profile) => [
       profile.system_template,
       profile.assignment_template,
     ]),
@@ -219,13 +219,13 @@ function assertExactTemplateDeclaration(
 
   for (
     const [office, expected] of Object.entries(expectedOfficeTemplates) as Array<
-      [OfficeV1, readonly [string, string]]
+      [AssignmentRoleV1, readonly [string, string]]
     >
   ) {
-    const profile = xshApplicationV1.office_profiles.find((candidate) =>
-      candidate.office === office
+    const profile = xshApplicationV1.assignment_role_profiles.find((candidate) =>
+      candidate.assignment_role === office
     );
-    if (profile === undefined) throw new Error(`missing ${office} office profile`);
+    if (profile === undefined) throw new Error(`missing ${office} assignment-role profile`);
     assertExactStrings(
       [...expected],
       [profile.system_template.source_path, profile.assignment_template.source_path],
@@ -263,9 +263,11 @@ function assertRenderedNeutral(
   source: string,
   artifact: TemplateDeclarationV1,
   values: Readonly<Record<string, string>>,
-  office: OfficeV1 | undefined,
+  assignment_role: AssignmentRoleV1 | undefined,
 ): void {
-  const rendered = decoder.decode(renderTemplateV1(source, artifact, values, office));
+  const rendered = decoder.decode(
+    renderTemplateV1(source, artifact, values, assignment_role),
+  );
   if (rendered.includes("${")) {
     throw new Error(`${sourcePath} left a placeholder in the worker prompt`);
   }

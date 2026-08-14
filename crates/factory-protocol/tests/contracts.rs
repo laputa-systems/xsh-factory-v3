@@ -2,12 +2,13 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use factory_protocol::{
     APPLICATION_BUNDLE_V1_FORMAT, AbsoluteHostPath, ActorToolV1, AggregateRevision,
-    ApplicationBundleV1, ApplicationKey, ApplicationRelativePath, CommandProfileV1,
-    CommitMessagePolicyV1, ContentDigest, CredentialDescriptorV1, DeliveryModeV1, DurationMillis,
-    EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, MicroUsd, ModelCapabilityV1, ModelProfileV1,
-    Office, OfficeProfileV1, RepositoryBindingV1, RepositoryRelativePath, RequiredReadV1,
-    RuntimeRelativePath, SessionLimitsV1, TemplateArtifactV1, TemplatePlaceholderV1,
-    ThinkingLevelV1, TicketBoundsV1, TicketPolicyV1, ValidationProfilesV1,
+    ApplicationBundleV1, ApplicationKey, ApplicationRelativePath, AssignmentRole,
+    AssignmentRoleProfileV1, CommandProfileV1, CommitMessagePolicyV1, ContentDigest,
+    CredentialDescriptorV1, DeliveryModeV1, DurationMillis, EnvironmentAdditionV1, ExecutableV1,
+    GitPolicyV1, MicroUsd, ModelCapabilityV1, ModelProfileV1, RepositoryBindingV1,
+    RepositoryRelativePath, RequiredReadV1, RuntimeRelativePath, SessionLimitsV1,
+    TemplateArtifactV1, TemplatePlaceholderV1, ThinkingLevelV1, TicketBoundsV1, TicketPolicyV1,
+    ValidationProfilesV1,
 };
 
 fn path(value: &str) -> RepositoryRelativePath {
@@ -48,9 +49,13 @@ fn command(name: &str) -> CommandProfileV1 {
     }
 }
 
-fn office_profile(office: Office, terminal_tool: ActorToolV1, byte: u8) -> OfficeProfileV1 {
-    OfficeProfileV1 {
-        office,
+fn assignment_role_profile(
+    assignment_role: AssignmentRole,
+    terminal_tool: ActorToolV1,
+    byte: u8,
+) -> AssignmentRoleProfileV1 {
+    AssignmentRoleProfileV1 {
+        assignment_role,
         system_template: template("templates/system.md", byte),
         assignment_template: template("templates/assignment.md", byte + 1),
         tools: vec![
@@ -90,14 +95,18 @@ fn bundle() -> ApplicationBundleV1 {
             delivery_mode: DeliveryModeV1::LocalFastForwardOnly,
         },
         mission_template: template("templates/mission.md", 1),
-        office_profiles: vec![
-            office_profile(Office::ProductResearch, ActorToolV1::ProductSubmitTicket, 2),
-            office_profile(
-                Office::Engineering,
+        assignment_role_profiles: vec![
+            assignment_role_profile(
+                AssignmentRole::ProductResearch,
+                ActorToolV1::ProductSubmitTicket,
+                2,
+            ),
+            assignment_role_profile(
+                AssignmentRole::Engineering,
                 ActorToolV1::CandidateCheckpointRegression,
                 4,
             ),
-            office_profile(Office::Quality, ActorToolV1::QualitySubmitReview, 6),
+            assignment_role_profile(AssignmentRole::Quality, ActorToolV1::QualitySubmitReview, 6),
         ],
         ticket_policy: TicketPolicyV1 {
             low_water: 1,
@@ -134,8 +143,9 @@ fn bundle() -> ApplicationBundleV1 {
 #[test]
 fn model_capabilities_and_credentials_are_closed() {
     let mut application = bundle();
-    application.office_profiles[0].model.capability_flags =
-        vec![ModelCapabilityV1::Reasoning, ModelCapabilityV1::Reasoning];
+    application.assignment_role_profiles[0]
+        .model
+        .capability_flags = vec![ModelCapabilityV1::Reasoning, ModelCapabilityV1::Reasoning];
     assert!(application.validate().is_err());
 
     assert!(
@@ -199,19 +209,19 @@ fn template_renderer_is_strict_and_one_pass() {
 }
 
 #[test]
-fn bundle_requires_the_fixed_offices_and_closed_tools() {
+fn bundle_requires_the_fixed_assignment_roles_and_closed_tools() {
     let valid = bundle();
     assert_eq!(valid.validate(), Ok(()));
 
     let mut wrong_tool = bundle();
-    wrong_tool.office_profiles[0]
+    wrong_tool.assignment_role_profiles[0]
         .tools
         .push(ActorToolV1::CandidateSubmit);
     assert!(wrong_tool.validate().is_err());
 
-    let mut missing_office = bundle();
-    missing_office.office_profiles.pop();
-    assert!(missing_office.validate().is_err());
+    let mut missing_role_profile = bundle();
+    missing_role_profile.assignment_role_profiles.pop();
+    assert!(missing_role_profile.validate().is_err());
 }
 
 #[test]

@@ -98,9 +98,9 @@ function fixture(): ApplicationBundleV1 {
       delivery_mode: "local_fast_forward_only",
     },
     mission_template: template("templates/mission.md"),
-    office_profiles: [
+    assignment_role_profiles: [
       {
-        office: "product_research",
+        assignment_role: "product_research",
         system_template: template("templates/system.md"),
         assignment_template: template("templates/assignment.md"),
         tools: ["workspace_read", "product_submit_ticket"],
@@ -108,7 +108,7 @@ function fixture(): ApplicationBundleV1 {
         limits,
       },
       {
-        office: "engineering",
+        assignment_role: "engineering",
         system_template: template("templates/system.md"),
         assignment_template: template("templates/assignment.md"),
         tools: ["workspace_read", "candidate_submit"],
@@ -116,7 +116,7 @@ function fixture(): ApplicationBundleV1 {
         limits,
       },
       {
-        office: "quality",
+        assignment_role: "quality",
         system_template: template("templates/system.md"),
         assignment_template: template("templates/assignment.md"),
         tools: ["workspace_read", "quality_submit_review"],

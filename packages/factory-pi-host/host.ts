@@ -437,7 +437,7 @@ export function validateToolAllowlist(
       // report sealing. Completion evidence is now kernel-owned, so omit this
       // strictly less-powerful legacy tool rather than making a changed
       // worktree depend on an optional workspace prose file.
-      if (adapter === undefined && name === "artifact_seal" && packet.office === "engineering") {
+      if (adapter === undefined && name === "artifact_seal" && packet.assignment_role === "engineering") {
         continue;
       }
       if (adapter === undefined) throw new Error(`assignment tool ${name} has no bound adapter`);
@@ -559,11 +559,11 @@ function validatePacket(packet: PiAssignmentPacket): void {
     packet.runtime.credential_source.kind === "pi_auth_store" &&
     packet.runtime.credential_source.path.length === 0
   ) throw new Error("credential path is required");
-  const exactTarget = packet.office === "product_research"
+  const exactTarget = packet.assignment_role === "product_research"
     ? packet.ticket_attempt_id === null && packet.candidate_id === null
-    : packet.office === "engineering"
+    : packet.assignment_role === "engineering"
     ? packet.ticket_attempt_id !== null && packet.candidate_id === null
-    : packet.office === "quality"
+    : packet.assignment_role === "quality"
     ? packet.ticket_attempt_id !== null && packet.candidate_id !== null
     : false;
   if (!exactTarget) throw new Error("assignment durable target does not match its office");
@@ -683,7 +683,7 @@ function summarize(
   const stopReason = string(terminal?.stop_reason ?? terminal?.stopReason) ?? "terminal_missing";
   return {
     assignment_id: packet.assignment_id,
-    office: packet.office,
+    assignment_role: packet.assignment_role,
     stop_reason: stopReason,
     failure_reason: string(terminal?.failure_reason ?? terminal?.failureReason) ?? null,
     cost_status: cost === undefined ? "unknown" : "known",

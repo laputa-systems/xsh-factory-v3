@@ -749,7 +749,7 @@ impl KernelSessionRpc {
             || binding.assignment_id() != self.packet.assignment_id
             || binding.application_revision_id() != self.packet.application_revision_id
             || binding.campaign_id() != self.packet.campaign_id
-            || binding.office() != self.packet.office
+            || binding.assignment_role() != self.packet.assignment_role
         {
             return Err(StoreError::PacketIdentityMismatch.into());
         }
@@ -994,9 +994,9 @@ impl KernelSessionRpc {
     }
 
     async fn assignment_artifact_ids(&self) -> Result<BTreeSet<ArtifactId>, LocalTransportError> {
-        match self.packet.office {
-            factory_protocol::Office::ProductResearch => Ok(BTreeSet::new()),
-            factory_protocol::Office::Engineering => {
+        match self.packet.assignment_role {
+            factory_protocol::AssignmentRole::ProductResearch => Ok(BTreeSet::new()),
+            factory_protocol::AssignmentRole::Engineering => {
                 let attempt = self.packet.ticket_attempt_id.ok_or_else(|| {
                     invalid_rpc("artifact.read", "Engineering packet has no attempt target")
                 })?;
@@ -1039,7 +1039,7 @@ impl KernelSessionRpc {
                 }
                 Ok(ids)
             }
-            factory_protocol::Office::Quality => {
+            factory_protocol::AssignmentRole::Quality => {
                 let attempt = self.packet.ticket_attempt_id.ok_or_else(|| {
                     invalid_rpc("artifact.read", "Quality packet has no attempt target")
                 })?;
@@ -1230,7 +1230,7 @@ impl KernelSessionRpc {
     }
 
     async fn submit_product_ticket(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
-        if self.packet.office != factory_protocol::Office::ProductResearch
+        if self.packet.assignment_role != factory_protocol::AssignmentRole::ProductResearch
             || !self.allowed_tools.contains("product_submit_ticket")
         {
             return Err(invalid_rpc(
@@ -1279,7 +1279,7 @@ impl KernelSessionRpc {
     /// transition, so a scheduler that has not composed repository/ticket
     /// authority cannot cause a partial candidate write.
     async fn checkpoint_regression(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
-        if self.packet.office != factory_protocol::Office::Engineering
+        if self.packet.assignment_role != factory_protocol::AssignmentRole::Engineering
             || !self
                 .allowed_tools
                 .contains("candidate_checkpoint_regression")
@@ -1361,7 +1361,7 @@ impl KernelSessionRpc {
     /// above.  The candidate request cannot carry a tree, commit, validation
     /// result, repository, or ticket identity.
     async fn submit_candidate(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
-        if self.packet.office != factory_protocol::Office::Engineering
+        if self.packet.assignment_role != factory_protocol::AssignmentRole::Engineering
             || !self.allowed_tools.contains("candidate_submit")
         {
             return Err(invalid_rpc(
@@ -1448,7 +1448,7 @@ impl KernelSessionRpc {
     /// and exact tree come exclusively from the resolved authority, never
     /// from the frame.
     async fn run_quality_full_suite(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
-        if self.packet.office != factory_protocol::Office::Quality
+        if self.packet.assignment_role != factory_protocol::AssignmentRole::Quality
             || !self.allowed_tools.contains("quality_run_full_suite")
         {
             return Err(invalid_rpc(
@@ -1532,7 +1532,7 @@ impl KernelSessionRpc {
     /// interrupted Quality session. In either case the receipt is durable and
     /// exact; actor input cannot name a validation ID on its own.
     async fn submit_quality_review(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
-        if self.packet.office != factory_protocol::Office::Quality
+        if self.packet.assignment_role != factory_protocol::AssignmentRole::Quality
             || !self.allowed_tools.contains("quality_submit_review")
         {
             return Err(invalid_rpc(
@@ -2679,9 +2679,9 @@ fn base64_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use factory_protocol::{
-        AbsoluteHostPath, AggregateRevision, CredentialDescriptorV1, DurationMillis, MicroUsd,
-        ModelProfileV1, Office, RepositoryRelativePath, RuntimeIdentityV1, SessionLimitsV1,
-        ThinkingLevelV1,
+        AbsoluteHostPath, AggregateRevision, AssignmentRole, CredentialDescriptorV1,
+        DurationMillis, MicroUsd, ModelProfileV1, RepositoryRelativePath, RuntimeIdentityV1,
+        SessionLimitsV1, ThinkingLevelV1,
     };
 
     fn packet() -> AssignmentPacketV1 {
@@ -2693,7 +2693,7 @@ mod tests {
                 b"build",
             )),
             application_revision_id: factory_protocol::ApplicationRevisionId::new(3).unwrap(),
-            office: Office::Engineering,
+            assignment_role: AssignmentRole::Engineering,
             target: "test".to_owned(),
             ticket_attempt_id: Some(factory_protocol::TicketAttemptId::new(1).unwrap()),
             candidate_id: None,

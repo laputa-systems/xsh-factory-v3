@@ -2228,7 +2228,7 @@ async fn require_session(
     expected_office: i16,
 ) -> Result<(), DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT campaign_id, office, lifecycle FROM factory.sessions WHERE id = $1",
+        "SELECT campaign_id, assignment_role, lifecycle FROM factory.sessions WHERE id = $1",
         session_id.get(),
     )
     .fetch_optional(&mut **tx)
@@ -2236,7 +2236,7 @@ async fn require_session(
     .ok_or(DecisionStoreError::SessionJurisdictionMismatch)?;
     let lifecycle = row.lifecycle;
     if row.campaign_id != expected_campaign_id.get()
-        || row.office != expected_office
+        || row.assignment_role != expected_office
         || !matches!(lifecycle, SESSION_RUNNING | SESSION_SUCCEEDED)
     {
         return Err(DecisionStoreError::SessionJurisdictionMismatch);
@@ -2255,13 +2255,13 @@ async fn require_session_jurisdiction(
     expected_office: i16,
 ) -> Result<(), DecisionStoreError> {
     let row = sqlx::query!(
-        "SELECT campaign_id, office FROM factory.sessions WHERE id = $1",
+        "SELECT campaign_id, assignment_role FROM factory.sessions WHERE id = $1",
         session_id.get(),
     )
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(DecisionStoreError::SessionJurisdictionMismatch)?;
-    if row.campaign_id != expected_campaign_id.get() || row.office != expected_office {
+    if row.campaign_id != expected_campaign_id.get() || row.assignment_role != expected_office {
         return Err(DecisionStoreError::SessionJurisdictionMismatch);
     }
     Ok(())

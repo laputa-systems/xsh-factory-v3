@@ -8,9 +8,9 @@ use std::str::FromStr;
 
 use factory_protocol::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
-    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentPacketV1, CampaignId,
-    CandidateId, ContentDigest, CredentialDescriptorV1, DurationMillis, ExpectedRevision,
-    KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1, Office, ProcessCustodyV1,
+    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentPacketV1,
+    AssignmentRole, CampaignId, CandidateId, ContentDigest, CredentialDescriptorV1, DurationMillis,
+    ExpectedRevision, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1, ProcessCustodyV1,
     ReadExactFileV1, RepositoryId, RepositoryRelativePath, RuntimeIdentityV1, RuntimeRelativePath,
     SessionId, SessionLimitsV1, SessionState, StopReasonV1, TerminalCostV1, TerminalOperationV1,
     TerminalReportV1, ThinkingLevelV1, TicketAttemptId, UsageTotalsV1,
@@ -235,13 +235,13 @@ pub struct CampaignProductIdentity {
 }
 
 /// One bounded, read-only row in a campaign's provider-cost breakdown.
-/// Grouping these rows by office/model/outcome is presentation; the terminal
+/// Grouping these rows by assignment role/model/outcome is presentation; the terminal
 /// session fact remains the single source of its cost identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionCostBreakdown {
     pub session_id: SessionId,
     pub assignment_id: AssignmentId,
-    pub office: Office,
+    pub assignment_role: AssignmentRole,
     pub model_provider: String,
     pub model_id: String,
     pub outcome: SessionState,
@@ -252,12 +252,12 @@ pub struct SessionCostBreakdown {
     pub elapsed_millis: Option<u64>,
 }
 
-/// Complete spend aggregation for one office/model/outcome tuple. The
-/// application revision pins one model per office, bounding one campaign to
-/// three offices times six session outcomes.
+/// Complete spend aggregation for one assignment-role/model/outcome tuple. The
+/// application revision pins one model per assignment role, bounding one campaign to
+/// three roles times six session outcomes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionCostAggregate {
-    pub office: Office,
+    pub assignment_role: AssignmentRole,
     pub model_provider: String,
     pub model_id: String,
     pub outcome: SessionState,
@@ -531,7 +531,7 @@ impl ProcessStore {
         packet: &AssignmentPacketV1,
     ) -> Result<crate::local_transport::ActorConnectionIdentity, StoreError> {
         let row = sqlx::query!(
-            "SELECT assignment_id, application_revision_id, campaign_id, office, lifecycle
+            "SELECT assignment_id, application_revision_id, campaign_id, assignment_role, lifecycle
              FROM factory.sessions WHERE id = $1",
             session_id.get()
         )
@@ -542,7 +542,7 @@ impl ProcessStore {
             || row.assignment_id != packet.assignment_id.get()
             || row.application_revision_id != packet.application_revision_id.get()
             || row.campaign_id != packet.campaign_id.get()
-            || row.office != office_code(packet.office)
+            || row.assignment_role != assignment_role_code(packet.assignment_role)
         {
             return Err(StoreError::PacketIdentityMismatch);
         }
@@ -552,7 +552,7 @@ impl ProcessStore {
                 packet.assignment_id,
                 packet.application_revision_id,
                 packet.campaign_id,
-                packet.office,
+                packet.assignment_role,
             ),
         )
     }
@@ -571,7 +571,7 @@ impl ProcessStore {
     ) -> Result<Vec<RestartRecoverySession>, StoreError> {
         let rows = sqlx::query!(
             "SELECT s.id, s.revision, s.assignment_id, s.campaign_id,
-                    s.kernel_build_id, s.application_revision_id, s.office AS session_office,
+                    s.kernel_build_id, s.application_revision_id, s.assignment_role AS session_assignment_role,
                     s.model_provider AS session_model_provider, s.model_id AS session_model_id,
                     s.thinking_level AS session_thinking_level,
                     s.input_price_micro_usd_per_million AS session_input_price,
@@ -580,7 +580,7 @@ impl ProcessStore {
                     s.cache_write_price_micro_usd_per_million AS session_cache_write_price,
                     s.pid, s.pgid,
                     s.process_started_at_unix_millis,
-                    a.office AS assignment_office, a.target,
+                    a.assignment_role AS assignment_assignment_role, a.target,
                     a.packet_artifact_id, a.packet_digest,
                     a.system_prompt_artifact_id, a.assignment_prompt_artifact_id,
                     a.required_read_manifest_artifact_id,
@@ -659,8 +659,8 @@ impl ProcessStore {
                 || packet.application_revision_id.get() != row.application_revision_id
                 || packet.kernel_build_id.digest() != persisted_build
                 || packet.packet_digest != packet_digest
-                || office_code(packet.office) != row.assignment_office
-                || office_code(packet.office) != row.session_office
+                || assignment_role_code(packet.assignment_role) != row.assignment_assignment_role
+                || assignment_role_code(packet.assignment_role) != row.session_assignment_role
                 || packet.target != row.target
                 || packet.system_prompt_artifact_id.get() != row.system_prompt_artifact_id
                 || packet.assignment_prompt_artifact_id.get() != row.assignment_prompt_artifact_id
@@ -1211,11 +1211,12 @@ impl ProcessStore {
         require_artifact(&mut tx, command.required_read_manifest_artifact_id, None).await?;
         verify_prompt_artifacts(&mut tx, &wire).await?;
         let id = command.identity.assignment_id().get();
-        let office = office_code(command.packet.office);
+        let role_code = assignment_role_code(command.packet.assignment_role);
         let model = &command.packet.model;
         sqlx::query!(
             "INSERT INTO factory.assignments (
-                 id, campaign_id, kernel_build_id, application_revision_id, office, target,
+                 id, campaign_id, kernel_build_id, application_revision_id,
+                 office_id, assignment_role, target,
                  ticket_attempt_id, candidate_id,
                  packet_artifact_id, packet_digest, system_prompt_artifact_id,
                  assignment_prompt_artifact_id, required_read_manifest_artifact_id,
@@ -1225,13 +1226,16 @@ impl ProcessStore {
                  turn_limit, wall_limit_millis, output_byte_limit, terminal_operations_mask,
                  remaining_campaign_allowance_micro_usd, attempt_ordinal, lifecycle, revision
              ) OVERRIDING SYSTEM VALUE VALUES (
-                 $1, $2, (SELECT id FROM factory.kernel_builds WHERE build_digest = $3), $4, $5, $6, $7, $8,
+                 $1, $2, (SELECT id FROM factory.kernel_builds WHERE build_digest = $3), $4,
+                 (SELECT id FROM factory.offices
+                    WHERE application_revision_id = $4 AND assignment_role = $5),
+                 $5, $6, $7, $8,
                  $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, 0, 0)",
             id,
             command.packet.campaign_id.get(),
             &command.packet.kernel_build_id.digest().as_bytes()[..],
             command.packet.application_revision_id.get(),
-            office,
+            role_code,
             command.packet.target,
             command.packet.ticket_attempt_id.map(TicketAttemptId::get),
             command.packet.candidate_id.map(CandidateId::get),
@@ -1371,12 +1375,14 @@ impl ProcessStore {
         }
         let session_id = sqlx::query_scalar!(
             "INSERT INTO factory.sessions (
-                 assignment_id, campaign_id, kernel_build_id, application_revision_id, office,
+                 assignment_id, campaign_id, kernel_build_id, application_revision_id,
+                 office_id, assignment_role,
                  model_provider, model_id, thinking_level, input_price_micro_usd_per_million,
                  output_price_micro_usd_per_million, cache_read_price_micro_usd_per_million,
                  cache_write_price_micro_usd_per_million, pid, pgid,
                  process_started_at_unix_millis, lifecycle, revision
-             ) SELECT a.id, a.campaign_id, a.kernel_build_id, a.application_revision_id, a.office,
+             ) SELECT a.id, a.campaign_id, a.kernel_build_id, a.application_revision_id,
+                 a.office_id, a.assignment_role,
                  a.model_provider, a.model_id, a.thinking_level, a.input_price_micro_usd_per_million,
                  a.output_price_micro_usd_per_million, a.cache_read_price_micro_usd_per_million,
                  a.cache_write_price_micro_usd_per_million, $2, $3, $4, $5, 0
@@ -1957,7 +1963,7 @@ impl ProcessStore {
         })
     }
 
-    /// Pages the exact terminal/session facts used for office, assignment,
+    /// Pages the exact terminal/session facts used for assignment role, assignment,
     /// model, and outcome spend reporting. It is deliberately read-only and
     /// bounded; callers continue with the last returned `SessionId`.
     pub async fn campaign_session_costs(
@@ -1985,7 +1991,7 @@ impl ProcessStore {
         }
         let after = after_session_id.map_or(0, SessionId::get);
         let rows = sqlx::query!(
-            "SELECT id, assignment_id, office, model_provider, model_id,
+            "SELECT id, assignment_id, assignment_role, model_provider, model_id,
                     lifecycle, cost_state, cost_micro_usd,
                     CASE WHEN lifecycle = $4 THEN GREATEST(
                         0,
@@ -2007,7 +2013,7 @@ impl ProcessStore {
                 Ok(SessionCostBreakdown {
                     session_id: SessionId::new(row.id)?,
                     assignment_id: AssignmentId::new(row.assignment_id)?,
-                    office: office_from_code(row.office)?,
+                    assignment_role: assignment_role_from_code(row.assignment_role)?,
                     model_provider: row.model_provider,
                     model_id: row.model_id,
                     outcome: session_state_from_code(row.lifecycle)?,
@@ -2025,13 +2031,13 @@ impl ProcessStore {
 
     /// Aggregates every session in the campaign without truncating spend at
     /// the recent-session display bound. The immutable application profile
-    /// limits the result to eighteen office/model/outcome tuples.
+    /// limits the result to eighteen assignment-role/model/outcome tuples.
     pub async fn campaign_session_cost_aggregates(
         &self,
         campaign_id: CampaignId,
     ) -> Result<Vec<SessionCostAggregate>, StoreError> {
         let rows = sqlx::query!(
-            "SELECT office, model_provider, model_id, lifecycle,
+            "SELECT assignment_role, model_provider, model_id, lifecycle,
                     COUNT(*)::BIGINT AS \"session_count!\",
                     COALESCE(SUM(cost_micro_usd), 0)::BIGINT
                         AS \"accounted_cost_micro_usd!\",
@@ -2043,8 +2049,8 @@ impl ProcessStore {
                         AS \"exceeded_cost_session_count!\"
              FROM factory.sessions
              WHERE campaign_id = $1
-             GROUP BY office, model_provider, model_id, lifecycle
-             ORDER BY office ASC, model_provider ASC, model_id ASC, lifecycle ASC",
+             GROUP BY assignment_role, model_provider, model_id, lifecycle
+             ORDER BY assignment_role ASC, model_provider ASC, model_id ASC, lifecycle ASC",
             campaign_id.get(),
             COST_UNKNOWN,
             COST_EXCEEDED,
@@ -2057,7 +2063,7 @@ impl ProcessStore {
         rows.into_iter()
             .map(|row| {
                 Ok(SessionCostAggregate {
-                    office: office_from_code(row.office)?,
+                    assignment_role: assignment_role_from_code(row.assignment_role)?,
                     model_provider: row.model_provider,
                     model_id: row.model_id,
                     outcome: session_state_from_code(row.lifecycle)?,
@@ -2202,9 +2208,13 @@ async fn validate_assignment_target_in_transaction(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     packet: &AssignmentPacketV1,
 ) -> Result<(), StoreError> {
-    let target_exists = match (packet.office, packet.ticket_attempt_id, packet.candidate_id) {
-        (Office::ProductResearch, None, None) => true,
-        (Office::Engineering, Some(ticket_attempt_id), None) => sqlx::query_scalar!(
+    let target_exists = match (
+        packet.assignment_role,
+        packet.ticket_attempt_id,
+        packet.candidate_id,
+    ) {
+        (AssignmentRole::ProductResearch, None, None) => true,
+        (AssignmentRole::Engineering, Some(ticket_attempt_id), None) => sqlx::query_scalar!(
             "SELECT ta.id
                    FROM factory.ticket_attempts ta
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
@@ -2220,8 +2230,9 @@ async fn validate_assignment_target_in_transaction(
         .fetch_optional(&mut **tx)
         .await?
         .is_some(),
-        (Office::Quality, Some(ticket_attempt_id), Some(candidate_id)) => sqlx::query_scalar!(
-            "SELECT c.id
+        (AssignmentRole::Quality, Some(ticket_attempt_id), Some(candidate_id)) => {
+            sqlx::query_scalar!(
+                "SELECT c.id
                    FROM factory.candidates c
                    JOIN factory.ticket_attempts ta ON ta.id = c.ticket_attempt_id
                    JOIN factory.ticket_revisions tr ON tr.id = ta.ticket_revision_id
@@ -2236,14 +2247,15 @@ async fn validate_assignment_target_in_transaction(
                     AND (ta.stage IN (2, 6)
                          OR (ta.stage = 3 AND qv.id IS NOT NULL AND qr.id IS NULL))
                   FOR KEY SHARE OF c, ta, tr",
-            candidate_id.get(),
-            ticket_attempt_id.get(),
-            packet.campaign_id.get(),
-            packet.application_revision_id.get(),
-        )
-        .fetch_optional(&mut **tx)
-        .await?
-        .is_some(),
+                candidate_id.get(),
+                ticket_attempt_id.get(),
+                packet.campaign_id.get(),
+                packet.application_revision_id.get(),
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+            .is_some()
+        }
         _ => false,
     };
     if target_exists {
@@ -2347,7 +2359,7 @@ fn verify_wire_domain_mapping(
         || wire.assignment_id != packet.assignment_id.get()
         || wire.application_revision_id != packet.application_revision_id.get()
         || wire_build != packet.kernel_build_id.digest()
-        || wire.office != office_name(packet.office)
+        || wire.assignment_role != assignment_role_name(packet.assignment_role)
         || wire.target != packet.target
         || wire.ticket_attempt_id != packet.ticket_attempt_id.map(TicketAttemptId::get)
         || wire.candidate_id != packet.candidate_id.map(CandidateId::get)
@@ -2470,10 +2482,10 @@ fn verify_wire_domain_mapping(
 fn assignment_packet_from_wire(
     wire: &factory_protocol::AssignmentPacketWireV1,
 ) -> Result<AssignmentPacketV1, StoreError> {
-    let office = match wire.office.as_str() {
-        "product_research" => Office::ProductResearch,
-        "engineering" => Office::Engineering,
-        "quality" => Office::Quality,
+    let assignment_role = match wire.assignment_role.as_str() {
+        "product_research" => AssignmentRole::ProductResearch,
+        "engineering" => AssignmentRole::Engineering,
+        "quality" => AssignmentRole::Quality,
         _ => return Err(StoreError::PacketIdentityMismatch),
     };
     let thinking_level = match wire.model.thinking_level.as_str() {
@@ -2565,7 +2577,7 @@ fn assignment_packet_from_wire(
         assignment_id: AssignmentId::new(wire.assignment_id)?,
         kernel_build_id: KernelBuildId::new(ContentDigest::from_str(&wire.kernel_build_id)?),
         application_revision_id: ApplicationRevisionId::new(wire.application_revision_id)?,
-        office,
+        assignment_role,
         target: wire.target.clone(),
         ticket_attempt_id: wire
             .ticket_attempt_id
@@ -2970,28 +2982,28 @@ fn fingerprint_terminal(
     hash_digest(&mut h, r.report_digest);
     ContentDigest::from_bytes(*h.finalize().as_bytes())
 }
-fn office_code(office: factory_protocol::Office) -> i16 {
-    match office {
-        factory_protocol::Office::ProductResearch => 0,
-        factory_protocol::Office::Engineering => 1,
-        factory_protocol::Office::Quality => 2,
+fn assignment_role_code(assignment_role: factory_protocol::AssignmentRole) -> i16 {
+    match assignment_role {
+        factory_protocol::AssignmentRole::ProductResearch => 0,
+        factory_protocol::AssignmentRole::Engineering => 1,
+        factory_protocol::AssignmentRole::Quality => 2,
     }
 }
 
-fn office_from_code(value: i16) -> Result<Office, StoreError> {
+fn assignment_role_from_code(value: i16) -> Result<AssignmentRole, StoreError> {
     match value {
-        0 => Ok(Office::ProductResearch),
-        1 => Ok(Office::Engineering),
-        2 => Ok(Office::Quality),
+        0 => Ok(AssignmentRole::ProductResearch),
+        1 => Ok(AssignmentRole::Engineering),
+        2 => Ok(AssignmentRole::Quality),
         _ => Err(StoreError::CorruptLifecycleColumn),
     }
 }
 
-fn office_name(office: factory_protocol::Office) -> &'static str {
-    match office {
-        factory_protocol::Office::ProductResearch => "product_research",
-        factory_protocol::Office::Engineering => "engineering",
-        factory_protocol::Office::Quality => "quality",
+fn assignment_role_name(assignment_role: factory_protocol::AssignmentRole) -> &'static str {
+    match assignment_role {
+        factory_protocol::AssignmentRole::ProductResearch => "product_research",
+        factory_protocol::AssignmentRole::Engineering => "engineering",
+        factory_protocol::AssignmentRole::Quality => "quality",
     }
 }
 

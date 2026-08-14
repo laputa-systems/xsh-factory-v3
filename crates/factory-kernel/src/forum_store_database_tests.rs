@@ -17,13 +17,13 @@ use crate::{
     storage::{InstallKernelBuild, KernelStore, RegisterArtifact, SCHEMA_IDENTITY},
 };
 use factory_protocol::{
-    AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentId, CampaignId, ContentDigest,
-    ExpectedRevision, FORUM_SNIPPET_MAX_BYTES, ForumAttachmentInput, ForumAttachmentLabel,
-    ForumCreateThreadCommand, ForumCreateThreadInput, ForumCreateTopicCommand,
-    ForumCreateTopicInput, ForumMutationIdentity, ForumPageLimit, ForumPostBody, ForumPostCommand,
-    ForumPostInput, ForumPostKind, ForumSearchCursor, ForumSearchInput, ForumSearchQuery,
-    ForumThreadId, ForumThreadPage, ForumThreadTitle, ForumTopicDescription, ForumTopicName,
-    KernelBuildId, Office, SessionId,
+    AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentId, AssignmentRole, CampaignId,
+    ContentDigest, ExpectedRevision, FORUM_SNIPPET_MAX_BYTES, ForumAttachmentInput,
+    ForumAttachmentLabel, ForumCreateThreadCommand, ForumCreateThreadInput,
+    ForumCreateTopicCommand, ForumCreateTopicInput, ForumMutationIdentity, ForumPageLimit,
+    ForumPostBody, ForumPostCommand, ForumPostInput, ForumPostKind, ForumSearchCursor,
+    ForumSearchInput, ForumSearchQuery, ForumThreadId, ForumThreadPage, ForumThreadTitle,
+    ForumTopicDescription, ForumTopicName, KernelBuildId, SessionId,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -36,7 +36,7 @@ fn forum_commands_are_audited_idempotent_attributed_and_roll_back_on_rejection()
         kernel.migrate_and_verify().await.expect("migrate");
         let artifact_id = register_artifact(&kernel).await;
         let forum = kernel.forum_store();
-        let binding = binding(&kernel, Office::Engineering).await;
+        let binding = binding(&kernel, AssignmentRole::Engineering).await;
         let before = forum.status().await.expect("initial status");
 
         let create_topic_command = topic_command(before.aggregate_revision, "durable topic");
@@ -161,7 +161,7 @@ fn forum_commands_are_audited_idempotent_attributed_and_roll_back_on_rejection()
             posts[0].author,
             factory_protocol::ForumAuthor::Actor {
                 session_id: binding.session_id(),
-                office: binding.office(),
+                assignment_role: binding.assignment_role(),
             }
         );
         assert_eq!(posts[0].attachments[0].artifact_id, artifact_id);
@@ -358,7 +358,7 @@ fn forum_search_cursor_and_snippet_are_stable_after_activity_changes() {
         let kernel = kernel().await;
         kernel.migrate_and_verify().await.expect("migrate");
         let forum = kernel.forum_store();
-        let binding = binding(&kernel, Office::Engineering).await;
+        let binding = binding(&kernel, AssignmentRole::Engineering).await;
         let revision = forum.status().await.expect("status").aggregate_revision;
         let topic = forum
             .create_topic(binding, &topic_command(revision, "search topic needle"))
@@ -611,7 +611,7 @@ async fn register_artifact(kernel: &KernelStore) -> ArtifactId {
     artifact
 }
 
-async fn binding(kernel: &KernelStore, office: Office) -> ActorConnectionBinding {
+async fn binding(kernel: &KernelStore, assignment_role: AssignmentRole) -> ActorConnectionBinding {
     // Unix-domain socket paths have a small platform limit. Keep this test
     // runtime root intentionally short; the semantic identity still comes
     // from the kernel-created socket binding, never from the path.
@@ -625,7 +625,7 @@ async fn binding(kernel: &KernelStore, office: Office) -> ActorConnectionBinding
             AssignmentId::new(1).unwrap(),
             ApplicationRevisionId::new(1).unwrap(),
             CampaignId::new(1).unwrap(),
-            office,
+            assignment_role,
         ))
         .expect("daemon-created actor descriptor");
     let binding = server.binding();

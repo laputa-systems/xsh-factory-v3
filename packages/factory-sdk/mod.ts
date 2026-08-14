@@ -7,7 +7,7 @@ export {
   type CommandProfileV1,
   defineApplicationSourceV1,
   defineApplicationV1,
-  type OfficeV1,
+  type AssignmentRoleV1,
   type TemplateArtifactV1,
   type TemplateDeclarationV1,
   type TicketPolicyV1,

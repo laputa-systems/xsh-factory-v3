@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT campaign_id, application_revision_id, office, ticket_attempt_id, candidate_id\n               FROM factory.assignments\n              WHERE id = $1",
+  "query": "SELECT campaign_id, application_revision_id, assignment_role, ticket_attempt_id, candidate_id\n               FROM factory.assignments\n              WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -27,12 +27,12 @@
       },
       {
         "ordinal": 2,
-        "name": "office",
+        "name": "assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.assignments",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -72,5 +72,5 @@
       true
     ]
   },
-  "hash": "7011b1b0ca5351b97b058833ed668ed6603e55f2a47473e894260f99f9336624"
+  "hash": "8353e3810d8d40b07c8d9ff1496e9ec58d8337c3dbfe690c622f748cf5f8bf53"
 }

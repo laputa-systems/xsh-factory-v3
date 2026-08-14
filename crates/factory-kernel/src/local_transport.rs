@@ -26,12 +26,12 @@ use factory_protocol::{
     ApplicationRevisionId, ApplicationRevisionReceiptResponse, ApplicationShowResponse,
     ArchitectDecideCandidateRequest, ArchitectDecisionReceiptResponse,
     ArchitectReleaseTicketAttemptRequest, ArchitectSponsorTicketRevisionRequest, AssignmentId,
-    AuditShowResponse, CampaignId, CampaignReceiptResponse, CampaignStatusResponse,
+    AssignmentRole, AuditShowResponse, CampaignId, CampaignReceiptResponse, CampaignStatusResponse,
     CandidateShowResponse, ConflictResponse, ErrorResponse, FRAME_PREFIX_BYTES,
     ForumCreateThreadRequestV1, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
     ForumListTopicsRequestV1, ForumPostRequestV1, ForumPostsResponseV1, ForumReadThreadRequestV1,
     ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1, ForumTopicsResponseV1,
-    FrameError, Office, OperationReceiptResponse, OperatorApplicationActivateRequest,
+    FrameError, OperationReceiptResponse, OperatorApplicationActivateRequest,
     OperatorApplicationRegisterRequest, OperatorApplicationShowRequest,
     OperatorArtifactSealReceiptResponse, OperatorArtifactSealRequest, OperatorAuditShowRequest,
     OperatorCampaignStatusRequest, OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
@@ -179,7 +179,7 @@ pub struct ActorConnectionIdentity {
     assignment_id: AssignmentId,
     application_revision_id: ApplicationRevisionId,
     campaign_id: CampaignId,
-    office: Office,
+    assignment_role: AssignmentRole,
 }
 
 impl ActorConnectionIdentity {
@@ -195,14 +195,14 @@ impl ActorConnectionIdentity {
         assignment_id: AssignmentId,
         application_revision_id: ApplicationRevisionId,
         campaign_id: CampaignId,
-        office: Office,
+        assignment_role: AssignmentRole,
     ) -> Self {
         Self {
             session_id,
             assignment_id,
             application_revision_id,
             campaign_id,
-            office,
+            assignment_role,
         }
     }
 }
@@ -219,7 +219,7 @@ pub struct ActorConnectionBinding {
     assignment_id: AssignmentId,
     application_revision_id: ApplicationRevisionId,
     campaign_id: CampaignId,
-    office: Office,
+    assignment_role: AssignmentRole,
 }
 
 impl ActorConnectionBinding {
@@ -229,7 +229,7 @@ impl ActorConnectionBinding {
             assignment_id: identity.assignment_id,
             application_revision_id: identity.application_revision_id,
             campaign_id: identity.campaign_id,
-            office: identity.office,
+            assignment_role: identity.assignment_role,
         }
     }
 
@@ -254,8 +254,8 @@ impl ActorConnectionBinding {
     }
 
     #[must_use]
-    pub const fn office(&self) -> Office {
-        self.office
+    pub const fn assignment_role(&self) -> AssignmentRole {
+        self.assignment_role
     }
 }
 
@@ -2035,7 +2035,7 @@ mod tests {
         },
     };
 
-    use factory_protocol::{OP_ARTIFACT_READ, Office};
+    use factory_protocol::{AssignmentRole, OP_ARTIFACT_READ};
 
     use super::*;
 
@@ -2317,7 +2317,10 @@ mod tests {
                     .serve(|request| async move {
                         assert_eq!(request.binding().session_id(), expected.session_id());
                         assert_eq!(request.binding().assignment_id(), expected.assignment_id());
-                        assert_eq!(request.binding().office(), expected.office());
+                        assert_eq!(
+                            request.binding().assignment_role(),
+                            expected.assignment_role()
+                        );
                         Ok(br#"{"accepted":true}"#.to_vec())
                     })
                     .await
@@ -2614,7 +2617,7 @@ mod tests {
                 AssignmentId::new(2).unwrap(),
                 ApplicationRevisionId::new(3).unwrap(),
                 CampaignId::new(4).unwrap(),
-                Office::Engineering,
+                AssignmentRole::Engineering,
             ),
         );
         (

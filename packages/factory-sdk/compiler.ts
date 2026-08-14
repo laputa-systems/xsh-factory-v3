@@ -2,7 +2,7 @@ import { defineApplicationV1 } from "./application.ts";
 import type {
   ApplicationDefinitionV1,
   ApplicationSourceDefinitionV1,
-  OfficeV1,
+  AssignmentRoleV1,
   TemplateArtifactV1,
   TemplateDeclarationV1,
 } from "./application.ts";
@@ -132,7 +132,7 @@ export async function compileApplicationWithTemplatesV1(
 export function validateTemplateForOfficeV1(
   source: string,
   artifact: TemplateDeclarationV1,
-  office?: OfficeV1 | "mission",
+  office?: AssignmentRoleV1 | "mission",
 ): readonly string[] {
   const declared = new Set(artifact.placeholders);
   const allowed = office === undefined ? undefined : allowedPlaceholders(office);
@@ -169,7 +169,7 @@ export function renderTemplateV1(
   source: string,
   artifact: TemplateDeclarationV1,
   values: Readonly<Record<string, string>>,
-  office?: OfficeV1,
+  office?: AssignmentRoleV1,
 ): Uint8Array {
   validateTemplateForOfficeV1(source, artifact, office);
   const declared = new Set(artifact.placeholders);
@@ -194,14 +194,14 @@ export function renderTemplateV1(
   return bytes;
 }
 
-function allowedPlaceholders(office: OfficeV1 | "mission"): ReadonlySet<string> {
-  if (office === "mission") return new Set();
+function allowedPlaceholders(assignment_role: AssignmentRoleV1 | "mission"): ReadonlySet<string> {
+  if (assignment_role === "mission") return new Set();
   const common = [
     "ASSIGNMENT_ID",
     "MISSION",
     "TARGET",
   ];
-  const officeSpecific: Record<OfficeV1, readonly string[]> = {
+  const officeSpecific: Record<AssignmentRoleV1, readonly string[]> = {
     product_research: [],
     engineering: [
       "TICKET_ID",
@@ -211,18 +211,18 @@ function allowedPlaceholders(office: OfficeV1 | "mission"): ReadonlySet<string> 
     ],
     quality: ["TICKET_ID", "TICKET_REVISION_ID", "CANDIDATE_ID", "VALIDATION_ID"],
   };
-  return new Set([...common, ...officeSpecific[office]]);
+  return new Set([...common, ...officeSpecific[assignment_role]]);
 }
 
 function templateArtifacts(
   definition: ApplicationSourceDefinitionV1,
-): readonly [TemplateDeclarationV1, OfficeV1 | "mission"][] {
-  const artifacts: [TemplateDeclarationV1, OfficeV1 | "mission"][] = [
+): readonly [TemplateDeclarationV1, AssignmentRoleV1 | "mission"][] {
+  const artifacts: [TemplateDeclarationV1, AssignmentRoleV1 | "mission"][] = [
     [definition.mission_template, "mission"],
   ];
-  for (const profile of definition.office_profiles) {
-    artifacts.push([profile.system_template, profile.office]);
-    artifacts.push([profile.assignment_template, profile.office]);
+  for (const profile of definition.assignment_role_profiles) {
+    artifacts.push([profile.system_template, profile.assignment_role]);
+    artifacts.push([profile.assignment_template, profile.assignment_role]);
   }
   return artifacts;
 }
@@ -234,7 +234,7 @@ function materializeApplicationDefinition(
   return defineApplicationV1({
     ...source,
     mission_template: materializeTemplate(source.mission_template, templateDigests),
-    office_profiles: source.office_profiles.map((profile) => ({
+    assignment_role_profiles: source.assignment_role_profiles.map((profile) => ({
       ...profile,
       system_template: materializeTemplate(profile.system_template, templateDigests),
       assignment_template: materializeTemplate(profile.assignment_template, templateDigests),

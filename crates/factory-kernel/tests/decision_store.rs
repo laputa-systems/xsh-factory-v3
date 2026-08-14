@@ -29,16 +29,16 @@ use factory_protocol::{
     ApplicationRevisionId, ArchitectDecisionKindV1, ArchitectPrincipalV1,
     AssignmentCredentialWireV1, AssignmentEvidenceRoleV1, AssignmentEvidenceV1,
     AssignmentEvidenceWireV1, AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1,
-    AssignmentPacketWireV1, AssignmentReadWireV1, AssignmentRuntimeWireV1,
-    CandidateDecisionRequestV1, CandidateDecisionV1, CandidateSubmissionV1, CommandWireV1,
-    CommitMessageWireV1, ContentDigest, CredentialDescriptorV1, DurationMillis, ExecutableWireV1,
-    ExpectedRevision, GitWireV1, KernelBuildId, LimitsWireV1, MicroUsd, ModelProfileV1,
-    ModelWireV1, Office, OfficeWireV1, ProcessCustodyV1, QualityReviewSubmissionV1,
-    ReadExactFileV1, ReleaseDecisionV1, RepositoryObjectIdV1, RepositoryRelativePath,
-    RepositoryWireV1, RuntimeIdentityV1, SealedArtifactReferenceV1, SessionLimitsV1,
-    SponsorshipDecisionV1, StopReasonV1, TemplateWireV1, TerminalOperationV1, TerminalReportV1,
-    ThinkingLevelV1, TicketBoundsWireV1, TicketPolicyWireV1, UsageTotalsV1, ValidationWireV1,
-    canonical_application_bundle_json_v1, canonical_assignment_packet_json_v1,
+    AssignmentPacketWireV1, AssignmentReadWireV1, AssignmentRole, AssignmentRoleWireV1,
+    AssignmentRuntimeWireV1, CandidateDecisionRequestV1, CandidateDecisionV1,
+    CandidateSubmissionV1, CommandWireV1, CommitMessageWireV1, ContentDigest,
+    CredentialDescriptorV1, DurationMillis, ExecutableWireV1, ExpectedRevision, GitWireV1,
+    KernelBuildId, LimitsWireV1, MicroUsd, ModelProfileV1, ModelWireV1, ProcessCustodyV1,
+    QualityReviewSubmissionV1, ReadExactFileV1, ReleaseDecisionV1, RepositoryObjectIdV1,
+    RepositoryRelativePath, RepositoryWireV1, RuntimeIdentityV1, SealedArtifactReferenceV1,
+    SessionLimitsV1, SponsorshipDecisionV1, StopReasonV1, TemplateWireV1, TerminalOperationV1,
+    TerminalReportV1, ThinkingLevelV1, TicketBoundsWireV1, TicketPolicyWireV1, UsageTotalsV1,
+    ValidationWireV1, canonical_application_bundle_json_v1, canonical_assignment_packet_json_v1,
     unsigned_assignment_packet_digest_v1,
 };
 
@@ -59,7 +59,7 @@ fn typed_candidate_validation_review_decision_delivery_vertical() {
 fn failed_attempt_requires_an_explicit_architect_release() {
     smol::block_on(async {
         let mut fixture = Fixture::new().await;
-        let engineering = fixture.open_session(Office::Engineering).await;
+        let engineering = fixture.open_session(AssignmentRole::Engineering).await;
         let candidate = fixture
             // A regression checkpoint intentionally captures the pristine
             // base tree before the implementation exists. Candidate storage
@@ -160,7 +160,7 @@ fn failed_attempt_requires_an_explicit_architect_release() {
 fn candidate_submission_accepts_an_empty_checkpoint_patch_for_a_ticket_reproducer() {
     smol::block_on(async {
         let mut fixture = Fixture::new().await;
-        let engineering = fixture.open_session(Office::Engineering).await;
+        let engineering = fixture.open_session(AssignmentRole::Engineering).await;
         // Product has already sealed and run the ticket reproducer. An
         // Engineering checkpoint may therefore capture the pristine base tree
         // while the candidate patch itself supplies the durable regression
@@ -192,7 +192,7 @@ fn candidate_submission_accepts_an_empty_checkpoint_patch_for_a_ticket_reproduce
 fn candidate_submission_accepts_controller_recovery_evidence_from_a_newer_build() {
     smol::block_on(async {
         let mut fixture = Fixture::new().await;
-        let engineering = fixture.open_session(Office::Engineering).await;
+        let engineering = fixture.open_session(AssignmentRole::Engineering).await;
         // Artifacts are globally content-addressed, so their row records the
         // first physical sealer. A recovered controller may create fresh
         // kernel evidence under a newer installed build while the campaign
@@ -362,7 +362,7 @@ impl Fixture {
     }
 
     async fn run_vertical(&mut self) {
-        let first_engineering = self.open_session(Office::Engineering).await;
+        let first_engineering = self.open_session(AssignmentRole::Engineering).await;
         let first = self
             .submit_candidate(&first_engineering, 'c', 'd', "candidate-d")
             .await;
@@ -443,7 +443,7 @@ impl Fixture {
             .await;
         self.finish_session(first_engineering).await;
 
-        let first_quality = self.open_session(Office::Quality).await;
+        let first_quality = self.open_session(AssignmentRole::Quality).await;
         let quality_first = self
             .record_validation(
                 first.candidate_id,
@@ -459,7 +459,7 @@ impl Fixture {
         // submit prose against this exact durable receipt without rerunning
         // the suite or inheriting a trusted actor result.
         self.finish_session(first_quality).await;
-        let continuation_quality = self.open_session(Office::Quality).await;
+        let continuation_quality = self.open_session(AssignmentRole::Quality).await;
         let accepted_review = self
             .submit_review(
                 first.candidate_id,
@@ -489,7 +489,7 @@ impl Fixture {
         self.attempt_revision = reworked.resulting_attempt_revision;
         self.finish_session(continuation_quality).await;
 
-        let second_engineering = self.open_session(Office::Engineering).await;
+        let second_engineering = self.open_session(AssignmentRole::Engineering).await;
         let second = self
             .submit_candidate(&second_engineering, 'f', 'c', "candidate-c")
             .await;
@@ -514,7 +514,7 @@ impl Fixture {
             .await;
         self.finish_session(second_engineering).await;
 
-        let second_quality = self.open_session(Office::Quality).await;
+        let second_quality = self.open_session(AssignmentRole::Quality).await;
         let quality_second = self
             .record_validation(
                 second.candidate_id,
@@ -794,7 +794,7 @@ impl Fixture {
             .await
     }
 
-    async fn open_session(&mut self, office: Office) -> LiveSession {
+    async fn open_session(&mut self, assignment_role: AssignmentRole) -> LiveSession {
         let process = self.store.process_store();
         self.assignment_ordinal = self
             .assignment_ordinal
@@ -829,17 +829,17 @@ impl Fixture {
             assignment_id: identity.assignment_id(),
             kernel_build_id: self.build.kernel_build_id,
             application_revision_id: self.application,
-            office,
+            assignment_role,
             target: "one exact candidate".to_owned(),
             ticket_attempt_id: Some(self.attempt_id),
             // Quality sessions are created only after the candidate they
             // review, and this fixture records that candidate below.
-            candidate_id: if office == Office::Quality {
+            candidate_id: if assignment_role == AssignmentRole::Quality {
                 self.current_candidate
             } else {
                 None
             },
-            assignment_evidence: if office == Office::ProductResearch {
+            assignment_evidence: if assignment_role == AssignmentRole::ProductResearch {
                 Vec::new()
             } else {
                 vec![AssignmentEvidenceV1 {
@@ -1255,10 +1255,10 @@ fn packet_wire(
         assignment_id: packet.assignment_id.get(),
         application_revision_id: packet.application_revision_id.get(),
         kernel_build_id: packet.kernel_build_id.digest().to_hex(),
-        office: match packet.office {
-            Office::ProductResearch => "product_research",
-            Office::Engineering => "engineering",
-            Office::Quality => "quality",
+        assignment_role: match packet.assignment_role {
+            AssignmentRole::ProductResearch => "product_research",
+            AssignmentRole::Engineering => "engineering",
+            AssignmentRole::Quality => "quality",
         }
         .to_owned(),
         target: packet.target.clone(),
@@ -1376,29 +1376,30 @@ fn bundle_json(
         stderr_byte_limit: 4_096,
         expected_exit_status: 0,
     };
-    let office = |name: &str, system: usize, assignment: usize| OfficeWireV1 {
-        office: name.to_owned(),
-        system_template: template(system),
-        assignment_template: template(assignment),
-        tools: vec!["workspace_read".to_owned()],
-        model: ModelWireV1 {
-            provider: "fixture".to_owned(),
-            model_id: "fixture".to_owned(),
-            thinking_level: "none".to_owned(),
-            context_token_limit: 1,
-            output_token_limit: 1,
-            price_input_micro_usd_per_million_tokens: 1,
-            price_output_micro_usd_per_million_tokens: 1,
-            price_cache_read_micro_usd_per_million_tokens: 1,
-            price_cache_write_micro_usd_per_million_tokens: 1,
-            capability_flags: Vec::new(),
-        },
-        limits: LimitsWireV1 {
-            turn_limit: 1,
-            wall_limit_millis: 10_000,
-            output_byte_limit: 4_096,
-        },
-    };
+    let assignment_role_profile =
+        |name: &str, system: usize, assignment: usize| AssignmentRoleWireV1 {
+            assignment_role: name.to_owned(),
+            system_template: template(system),
+            assignment_template: template(assignment),
+            tools: vec!["workspace_read".to_owned()],
+            model: ModelWireV1 {
+                provider: "fixture".to_owned(),
+                model_id: "fixture".to_owned(),
+                thinking_level: "none".to_owned(),
+                context_token_limit: 1,
+                output_token_limit: 1,
+                price_input_micro_usd_per_million_tokens: 1,
+                price_output_micro_usd_per_million_tokens: 1,
+                price_cache_read_micro_usd_per_million_tokens: 1,
+                price_cache_write_micro_usd_per_million_tokens: 1,
+                capability_flags: Vec::new(),
+            },
+            limits: LimitsWireV1 {
+                turn_limit: 1,
+                wall_limit_millis: 10_000,
+                output_byte_limit: 4_096,
+            },
+        };
     canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
         format_version: 1,
         application_key: application_key.to_owned(),
@@ -1410,10 +1411,10 @@ fn bundle_json(
             delivery_mode: "local_fast_forward_only".to_owned(),
         },
         mission_template: template(0),
-        office_profiles: vec![
-            office("product_research", 1, 2),
-            office("engineering", 3, 4),
-            office("quality", 5, 6),
+        assignment_role_profiles: vec![
+            assignment_role_profile("product_research", 1, 2),
+            assignment_role_profile("engineering", 3, 4),
+            assignment_role_profile("quality", 5, 6),
         ],
         ticket_policy: TicketPolicyWireV1 {
             low_water: 1,

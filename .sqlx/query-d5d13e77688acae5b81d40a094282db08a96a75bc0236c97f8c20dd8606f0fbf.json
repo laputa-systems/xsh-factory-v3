@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, assignment_id, office, model_provider, model_id,\n                    lifecycle, cost_state, cost_micro_usd,\n                    CASE WHEN lifecycle = $4 THEN GREATEST(\n                        0,\n                        FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - started_at) * 1000)::BIGINT\n                    ) ELSE NULL END AS \"elapsed_millis?\"\n             FROM factory.sessions\n             WHERE campaign_id = $1 AND id > $2\n             ORDER BY id ASC\n             LIMIT $3",
+  "query": "SELECT id, assignment_id, assignment_role, model_provider, model_id,\n                    lifecycle, cost_state, cost_micro_usd,\n                    CASE WHEN lifecycle = $4 THEN GREATEST(\n                        0,\n                        FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - started_at) * 1000)::BIGINT\n                    ) ELSE NULL END AS \"elapsed_millis?\"\n             FROM factory.sessions\n             WHERE campaign_id = $1 AND id > $2\n             ORDER BY id ASC\n             LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -27,12 +27,12 @@
       },
       {
         "ordinal": 2,
-        "name": "office",
+        "name": "assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.sessions",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -118,5 +118,5 @@
       null
     ]
   },
-  "hash": "54486b57b9d014352f3041cf100d15540a1af81bdfd61e073fd755e607b447ca"
+  "hash": "d5d13e77688acae5b81d40a094282db08a96a75bc0236c97f8c20dd8606f0fbf"
 }

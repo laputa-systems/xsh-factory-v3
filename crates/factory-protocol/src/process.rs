@@ -8,8 +8,8 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, CandidateId,
-    ContentDigest, ContractError, ExpectedRevision, KernelBuildId, MicroUsd, Office,
+    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentRole,
+    CandidateId, ContentDigest, ContractError, ExpectedRevision, KernelBuildId, MicroUsd,
     PROTOCOL_VERSION_V1, RepositoryRelativePath, RuntimeRelativePath, SessionLimitsV1,
     TicketAttemptId,
 };
@@ -73,7 +73,7 @@ pub struct AssignmentPacketWireV1 {
     pub assignment_id: i64,
     pub application_revision_id: i64,
     pub kernel_build_id: String,
-    pub office: String,
+    pub assignment_role: String,
     pub target: String,
     pub repository_base_identity: String,
     pub factory_base_identity: String,
@@ -480,7 +480,7 @@ pub struct AssignmentPacketV1 {
     pub assignment_id: crate::AssignmentId,
     pub kernel_build_id: KernelBuildId,
     pub application_revision_id: ApplicationRevisionId,
-    pub office: Office,
+    pub assignment_role: AssignmentRole,
     pub target: String,
     /// Product has no target. Engineering names one attempt. Quality names an
     /// attempt and a candidate from that attempt. These IDs are packet facts
@@ -517,10 +517,14 @@ impl AssignmentPacketV1 {
                 reason: "must be 1 through 4096 bytes without NUL",
             });
         }
-        match (self.office, self.ticket_attempt_id, self.candidate_id) {
-            (Office::ProductResearch, None, None)
-            | (Office::Engineering, Some(_), None)
-            | (Office::Quality, Some(_), Some(_)) => {}
+        match (
+            self.assignment_role,
+            self.ticket_attempt_id,
+            self.candidate_id,
+        ) {
+            (AssignmentRole::ProductResearch, None, None)
+            | (AssignmentRole::Engineering, Some(_), None)
+            | (AssignmentRole::Quality, Some(_), Some(_)) => {}
             _ => {
                 return Err(ContractError::InvalidValue {
                     field: "assignment target identity",
@@ -534,13 +538,17 @@ impl AssignmentPacketV1 {
                 reason: "exceeds the closed evidence reference limit",
             });
         }
-        if self.office == Office::ProductResearch && !self.assignment_evidence.is_empty() {
+        if self.assignment_role == AssignmentRole::ProductResearch
+            && !self.assignment_evidence.is_empty()
+        {
             return Err(ContractError::InvalidValue {
                 field: "assignment evidence",
                 reason: "Product has no upstream assignment evidence",
             });
         }
-        if self.office != Office::ProductResearch && self.assignment_evidence.is_empty() {
+        if self.assignment_role != AssignmentRole::ProductResearch
+            && self.assignment_evidence.is_empty()
+        {
             return Err(ContractError::InvalidValue {
                 field: "assignment evidence",
                 reason: "Engineering and Quality require upstream evidence",

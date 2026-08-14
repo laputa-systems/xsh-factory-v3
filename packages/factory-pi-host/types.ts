@@ -94,7 +94,7 @@ export interface AssignmentEvidenceReferenceV1 {
 export interface PiAssignmentPacket {
   readonly format_version: 1;
   readonly assignment_id: string;
-  readonly office: string;
+  readonly assignment_role: string;
   readonly campaign_id: string;
   readonly application_revision_id: string;
   readonly kernel_build_id: string;
@@ -240,7 +240,7 @@ export interface RequiredReadManifest {
 
 export interface NormalizedSessionSummary {
   readonly assignment_id: string;
-  readonly office: string;
+  readonly assignment_role: string;
   readonly stop_reason: string;
   readonly failure_reason: string | null;
   readonly cost_status: "known" | "unknown";

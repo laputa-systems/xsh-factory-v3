@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT office, model_provider, model_id, lifecycle,\n                    COUNT(*)::BIGINT AS \"session_count!\",\n                    COALESCE(SUM(cost_micro_usd), 0)::BIGINT\n                        AS \"accounted_cost_micro_usd!\",\n                    COUNT(*) FILTER (WHERE cost_state IS NULL)::BIGINT\n                        AS \"pending_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $2)::BIGINT\n                        AS \"unknown_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $3)::BIGINT\n                        AS \"exceeded_cost_session_count!\"\n             FROM factory.sessions\n             WHERE campaign_id = $1\n             GROUP BY office, model_provider, model_id, lifecycle\n             ORDER BY office ASC, model_provider ASC, model_id ASC, lifecycle ASC",
+  "query": "SELECT assignment_role, model_provider, model_id, lifecycle,\n                    COUNT(*)::BIGINT AS \"session_count!\",\n                    COALESCE(SUM(cost_micro_usd), 0)::BIGINT\n                        AS \"accounted_cost_micro_usd!\",\n                    COUNT(*) FILTER (WHERE cost_state IS NULL)::BIGINT\n                        AS \"pending_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $2)::BIGINT\n                        AS \"unknown_cost_session_count!\",\n                    COUNT(*) FILTER (WHERE cost_state = $3)::BIGINT\n                        AS \"exceeded_cost_session_count!\"\n             FROM factory.sessions\n             WHERE campaign_id = $1\n             GROUP BY assignment_role, model_provider, model_id, lifecycle\n             ORDER BY assignment_role ASC, model_provider ASC, model_id ASC, lifecycle ASC",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "office",
+        "name": "assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.sessions",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -97,5 +97,5 @@
       null
     ]
   },
-  "hash": "0d69f5bc5aa52c8c9e5d104c240b0299bda3cb897b95266da2cb5df0366a07f1"
+  "hash": "a465f7a068b11d37bf23cfbfbcda529b4fee541baca87806b5cb979082527da0"
 }

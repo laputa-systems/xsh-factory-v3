@@ -12,9 +12,9 @@
 use std::path::Path;
 
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV1, AssignmentPacketV1,
+    AggregateRevision, ApplicationBundleV1, AssignmentPacketV1, AssignmentRole,
     CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV1, CandidateSubmissionV1,
-    CandidateSubmitRequest, ContentDigest, ExpectedRevision, Office, QualityRunFullSuiteRequest,
+    CandidateSubmitRequest, ContentDigest, ExpectedRevision, QualityRunFullSuiteRequest,
     QualitySubmitReviewRequest, QualityValidationReceiptV1, RepositoryObjectIdV1,
     SealedArtifactReferenceV1, SessionId, TerminalOperationV1, TicketAttemptId, TicketId,
     TicketRevisionId, ValidationId,
@@ -1037,7 +1037,7 @@ fn validate_engineering_authority(
         authority.actor,
         authority.application,
         authority.repository,
-        Office::Engineering,
+        AssignmentRole::Engineering,
         terminal,
     )?;
     let packet_workspace = Path::new(authority.actor.packet.workspace_root.as_str());
@@ -1065,7 +1065,7 @@ fn validate_quality_authority(
         authority.actor,
         authority.application,
         authority.repository,
-        Office::Quality,
+        AssignmentRole::Quality,
         None,
     )?;
     authority
@@ -1084,7 +1084,7 @@ fn validate_review_authority(
 ) -> Result<(), CandidateRuntimeError> {
     validate_packet_office(
         authority.actor,
-        Office::Quality,
+        AssignmentRole::Quality,
         Some(TerminalOperationV1::QualitySubmitReview),
     )?;
     authority
@@ -1107,13 +1107,13 @@ fn validate_common_authority(
     actor: ActorRequestBinding<'_>,
     application: &ApplicationBundleV1,
     repository: &QualifiedRepository,
-    office: Office,
+    assignment_role: AssignmentRole,
     terminal: Option<TerminalOperationV1>,
 ) -> Result<(), CandidateRuntimeError> {
     application
         .validate()
         .map_err(|error| CandidateRuntimeError::ApplicationContract(error.to_string()))?;
-    validate_packet_office(actor, office, terminal)?;
+    validate_packet_office(actor, assignment_role, terminal)?;
     let configured_root = Path::new(application.repository.canonical_local_path.as_str());
     if configured_root != repository.root() {
         return Err(CandidateRuntimeError::RepositoryBindingMismatch);
@@ -1126,14 +1126,14 @@ fn validate_common_authority(
 
 fn validate_packet_office(
     actor: ActorRequestBinding<'_>,
-    office: Office,
+    assignment_role: AssignmentRole,
     terminal: Option<TerminalOperationV1>,
 ) -> Result<(), CandidateRuntimeError> {
     actor
         .packet
         .validate()
         .map_err(|error| CandidateRuntimeError::PacketBinding(error.to_string()))?;
-    if actor.packet.office != office {
+    if actor.packet.assignment_role != assignment_role {
         return Err(CandidateRuntimeError::PacketBinding(
             "assignment office is not authorized for this operation".to_owned(),
         ));

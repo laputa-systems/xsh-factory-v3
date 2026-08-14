@@ -44,8 +44,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("canonical migration count");
         assert_eq!(
-            migration_count, 1,
-            "fresh V3 applies one canonical migration"
+            migration_count, 3,
+            "fresh V3 applies the canonical base and two additive authority migrations"
         );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
@@ -55,7 +55,10 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
         .fetch_one(&inspection)
         .await
         .expect("Factory table count");
-        assert_eq!(table_count, 20, "the schema retains the fixed table budget");
+        assert_eq!(
+            table_count, 21,
+            "the schema adds one durable-office relation to the original authority tables"
+        );
         inspection.close().await;
         let before = store.kernel_build_status().await.expect("read-only status");
         let application = store
@@ -275,8 +278,8 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             .await
             .expect("activate application");
         // The canonical fresh schema stores seven fixed templates directly on
-        // the application revision, preserving room for the twenty-purpose-
-        // specific-table MVP budget without a child relation.
+        // the application revision. The durable-office relation is the only
+        // additional Phase 1 table; templates remain direct authority facts.
         let inspection = sqlx::PgPool::connect(&test_database_url())
             .await
             .expect("read-only schema inspection pool");
@@ -297,8 +300,8 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         .await
         .expect("Factory table count");
         assert!(
-            table_count <= 20,
-            "Factory table count exceeded the hard cap"
+            table_count <= 21,
+            "Factory table count exceeded the durable-office authority cap"
         );
         let fixed_templates = sqlx::query!(
             "SELECT mission_artifact_id,
@@ -989,10 +992,10 @@ fn application_bundle_json(
     templates: &[(&str, ContentDigest)],
 ) -> String {
     use factory_protocol::{
-        ApplicationBundleWireV1, CommandWireV1, CommitMessageWireV1, ExecutableWireV1, GitWireV1,
-        LimitsWireV1, ModelWireV1, OfficeWireV1, RepositoryWireV1, RequiredReadWireV1,
-        TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1, ValidationWireV1,
-        canonical_application_bundle_json_v1,
+        ApplicationBundleWireV1, AssignmentRoleWireV1, CommandWireV1, CommitMessageWireV1,
+        ExecutableWireV1, GitWireV1, LimitsWireV1, ModelWireV1, RepositoryWireV1,
+        RequiredReadWireV1, TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1,
+        ValidationWireV1, canonical_application_bundle_json_v1,
     };
 
     let template = |index: usize| TemplateWireV1 {
@@ -1015,29 +1018,32 @@ fn application_bundle_json(
         stderr_byte_limit: 4096,
         expected_exit_status: 0,
     };
-    let office = |office: &str, system_index: usize, assignment_index: usize| OfficeWireV1 {
-        office: office.to_owned(),
-        system_template: template(system_index),
-        assignment_template: template(assignment_index),
-        tools: vec!["workspace_read".to_owned()],
-        model: ModelWireV1 {
-            provider: "test".to_owned(),
-            model_id: "test-model".to_owned(),
-            thinking_level: "none".to_owned(),
-            context_token_limit: 1,
-            output_token_limit: 1,
-            price_input_micro_usd_per_million_tokens: 0,
-            price_output_micro_usd_per_million_tokens: 0,
-            price_cache_read_micro_usd_per_million_tokens: 0,
-            price_cache_write_micro_usd_per_million_tokens: 0,
-            capability_flags: Vec::new(),
-        },
-        limits: LimitsWireV1 {
-            turn_limit: 1,
-            wall_limit_millis: 1,
-            output_byte_limit: 4096,
-        },
-    };
+    let assignment_role_profile =
+        |assignment_role: &str, system_index: usize, assignment_index: usize| {
+            AssignmentRoleWireV1 {
+                assignment_role: assignment_role.to_owned(),
+                system_template: template(system_index),
+                assignment_template: template(assignment_index),
+                tools: vec!["workspace_read".to_owned()],
+                model: ModelWireV1 {
+                    provider: "test".to_owned(),
+                    model_id: "test-model".to_owned(),
+                    thinking_level: "none".to_owned(),
+                    context_token_limit: 1,
+                    output_token_limit: 1,
+                    price_input_micro_usd_per_million_tokens: 0,
+                    price_output_micro_usd_per_million_tokens: 0,
+                    price_cache_read_micro_usd_per_million_tokens: 0,
+                    price_cache_write_micro_usd_per_million_tokens: 0,
+                    capability_flags: Vec::new(),
+                },
+                limits: LimitsWireV1 {
+                    turn_limit: 1,
+                    wall_limit_millis: 1,
+                    output_byte_limit: 4096,
+                },
+            }
+        };
     canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
         format_version: 1,
         application_key: application_key.to_owned(),
@@ -1049,10 +1055,10 @@ fn application_bundle_json(
             delivery_mode: "local_fast_forward_only".to_owned(),
         },
         mission_template: template(0),
-        office_profiles: vec![
-            office("product_research", 1, 2),
-            office("engineering", 3, 4),
-            office("quality", 5, 6),
+        assignment_role_profiles: vec![
+            assignment_role_profile("product_research", 1, 2),
+            assignment_role_profile("engineering", 3, 4),
+            assignment_role_profile("quality", 5, 6),
         ],
         ticket_policy: TicketPolicyWireV1 {
             low_water: 1,

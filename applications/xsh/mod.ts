@@ -170,9 +170,9 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
     "templates/mission.md",
     [],
   ),
-  office_profiles: [
+  assignment_role_profiles: [
     {
-      office: "product_research",
+      assignment_role: "product_research",
       system_template: template(
         "templates/product-system.md",
         ["ASSIGNMENT_ID", "MISSION"],
@@ -186,7 +186,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
       limits: { turn_limit: 12, wall_limit_millis: 600_000, output_byte_limit: 16_777_216 },
     },
     {
-      office: "engineering",
+      assignment_role: "engineering",
       system_template: template(
         "templates/engineering-system.md",
         ["ASSIGNMENT_ID", "MISSION"],
@@ -210,7 +210,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
       limits: { turn_limit: 220, wall_limit_millis: 1_800_000, output_byte_limit: 67_108_864 },
     },
     {
-      office: "quality",
+      assignment_role: "quality",
       system_template: template(
         "templates/quality-system.md",
         ["ASSIGNMENT_ID", "MISSION"],

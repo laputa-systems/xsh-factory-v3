@@ -10,8 +10,8 @@ use std::{collections::BTreeSet, fmt, str::FromStr};
 use miniserde::{Deserialize, Serialize};
 
 use crate::{
-    AggregateRevision, ArtifactId, ContractError, ForumPostId, ForumThreadId, ForumTopicId, Office,
-    SessionId,
+    AggregateRevision, ArtifactId, AssignmentRole, ContractError, ForumPostId, ForumThreadId,
+    ForumTopicId, SessionId,
 };
 
 /// Maximum UTF-8 byte lengths from the Forum contract.
@@ -342,7 +342,7 @@ pub enum ForumPostKind {
 pub enum ForumAuthor {
     Actor {
         session_id: SessionId,
-        office: Office,
+        assignment_role: AssignmentRole,
     },
     GrandArchitect,
 }
@@ -654,7 +654,7 @@ pub struct ForumSearchInput {
     pub query: ForumSearchQuery,
     pub topic_id: Option<ForumTopicId>,
     pub thread_id: Option<ForumThreadId>,
-    pub author_office: Option<Office>,
+    pub author_office: Option<AssignmentRole>,
     pub post_kind: Option<ForumPostKind>,
     pub created_after_micros: Option<u64>,
     pub created_before_micros: Option<u64>,

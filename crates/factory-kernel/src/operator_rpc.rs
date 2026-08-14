@@ -899,7 +899,7 @@ fn campaign_status_response(
                 CampaignSessionCostResponse {
                     session_id: session.session_id.get(),
                     assignment_id: session.assignment_id.get(),
-                    office: office_name(session.office).to_owned(),
+                    assignment_role: office_name(session.assignment_role).to_owned(),
                     model_provider: session.model_provider.clone(),
                     model_id: session.model_id.clone(),
                     outcome: session_state_name(session.outcome).to_owned(),
@@ -912,7 +912,7 @@ fn campaign_status_response(
         session_cost_aggregates: session_cost_aggregates
             .iter()
             .map(|aggregate| CampaignSessionCostAggregateResponse {
-                office: office_name(aggregate.office).to_owned(),
+                assignment_role: office_name(aggregate.assignment_role).to_owned(),
                 model_provider: aggregate.model_provider.clone(),
                 model_id: aggregate.model_id.clone(),
                 outcome: session_state_name(aggregate.outcome).to_owned(),
@@ -936,11 +936,11 @@ fn session_cost_projection(cost: Option<TerminalCostV1>) -> (&'static str, Optio
     }
 }
 
-fn office_name(office: factory_protocol::Office) -> &'static str {
-    match office {
-        factory_protocol::Office::ProductResearch => "product_research",
-        factory_protocol::Office::Engineering => "engineering",
-        factory_protocol::Office::Quality => "quality",
+fn office_name(assignment_role: factory_protocol::AssignmentRole) -> &'static str {
+    match assignment_role {
+        factory_protocol::AssignmentRole::ProductResearch => "product_research",
+        factory_protocol::AssignmentRole::Engineering => "engineering",
+        factory_protocol::AssignmentRole::Quality => "quality",
     }
 }
 

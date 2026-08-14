@@ -1,8 +1,9 @@
 use factory_protocol::{
-    AggregateRevision, ArtifactId, ContractError, ExpectedRevision, ForumAttachmentInput,
-    ForumAttachmentLabel, ForumAuthor, ForumPageLimit, ForumPostBody, ForumPostId, ForumPostInput,
-    ForumPostKind, ForumSearchCursor, ForumSearchInput, ForumSearchQuery, ForumThreadId,
-    ForumThreadPage, ForumThreadTitle, ForumTopicDescription, ForumTopicName, Office, SessionId,
+    AggregateRevision, ArtifactId, AssignmentRole, ContractError, ExpectedRevision,
+    ForumAttachmentInput, ForumAttachmentLabel, ForumAuthor, ForumPageLimit, ForumPostBody,
+    ForumPostId, ForumPostInput, ForumPostKind, ForumSearchCursor, ForumSearchInput,
+    ForumSearchQuery, ForumThreadId, ForumThreadPage, ForumThreadTitle, ForumTopicDescription,
+    ForumTopicName, SessionId,
 };
 
 #[test]
@@ -70,13 +71,13 @@ fn forum_search_range_and_relation_input_are_closed() {
 fn forum_public_values_keep_identity_and_page_bounds_typed() {
     let actor = ForumAuthor::Actor {
         session_id: SessionId::new(1).unwrap(),
-        office: Office::Engineering,
+        assignment_role: AssignmentRole::Engineering,
     };
     assert_eq!(
         actor,
         ForumAuthor::Actor {
             session_id: SessionId::new(1).unwrap(),
-            office: Office::Engineering,
+            assignment_role: AssignmentRole::Engineering,
         }
     );
     assert!(ForumPageLimit::new(0).is_err());

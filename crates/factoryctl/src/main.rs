@@ -712,7 +712,7 @@ fn session_costs_json(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             "{{\"session_id\":{},\"assignment_id\":{},\"office\":\"{}\",\"model_provider\":\"{}\",\"model_id\":\"{}\",\"outcome\":\"{}\",\"cost_state\":\"{}\",\"cost_micro_usd\":{},\"elapsed_millis\":{}}}",
             row.session_id,
             row.assignment_id,
-            row.office,
+            row.assignment_role,
             row.model_provider,
             row.model_id,
             row.outcome,
@@ -735,7 +735,7 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             "\n    #{} assignment #{}: {} / {}/{} ({}, {}; cost {}{})",
             row.session_id,
             row.assignment_id,
-            row.office,
+            row.assignment_role,
             row.model_provider,
             row.model_id,
             row.outcome,
@@ -759,7 +759,7 @@ fn session_cost_aggregates_json(
         }
         output.push_str(&format!(
             "{{\"office\":\"{}\",\"model_provider\":\"{}\",\"model_id\":\"{}\",\"outcome\":\"{}\",\"session_count\":{},\"accounted_cost_micro_usd\":{},\"pending_cost_session_count\":{},\"unknown_cost_session_count\":{},\"exceeded_cost_session_count\":{}}}",
-            row.office,
+            row.assignment_role,
             row.model_provider,
             row.model_id,
             row.outcome,
@@ -784,7 +784,7 @@ fn session_cost_aggregates_text(
     for row in rows {
         output.push_str(&format!(
             "\n    {} / {}/{} / {}: {} sessions, {} μUSD (pending {}, unknown {}, exceeded {})",
-            row.office,
+            row.assignment_role,
             row.model_provider,
             row.model_id,
             row.outcome,
@@ -2908,7 +2908,7 @@ mod tests {
     #[test]
     fn campaign_cost_aggregate_output_is_complete_and_bounded_by_identity() {
         let rows = vec![factory_protocol::CampaignSessionCostAggregateResponse {
-            office: "engineering".to_owned(),
+            assignment_role: "engineering".to_owned(),
             model_provider: "openai".to_owned(),
             model_id: "gpt-5.6".to_owned(),
             outcome: "succeeded".to_owned(),

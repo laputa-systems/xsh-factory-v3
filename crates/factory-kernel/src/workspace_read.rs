@@ -636,7 +636,9 @@ pub enum WorkspaceReadError {
 mod tests {
     use super::*;
     use crate::local_transport::ActorConnectionIdentity;
-    use factory_protocol::{ApplicationRevisionId, AssignmentId, CampaignId, Office, SessionId};
+    use factory_protocol::{
+        ApplicationRevisionId, AssignmentId, AssignmentRole, CampaignId, SessionId,
+    };
     use std::os::unix::fs::symlink;
 
     fn binding(session: i64) -> ActorConnectionBinding {
@@ -645,7 +647,7 @@ mod tests {
             AssignmentId::new(2).unwrap(),
             ApplicationRevisionId::new(3).unwrap(),
             CampaignId::new(4).unwrap(),
-            Office::Engineering,
+            AssignmentRole::Engineering,
         ))
     }
 

@@ -1,5 +1,5 @@
 import { assertThrows } from "@std/assert";
-import type { OfficeV1, TemplateArtifactV1 } from "./application.ts";
+import type { AssignmentRoleV1, TemplateArtifactV1 } from "./application.ts";
 import { blake3Hex } from "./blake3.ts";
 import { ApplicationCompileError, validateTemplateForOfficeV1 } from "./compiler.ts";
 
@@ -33,7 +33,7 @@ Deno.test("application compiler BLAKE3 matches the canonical digest vectors", ()
 });
 
 Deno.test("assignment templates structurally hide control-plane identities", () => {
-  const rejected: readonly [OfficeV1, string][] = [
+  const rejected: readonly [AssignmentRoleV1, string][] = [
     ["product_research", "CAMPAIGN_ID"],
     ["engineering", "APPLICATION_REVISION_ID"],
     ["quality", "OFFICE"],

@@ -6,17 +6,17 @@
 //! claim a session, office, or principal.
 
 use factory_protocol::{
-    AggregateRevision, ArtifactId, ErrorResponse, ForumAttachmentInput, ForumAttachmentLabel,
-    ForumAttachmentViewV1, ForumAuthor, ForumCreateThreadCommand, ForumCreateThreadInput,
-    ForumCreateThreadRequestV1, ForumCreateTopicCommand, ForumCreateTopicInput,
-    ForumCreateTopicRequestV1, ForumListThreadsRequestV1, ForumListTopicsRequestV1,
-    ForumMutationIdentity, ForumPageLimit, ForumPostBody, ForumPostCommand, ForumPostId,
-    ForumPostInput, ForumPostKind, ForumPostRequestV1, ForumPostViewV1, ForumPostsResponseV1,
-    ForumReadThreadRequestV1, ForumSearchCursor, ForumSearchHitV1, ForumSearchInput,
-    ForumSearchQuery, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadId, ForumThreadPage,
-    ForumThreadTitle, ForumThreadViewV1, ForumThreadsResponseV1, ForumTopicDescription,
-    ForumTopicId, ForumTopicName, ForumTopicViewV1, ForumTopicsResponseV1, Office,
-    OperationReceiptResponse, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
+    AggregateRevision, ArtifactId, AssignmentRole, ErrorResponse, ForumAttachmentInput,
+    ForumAttachmentLabel, ForumAttachmentViewV1, ForumAuthor, ForumCreateThreadCommand,
+    ForumCreateThreadInput, ForumCreateThreadRequestV1, ForumCreateTopicCommand,
+    ForumCreateTopicInput, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
+    ForumListTopicsRequestV1, ForumMutationIdentity, ForumPageLimit, ForumPostBody,
+    ForumPostCommand, ForumPostId, ForumPostInput, ForumPostKind, ForumPostRequestV1,
+    ForumPostViewV1, ForumPostsResponseV1, ForumReadThreadRequestV1, ForumSearchCursor,
+    ForumSearchHitV1, ForumSearchInput, ForumSearchQuery, ForumSearchRequestV1,
+    ForumSearchResponseV1, ForumThreadId, ForumThreadPage, ForumThreadTitle, ForumThreadViewV1,
+    ForumThreadsResponseV1, ForumTopicDescription, ForumTopicId, ForumTopicName, ForumTopicViewV1,
+    ForumTopicsResponseV1, OperationReceiptResponse, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
     decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
@@ -347,11 +347,11 @@ fn optional_positive_id<T>(
         Ok(Some(constructor(value)?))
     }
 }
-fn office(value: u8) -> Result<Office, OperatorForumRpcError> {
+fn office(value: u8) -> Result<AssignmentRole, OperatorForumRpcError> {
     match value {
-        0 => Ok(Office::ProductResearch),
-        1 => Ok(Office::Engineering),
-        2 => Ok(Office::Quality),
+        0 => Ok(AssignmentRole::ProductResearch),
+        1 => Ok(AssignmentRole::Engineering),
+        2 => Ok(AssignmentRole::Quality),
         _ => Err(OperatorForumRpcError::InvalidOffice),
     }
 }
@@ -367,11 +367,11 @@ fn post_kind(value: u8) -> Result<ForumPostKind, OperatorForumRpcError> {
         _ => Err(OperatorForumRpcError::InvalidPostKind),
     }
 }
-const fn office_code(value: Office) -> u8 {
+const fn office_code(value: AssignmentRole) -> u8 {
     match value {
-        Office::ProductResearch => 0,
-        Office::Engineering => 1,
-        Office::Quality => 2,
+        AssignmentRole::ProductResearch => 0,
+        AssignmentRole::Engineering => 1,
+        AssignmentRole::Quality => 2,
     }
 }
 const fn post_kind_code(value: ForumPostKind) -> u8 {
@@ -387,9 +387,14 @@ const fn post_kind_code(value: ForumPostKind) -> u8 {
 }
 fn author_wire(author: ForumAuthor) -> (u8, Option<i64>, Option<u8>) {
     match author {
-        ForumAuthor::Actor { session_id, office } => {
-            (0, Some(session_id.get()), Some(office_code(office)))
-        }
+        ForumAuthor::Actor {
+            session_id,
+            assignment_role,
+        } => (
+            0,
+            Some(session_id.get()),
+            Some(office_code(assignment_role)),
+        ),
         ForumAuthor::GrandArchitect => (1, None, None),
     }
 }

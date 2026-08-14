@@ -2433,8 +2433,8 @@ mod tests {
     use super::*;
     use factory_protocol::{
         AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
-        AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, CampaignId,
-        CredentialDescriptorV1, DurationMillis, KernelBuildId, MicroUsd, ModelProfileV1, Office,
+        AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentRole, CampaignId,
+        CredentialDescriptorV1, DurationMillis, KernelBuildId, MicroUsd, ModelProfileV1,
         ReadExactFileV1, RepositoryRelativePath, SessionLimitsV1, TerminalOperationV1,
         ThinkingLevelV1,
     };
@@ -2556,7 +2556,7 @@ mod tests {
             assignment_id: AssignmentId::new(2).unwrap(),
             kernel_build_id: KernelBuildId::new(ContentDigest::of_bytes(b"build")),
             application_revision_id: ApplicationRevisionId::new(3).unwrap(),
-            office: Office::Engineering,
+            assignment_role: AssignmentRole::Engineering,
             target: "runtime identity test".to_owned(),
             ticket_attempt_id: Some(factory_protocol::TicketAttemptId::new(1).unwrap()),
             candidate_id: None,

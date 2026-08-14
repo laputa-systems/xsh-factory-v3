@@ -22,8 +22,8 @@ use factory_kernel::{
     },
 };
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV1, ArchitectPrincipalV1, ContentDigest, ExpectedRevision,
-    KernelBuildId, Office, SealedArtifactReferenceV1, TemplateArtifactV1,
+    AggregateRevision, ApplicationBundleV1, ArchitectPrincipalV1, AssignmentRole, ContentDigest,
+    ExpectedRevision, KernelBuildId, SealedArtifactReferenceV1, TemplateArtifactV1,
     parse_application_bundle_v1,
 };
 use sqlx::{PgPool, Row};
@@ -228,12 +228,12 @@ fn copy_exact_xsh_inputs(
     let application_root = workspace_root.join("applications/xsh");
     let mut declared = Vec::with_capacity(7);
     declared.push(&bundle.mission_template);
-    for office in Office::ALL {
+    for office in AssignmentRole::ALL {
         let profile = bundle
-            .office_profiles
+            .assignment_role_profiles
             .iter()
-            .find(|profile| profile.office == office)
-            .expect("canonical XSH bundle has every fixed office");
+            .find(|profile| profile.assignment_role == office)
+            .expect("canonical XSH bundle has every fixed assignment role");
         declared.push(&profile.system_template);
         declared.push(&profile.assignment_template);
     }

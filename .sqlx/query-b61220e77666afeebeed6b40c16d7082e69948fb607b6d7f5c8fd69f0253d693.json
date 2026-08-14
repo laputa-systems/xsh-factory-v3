@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT assignment_id, application_revision_id, campaign_id, office, lifecycle\n             FROM factory.sessions WHERE id = $1",
+  "query": "SELECT assignment_id, application_revision_id, campaign_id, assignment_role, lifecycle\n             FROM factory.sessions WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -38,12 +38,12 @@
       },
       {
         "ordinal": 3,
-        "name": "office",
+        "name": "assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.sessions",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -72,5 +72,5 @@
       false
     ]
   },
-  "hash": "ae82d5bd2ac5bfdb2166ec9ec6458f5746922450edbb831c5d3eb017ab9ad651"
+  "hash": "b61220e77666afeebeed6b40c16d7082e69948fb607b6d7f5c8fd69f0253d693"
 }

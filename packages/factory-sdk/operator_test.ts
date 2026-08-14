@@ -88,7 +88,7 @@ class OperatorTransport implements FrameTransport {
             session_costs: [{
               session_id: 14,
               assignment_id: 15,
-              office: "quality",
+              assignment_role: "quality",
               model_provider: "openai",
               model_id: "gpt-5.6",
               outcome: "running",
@@ -97,7 +97,7 @@ class OperatorTransport implements FrameTransport {
               elapsed_millis: 1,
             }],
             session_cost_aggregates: [{
-              office: "quality",
+              assignment_role: "quality",
               model_provider: "openai",
               model_id: "gpt-5.6",
               outcome: "running",

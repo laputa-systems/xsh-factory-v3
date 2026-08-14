@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    AbsoluteHostPath, ApplicationRelativePath, ContentDigest, ContractError, DurationMillis,
-    MicroUsd, Office, RepositoryRelativePath,
+    AbsoluteHostPath, ApplicationRelativePath, AssignmentRole, ContentDigest, ContractError,
+    DurationMillis, MicroUsd, RepositoryRelativePath,
 };
 
 /// The only application-bundle format admitted by the first implementation.
@@ -20,7 +20,7 @@ pub struct ApplicationBundleV1 {
     pub predecessor_bundle: Option<ContentDigest>,
     pub repository: RepositoryBindingV1,
     pub mission_template: TemplateArtifactV1,
-    pub office_profiles: Vec<OfficeProfileV1>,
+    pub assignment_role_profiles: Vec<AssignmentRoleProfileV1>,
     pub ticket_policy: TicketPolicyV1,
     pub required_reads: Vec<RequiredReadV1>,
     pub reproducer_profiles: Vec<CommandProfileV1>,
@@ -41,29 +41,29 @@ impl ApplicationBundleV1 {
         self.repository.validate()?;
         self.mission_template.validate("mission_template")?;
 
-        if self.office_profiles.len() != Office::ALL.len() {
+        if self.assignment_role_profiles.len() != AssignmentRole::ALL.len() {
             return Err(bundle_error(
-                "fixed offices",
-                "exactly one profile is required for each fixed office",
+                "fixed assignment roles",
+                "exactly one profile is required for each fixed assignment role",
             ));
         }
-        let mut offices = BTreeSet::new();
-        for profile in &self.office_profiles {
+        let mut roles = BTreeSet::new();
+        for profile in &self.assignment_role_profiles {
             profile.validate()?;
-            if !offices.insert(profile.office) {
+            if !roles.insert(profile.assignment_role) {
                 return Err(bundle_error(
-                    "fixed offices",
-                    "office profile is duplicated",
+                    "fixed assignment roles",
+                    "assignment-role profile is duplicated",
                 ));
             }
         }
-        if !Office::ALL
+        if !AssignmentRole::ALL
             .into_iter()
-            .all(|office| offices.contains(&office))
+            .all(|role| roles.contains(&role))
         {
             return Err(bundle_error(
-                "fixed offices",
-                "an office profile is missing",
+                "fixed assignment roles",
+                "an assignment-role profile is missing",
             ));
         }
 
@@ -289,8 +289,8 @@ impl TemplatePlaceholderV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OfficeProfileV1 {
-    pub office: Office,
+pub struct AssignmentRoleProfileV1 {
+    pub assignment_role: AssignmentRole,
     pub system_template: TemplateArtifactV1,
     pub assignment_template: TemplateArtifactV1,
     pub tools: Vec<ActorToolV1>,
@@ -298,28 +298,29 @@ pub struct OfficeProfileV1 {
     pub limits: SessionLimitsV1,
 }
 
-impl OfficeProfileV1 {
+impl AssignmentRoleProfileV1 {
     fn validate(&self) -> Result<(), ContractError> {
-        self.system_template.validate("office system template")?;
+        self.system_template
+            .validate("assignment-role system template")?;
         self.assignment_template
-            .validate("office assignment template")?;
+            .validate("assignment-role assignment template")?;
         self.model.validate()?;
         self.limits.validate()?;
         if self.tools.is_empty() {
             return Err(bundle_error(
-                "office tools",
+                "assignment-role tools",
                 "at least one tool is required",
             ));
         }
         let mut seen = BTreeSet::new();
         for tool in &self.tools {
             if !seen.insert(*tool) {
-                return Err(bundle_error("office tools", "tool is duplicated"));
+                return Err(bundle_error("assignment-role tools", "tool is duplicated"));
             }
-            if !tool.is_allowed_for(self.office) {
+            if !tool.is_allowed_for(self.assignment_role) {
                 return Err(bundle_error(
-                    "office tools",
-                    "tool exceeds this office's fixed authority",
+                    "assignment-role tools",
+                    "tool exceeds this assignment role's fixed authority",
                 ));
             }
         }
@@ -356,13 +357,15 @@ pub enum ActorToolV1 {
 }
 
 impl ActorToolV1 {
-    fn is_allowed_for(self, office: Office) -> bool {
+    fn is_allowed_for(self, assignment_role: AssignmentRole) -> bool {
         match self {
-            Self::ProductSubmitTicket => office == Office::ProductResearch,
+            Self::ProductSubmitTicket => assignment_role == AssignmentRole::ProductResearch,
             Self::CandidateCheckpointRegression | Self::CandidateSubmit => {
-                office == Office::Engineering
+                assignment_role == AssignmentRole::Engineering
             }
-            Self::QualityRunFullSuite | Self::QualitySubmitReview => office == Office::Quality,
+            Self::QualityRunFullSuite | Self::QualitySubmitReview => {
+                assignment_role == AssignmentRole::Quality
+            }
             Self::WorkspaceRead
             | Self::WorkspaceWrite
             | Self::WorkspaceEdit

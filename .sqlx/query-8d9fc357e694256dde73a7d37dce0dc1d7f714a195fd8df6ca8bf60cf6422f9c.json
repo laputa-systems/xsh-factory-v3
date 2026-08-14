@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.offices (\n                 application_revision_id, assignment_role, charter_artifact_id, authority_mask\n             ) VALUES\n                 ($1, 0, $2, 1),\n                 ($1, 1, $3, 2),\n                 ($1, 2, $4, 4)\n             ON CONFLICT (application_revision_id, assignment_role) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d9fc357e694256dde73a7d37dce0dc1d7f714a195fd8df6ca8bf60cf6422f9c"
+}

@@ -269,7 +269,7 @@ Deno.test("template compiler reads declared templates and rejects undeclared syn
   });
   assertEquals(compiled.templates.length, 7);
 
-  const artifact = xshApplicationV1.office_profiles[1].system_template;
+  const artifact = xshApplicationV1.assignment_role_profiles[1].system_template;
   assertEquals(
     new TextDecoder().decode(renderTemplateV1(
       "assignment ${ASSIGNMENT_ID}; mission ${MISSION}",

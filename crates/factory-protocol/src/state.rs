@@ -1,12 +1,12 @@
 /// The fixed paid offices. The external Grand Architect is not an actor office.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Office {
+pub enum AssignmentRole {
     ProductResearch,
     Engineering,
     Quality,
 }
 
-impl Office {
+impl AssignmentRole {
     pub const ALL: [Self; 3] = [Self::ProductResearch, Self::Engineering, Self::Quality];
 }
 

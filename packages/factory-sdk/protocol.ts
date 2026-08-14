@@ -737,11 +737,11 @@ export function validateProtocolResponse(
         for (const field of ["session_id", "assignment_id"]) {
           responseInteger(row, field, expectedOperation);
         }
-        for (const field of ["office", "model_provider", "model_id", "outcome", "cost_state"]) {
+        for (const field of ["assignment_role", "model_provider", "model_id", "outcome", "cost_state"]) {
           responseString(row, field, expectedOperation);
         }
         if (
-          !["product_research", "engineering", "quality"].includes(row.office as string) ||
+          !["product_research", "engineering", "quality"].includes(row.assignment_role as string) ||
           !["prepared", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(
             row.outcome as string,
           ) ||
@@ -769,7 +769,7 @@ export function validateProtocolResponse(
           );
         }
         const row = aggregate as Record<string, unknown>;
-        for (const field of ["office", "model_provider", "model_id", "outcome"]) {
+        for (const field of ["assignment_role", "model_provider", "model_id", "outcome"]) {
           responseString(row, field, expectedOperation);
         }
         for (
@@ -784,7 +784,7 @@ export function validateProtocolResponse(
           responseInteger(row, field, expectedOperation);
         }
         if (
-          !["product_research", "engineering", "quality"].includes(row.office as string) ||
+          !["product_research", "engineering", "quality"].includes(row.assignment_role as string) ||
           !["prepared", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(
             row.outcome as string,
           )
@@ -1305,7 +1305,7 @@ export interface CampaignStatusResponse {
 export interface CampaignSessionCostResponse {
   readonly session_id: number;
   readonly assignment_id: number;
-  readonly office: "product_research" | "engineering" | "quality";
+  readonly assignment_role: "product_research" | "engineering" | "quality";
   readonly model_provider: string;
   readonly model_id: string;
   readonly outcome:
@@ -1322,7 +1322,7 @@ export interface CampaignSessionCostResponse {
 }
 
 export interface CampaignSessionCostAggregateResponse {
-  readonly office: "product_research" | "engineering" | "quality";
+  readonly assignment_role: "product_research" | "engineering" | "quality";
   readonly model_provider: string;
   readonly model_id: string;
   readonly outcome:

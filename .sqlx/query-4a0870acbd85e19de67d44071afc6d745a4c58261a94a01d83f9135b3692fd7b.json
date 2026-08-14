@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.id, s.revision, s.assignment_id, s.campaign_id,\n                    s.kernel_build_id, s.application_revision_id, s.office AS session_office,\n                    s.model_provider AS session_model_provider, s.model_id AS session_model_id,\n                    s.thinking_level AS session_thinking_level,\n                    s.input_price_micro_usd_per_million AS session_input_price,\n                    s.output_price_micro_usd_per_million AS session_output_price,\n                    s.cache_read_price_micro_usd_per_million AS session_cache_read_price,\n                    s.cache_write_price_micro_usd_per_million AS session_cache_write_price,\n                    s.pid, s.pgid,\n                    s.process_started_at_unix_millis,\n                    a.office AS assignment_office, a.target,\n                    a.packet_artifact_id, a.packet_digest,\n                    a.system_prompt_artifact_id, a.assignment_prompt_artifact_id,\n                    a.required_read_manifest_artifact_id,\n                    a.model_provider AS assignment_model_provider,\n                    a.model_id AS assignment_model_id,\n                    a.thinking_level AS assignment_thinking_level,\n                    a.input_price_micro_usd_per_million AS assignment_input_price,\n                    a.output_price_micro_usd_per_million AS assignment_output_price,\n                    a.cache_read_price_micro_usd_per_million AS assignment_cache_read_price,\n                    a.cache_write_price_micro_usd_per_million AS assignment_cache_write_price,\n                    artifact.digest AS packet_artifact_digest,\n                    artifact.byte_length AS packet_artifact_byte_length,\n                    build.build_digest AS kernel_build_digest\n             FROM factory.sessions s\n             JOIN factory.assignments a ON a.id = s.assignment_id\n             JOIN factory.artifacts artifact ON artifact.id = a.packet_artifact_id\n             JOIN factory.kernel_builds build ON build.id = s.kernel_build_id\n             WHERE s.lifecycle = $1\n             ORDER BY s.id",
+  "query": "SELECT s.id, s.revision, s.assignment_id, s.campaign_id,\n                    s.kernel_build_id, s.application_revision_id, s.assignment_role AS session_assignment_role,\n                    s.model_provider AS session_model_provider, s.model_id AS session_model_id,\n                    s.thinking_level AS session_thinking_level,\n                    s.input_price_micro_usd_per_million AS session_input_price,\n                    s.output_price_micro_usd_per_million AS session_output_price,\n                    s.cache_read_price_micro_usd_per_million AS session_cache_read_price,\n                    s.cache_write_price_micro_usd_per_million AS session_cache_write_price,\n                    s.pid, s.pgid,\n                    s.process_started_at_unix_millis,\n                    a.assignment_role AS assignment_assignment_role, a.target,\n                    a.packet_artifact_id, a.packet_digest,\n                    a.system_prompt_artifact_id, a.assignment_prompt_artifact_id,\n                    a.required_read_manifest_artifact_id,\n                    a.model_provider AS assignment_model_provider,\n                    a.model_id AS assignment_model_id,\n                    a.thinking_level AS assignment_thinking_level,\n                    a.input_price_micro_usd_per_million AS assignment_input_price,\n                    a.output_price_micro_usd_per_million AS assignment_output_price,\n                    a.cache_read_price_micro_usd_per_million AS assignment_cache_read_price,\n                    a.cache_write_price_micro_usd_per_million AS assignment_cache_write_price,\n                    artifact.digest AS packet_artifact_digest,\n                    artifact.byte_length AS packet_artifact_byte_length,\n                    build.build_digest AS kernel_build_digest\n             FROM factory.sessions s\n             JOIN factory.assignments a ON a.id = s.assignment_id\n             JOIN factory.artifacts artifact ON artifact.id = a.packet_artifact_id\n             JOIN factory.kernel_builds build ON build.id = s.kernel_build_id\n             WHERE s.lifecycle = $1\n             ORDER BY s.id",
   "describe": {
     "columns": [
       {
@@ -71,12 +71,12 @@
       },
       {
         "ordinal": 6,
-        "name": "session_office",
+        "name": "session_assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.sessions",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -192,12 +192,12 @@
       },
       {
         "ordinal": 17,
-        "name": "assignment_office",
+        "name": "assignment_assignment_role",
         "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "factory.assignments",
-            "name": "office"
+            "name": "assignment_role"
           }
         }
       },
@@ -420,5 +420,5 @@
       false
     ]
   },
-  "hash": "f41bac843c1dee8f256e2deb94dd535eb3fb93250906e4f9ab15843989bf8c92"
+  "hash": "4a0870acbd85e19de67d44071afc6d745a4c58261a94a01d83f9135b3692fd7b"
 }

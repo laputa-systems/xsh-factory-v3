@@ -34,6 +34,7 @@ numeric_identifier!(ApplicationId, "application ID");
 numeric_identifier!(ApplicationRevisionId, "application revision ID");
 numeric_identifier!(RepositoryId, "repository ID");
 numeric_identifier!(CampaignId, "campaign ID");
+numeric_identifier!(OfficeId, "office ID");
 numeric_identifier!(TicketId, "ticket ID");
 numeric_identifier!(TicketRevisionId, "ticket revision ID");
 numeric_identifier!(TicketAttemptId, "ticket attempt ID");

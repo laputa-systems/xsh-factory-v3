@@ -13,18 +13,19 @@ use thiserror::Error;
 
 use crate::{
     AbsoluteHostPath, ActorToolV1, ApplicationBundleV1, ApplicationKey, ApplicationRelativePath,
-    ApprovedToolV1, ArchitectPrincipalV1, AssignmentPacketWireV1, CandidateDecisionRequestV1,
-    CandidateDecisionV1, CandidateSubmissionV1, CommandObservationV1, CommandProfileV1,
-    CommitMessagePolicyV1, ContentDigest, ContractError, DeliveryModeV1, DuplicateSearchInputV1,
-    DurationMillis, EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, KernelBuildId, MicroUsd,
-    ModelCapabilityV1, ModelProfileV1, OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1,
-    OP_FORUM_LIST_THREADS_V1, OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1, OP_FORUM_READ_THREAD_V1,
-    OP_FORUM_SEARCH_V1, Office, OfficeProfileV1, ProductTicketProposalV1,
-    QualityFullSuiteRequestV1, QualityReviewSubmissionV1, ReleaseDecisionV1, RepositoryBindingV1,
-    RepositoryRelativePath, RequiredReadV1, ReviewId, ReviewVerdict, RuntimeRelativePath,
-    SealedArtifactReferenceV1, SessionLimitsV1, SponsorshipDecisionV1, TemplateArtifactV1,
-    TemplatePlaceholderV1, ThinkingLevelV1, TicketAttemptId, TicketBoundsV1, TicketContractReadV1,
-    TicketPolicyV1, TicketRevisionId, TwoRunReproducerV1, ValidationId, ValidationProfilesV1,
+    ApprovedToolV1, ArchitectPrincipalV1, AssignmentPacketWireV1, AssignmentRole,
+    AssignmentRoleProfileV1, CandidateDecisionRequestV1, CandidateDecisionV1,
+    CandidateSubmissionV1, CommandObservationV1, CommandProfileV1, CommitMessagePolicyV1,
+    ContentDigest, ContractError, DeliveryModeV1, DuplicateSearchInputV1, DurationMillis,
+    EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, KernelBuildId, MicroUsd, ModelCapabilityV1,
+    ModelProfileV1, OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1,
+    OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1, OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1,
+    ProductTicketProposalV1, QualityFullSuiteRequestV1, QualityReviewSubmissionV1,
+    ReleaseDecisionV1, RepositoryBindingV1, RepositoryRelativePath, RequiredReadV1, ReviewId,
+    ReviewVerdict, RuntimeRelativePath, SealedArtifactReferenceV1, SessionLimitsV1,
+    SponsorshipDecisionV1, TemplateArtifactV1, TemplatePlaceholderV1, ThinkingLevelV1,
+    TicketAttemptId, TicketBoundsV1, TicketContractReadV1, TicketPolicyV1, TicketRevisionId,
+    TwoRunReproducerV1, ValidationId, ValidationProfilesV1,
 };
 
 pub const PROTOCOL_VERSION_V1: u16 = 1;
@@ -1105,7 +1106,7 @@ pub struct CampaignStatusResponse {
 pub struct CampaignSessionCostResponse {
     pub session_id: i64,
     pub assignment_id: i64,
-    pub office: String,
+    pub assignment_role: String,
     pub model_provider: String,
     pub model_id: String,
     pub outcome: String,
@@ -1119,7 +1120,7 @@ pub struct CampaignSessionCostResponse {
 /// remain explicit counts rather than being silently folded into a sum.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CampaignSessionCostAggregateResponse {
-    pub office: String,
+    pub assignment_role: String,
     pub model_provider: String,
     pub model_id: String,
     pub outcome: String,
@@ -1516,14 +1517,14 @@ fn validate_assignment_packet_wire_v1(
         validate_digest("packet_digest", &packet.packet_digest)?;
     }
     if !matches!(
-        packet.office.as_str(),
+        packet.assignment_role.as_str(),
         "product_research" | "engineering" | "quality"
     ) {
         return packet_error("office", "unknown office");
     }
     if !matches!(
         (
-            packet.office.as_str(),
+            packet.assignment_role.as_str(),
             packet.ticket_attempt_id.is_some(),
             packet.candidate_id.is_some()
         ),
@@ -1634,13 +1635,13 @@ fn validate_assignment_packet_wire_v1(
             "exceeds the closed evidence reference limit",
         );
     }
-    if packet.office == "product_research" && !packet.assignment_evidence.is_empty() {
+    if packet.assignment_role == "product_research" && !packet.assignment_evidence.is_empty() {
         return packet_error(
             "assignment_evidence",
             "Product has no upstream assignment evidence",
         );
     }
-    if packet.office != "product_research" && packet.assignment_evidence.is_empty() {
+    if packet.assignment_role != "product_research" && packet.assignment_evidence.is_empty() {
         return packet_error(
             "assignment_evidence",
             "Engineering and Quality require upstream evidence",
@@ -1824,7 +1825,7 @@ pub struct ApplicationBundleWireV1 {
     pub predecessor_bundle: Option<String>,
     pub repository: RepositoryWireV1,
     pub mission_template: TemplateWireV1,
-    pub office_profiles: Vec<OfficeWireV1>,
+    pub assignment_role_profiles: Vec<AssignmentRoleWireV1>,
     pub ticket_policy: TicketPolicyWireV1,
     pub required_reads: Vec<RequiredReadWireV1>,
     pub reproducer_profiles: Vec<CommandWireV1>,
@@ -1850,8 +1851,8 @@ pub struct TemplateWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OfficeWireV1 {
-    pub office: String,
+pub struct AssignmentRoleWireV1 {
+    pub assignment_role: String,
     pub system_template: TemplateWireV1,
     pub assignment_template: TemplateWireV1,
     pub tools: Vec<String>,
@@ -1980,7 +1981,7 @@ pub struct CommitMessageWireV1 {
 pub fn canonical_application_bundle_json_v1(
     bundle: &ApplicationBundleWireV1,
 ) -> Result<String, FrameError> {
-    for profile in &bundle.office_profiles {
+    for profile in &bundle.assignment_role_profiles {
         validate_unique_strings("model.capability_flags", &profile.model.capability_flags)?;
         if profile
             .model
@@ -2023,8 +2024,8 @@ pub fn canonical_application_bundle_json_v1(
     );
     field_string(
         &mut out,
-        "office_profiles",
-        &canonical_offices(&bundle.office_profiles),
+        "assignment_role_profiles",
+        &canonical_assignment_role_profiles(&bundle.assignment_role_profiles),
         false,
     );
     field_optional_string(
@@ -2168,13 +2169,13 @@ fn canonical_limits(value: &LimitsWireV1) -> String {
     )
 }
 
-fn canonical_office(value: &OfficeWireV1) -> String {
+fn canonical_assignment_role_profile(value: &AssignmentRoleWireV1) -> String {
     format!(
-        "{{\"assignment_template\":{},\"limits\":{},\"model\":{},\"office\":{},\"system_template\":{},\"tools\":[{}]}}",
+        "{{\"assignment_role\":{},\"assignment_template\":{},\"limits\":{},\"model\":{},\"system_template\":{},\"tools\":[{}]}}",
+        json_quote(&value.assignment_role),
         canonical_template(&value.assignment_template),
         canonical_limits(&value.limits),
         canonical_model(&value.model),
-        json_quote(&value.office),
         canonical_template(&value.system_template),
         value
             .tools
@@ -2185,12 +2186,12 @@ fn canonical_office(value: &OfficeWireV1) -> String {
     )
 }
 
-fn canonical_offices(values: &[OfficeWireV1]) -> String {
+fn canonical_assignment_role_profiles(values: &[AssignmentRoleWireV1]) -> String {
     format!(
         "[{}]",
         values
             .iter()
-            .map(canonical_office)
+            .map(canonical_assignment_role_profile)
             .collect::<Vec<_>>()
             .join(",")
     )
@@ -2373,10 +2374,10 @@ impl ApplicationBundleWireV1 {
                 .transpose()?,
             repository: self.repository.into_domain()?,
             mission_template: self.mission_template.into_domain()?,
-            office_profiles: self
-                .office_profiles
+            assignment_role_profiles: self
+                .assignment_role_profiles
                 .into_iter()
-                .map(OfficeWireV1::into_domain)
+                .map(AssignmentRoleWireV1::into_domain)
                 .collect::<Result<_, _>>()?,
             ticket_policy: self.ticket_policy.into_domain()?,
             required_reads: self
@@ -2424,10 +2425,10 @@ impl TemplateWireV1 {
     }
 }
 
-impl OfficeWireV1 {
-    fn into_domain(self) -> Result<OfficeProfileV1, String> {
-        Ok(OfficeProfileV1 {
-            office: parse_office(&self.office)?,
+impl AssignmentRoleWireV1 {
+    fn into_domain(self) -> Result<AssignmentRoleProfileV1, String> {
+        Ok(AssignmentRoleProfileV1 {
+            assignment_role: parse_assignment_role(&self.assignment_role)?,
             system_template: self.system_template.into_domain()?,
             assignment_template: self.assignment_template.into_domain()?,
             tools: self
@@ -2605,11 +2606,11 @@ fn parse_delivery_mode(value: &str) -> Result<DeliveryModeV1, String> {
     }
 }
 
-fn parse_office(value: &str) -> Result<Office, String> {
+fn parse_assignment_role(value: &str) -> Result<AssignmentRole, String> {
     match value {
-        "product_research" => Ok(Office::ProductResearch),
-        "engineering" => Ok(Office::Engineering),
-        "quality" => Ok(Office::Quality),
+        "product_research" => Ok(AssignmentRole::ProductResearch),
+        "engineering" => Ok(AssignmentRole::Engineering),
+        "quality" => Ok(AssignmentRole::Quality),
         _ => Err(format!("unsupported office {value:?}")),
     }
 }

@@ -7,10 +7,10 @@
 use std::collections::BTreeMap;
 
 use factory_protocol::{
-    AggregateRevision, ArtifactId, AuditLogId, ContractError, FORUM_SNIPPET_MAX_BYTES, ForumAuthor,
-    ForumCreateThreadCommand, ForumCreateTopicCommand, ForumPageLimit, ForumPostCommand,
-    ForumPostId, ForumPostKind, ForumSearchInput, ForumThreadId, ForumThreadPage, ForumTopicId,
-    Office,
+    AggregateRevision, ArtifactId, AssignmentRole, AuditLogId, ContractError,
+    FORUM_SNIPPET_MAX_BYTES, ForumAuthor, ForumCreateThreadCommand, ForumCreateTopicCommand,
+    ForumPageLimit, ForumPostCommand, ForumPostId, ForumPostKind, ForumSearchInput, ForumThreadId,
+    ForumThreadPage, ForumTopicId,
 };
 use sqlx::{PgPool, Postgres};
 use thiserror::Error;
@@ -926,7 +926,7 @@ pub struct ForumSearchHit {
     pub thread_id: ForumThreadId,
     pub post_id: ForumPostId,
     pub kind: ForumPostKind,
-    pub author_office: Option<Office>,
+    pub author_office: Option<AssignmentRole>,
     pub rank_bits: u32,
     pub snippet: String,
     pub topic_name: String,
@@ -1107,7 +1107,7 @@ fn authority_author_columns(authority: ForumAuthority) -> (i16, Option<i64>, Opt
         ForumAuthority::Actor(binding) => (
             0,
             Some(binding.session_id().get()),
-            Some(office_number(binding.office())),
+            Some(office_number(binding.assignment_role())),
         ),
         ForumAuthority::GrandArchitect(_) => (1, None, None),
     }
@@ -1121,7 +1121,7 @@ fn author_from_columns(
     match (author_kind, author_session_id, author_office) {
         (0, Some(session_id), Some(office)) => Ok(ForumAuthor::Actor {
             session_id: factory_protocol::SessionId::new(session_id)?,
-            office: office_from_number(office)?,
+            assignment_role: office_from_number(office)?,
         }),
         (1, None, None) => Ok(ForumAuthor::GrandArchitect),
         _ => Err(ForumStoreError::InvalidStoredAuthor),
@@ -1149,19 +1149,19 @@ fn authority_principal(authority: ForumAuthority) -> String {
     }
 }
 
-const fn office_number(office: Office) -> i16 {
-    match office {
-        Office::ProductResearch => 0,
-        Office::Engineering => 1,
-        Office::Quality => 2,
+const fn office_number(assignment_role: AssignmentRole) -> i16 {
+    match assignment_role {
+        AssignmentRole::ProductResearch => 0,
+        AssignmentRole::Engineering => 1,
+        AssignmentRole::Quality => 2,
     }
 }
 
-fn office_from_number(value: i16) -> Result<Office, ForumStoreError> {
+fn office_from_number(value: i16) -> Result<AssignmentRole, ForumStoreError> {
     match value {
-        0 => Ok(Office::ProductResearch),
-        1 => Ok(Office::Engineering),
-        2 => Ok(Office::Quality),
+        0 => Ok(AssignmentRole::ProductResearch),
+        1 => Ok(AssignmentRole::Engineering),
+        2 => Ok(AssignmentRole::Quality),
         _ => Err(ForumStoreError::UnknownOffice(value)),
     }
 }
@@ -1377,7 +1377,7 @@ mod immutable_row_database_test {
                     AssignmentId::new(1).unwrap(),
                     ApplicationRevisionId::new(1).unwrap(),
                     CampaignId::new(1).unwrap(),
-                    Office::Quality,
+                    AssignmentRole::Quality,
                 ),
             );
             let command = ForumCreateTopicCommand {

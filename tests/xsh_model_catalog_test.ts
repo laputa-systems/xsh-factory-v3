@@ -21,17 +21,17 @@ Deno.test("XSH office model profiles exactly match Pi's frozen offline catalog",
     refreshOnCreate: false,
   });
 
-  for (const office of xshApplicationV1.office_profiles) {
+  for (const office of xshApplicationV1.assignment_role_profiles) {
     const model = runtime.getModel(office.model.provider, office.model.model_id);
-    assert(model !== undefined, `${office.office} model is absent from Pi's offline catalog`);
+    assert(model !== undefined, `${office.assignment_role} model is absent from Pi's offline catalog`);
     verifyModelDescriptor(
       model,
       { model: office.model } as unknown as PiAssignmentPacket,
     );
   }
 
-  const engineering = xshApplicationV1.office_profiles.find((office) =>
-    office.office === "engineering"
+  const engineering = xshApplicationV1.assignment_role_profiles.find((office) =>
+    office.assignment_role === "engineering"
   );
   assert(engineering !== undefined);
   assertEquals(engineering.model.model_id, "openai/gpt-5.6-luna");

@@ -40,8 +40,8 @@ use factory_kernel::{
 };
 use factory_protocol::{
     AggregateRevision, ApplicationBundleWireV1, ApplicationKey, ApplicationRevisionId,
-    ArchitectPrincipalV1, CommandWireV1, CommitMessageWireV1, ContentDigest, ExecutableWireV1,
-    ExpectedRevision, GitWireV1, LimitsWireV1, MicroUsd, ModelWireV1, OfficeWireV1,
+    ArchitectPrincipalV1, AssignmentRoleWireV1, CommandWireV1, CommitMessageWireV1, ContentDigest,
+    ExecutableWireV1, ExpectedRevision, GitWireV1, LimitsWireV1, MicroUsd, ModelWireV1,
     RepositoryWireV1, RuntimeRelativePath, SealedArtifactReferenceV1, SponsorshipDecisionV1,
     TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1, ValidationWireV1,
     canonical_application_bundle_json_v1, canonical_command_profile_json_v1,
@@ -534,11 +534,14 @@ impl Fixture {
             .expect("bounded cost breakdown");
         assert_eq!(costs.len(), 3);
         assert_eq!(
-            costs.iter().map(|row| row.office).collect::<Vec<_>>(),
+            costs
+                .iter()
+                .map(|row| row.assignment_role)
+                .collect::<Vec<_>>(),
             vec![
-                factory_protocol::Office::ProductResearch,
-                factory_protocol::Office::Engineering,
-                factory_protocol::Office::Quality,
+                factory_protocol::AssignmentRole::ProductResearch,
+                factory_protocol::AssignmentRole::Engineering,
+                factory_protocol::AssignmentRole::Quality,
             ],
         );
         assert!(costs.iter().all(|row| {
@@ -876,7 +879,7 @@ async function frame(): Promise<any> { const p = await exact(4); const n = new D
 async function call(operation: string, fields: Record<string, unknown>): Promise<any> { const request_id = `actor-${++sequence}`; const body = enc.encode(JSON.stringify({protocol_version:1, request_id, operation, ...fields})); const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, body.length, false); await write(p); await write(body); const response = await frame(); if (response.request_id !== request_id || response.operation !== operation || response.error_code) throw new Error(`${operation}: ${response.error_code ?? 'identity'}: ${response.message ?? ''}`); return response; }
 const b64 = (text: string) => btoa(text);
 const admission = JSON.parse(await line()); const packetBytes = Uint8Array.from(atob(admission.packet_b64), c => c.charCodeAt(0)); const packet = JSON.parse(dec.decode(packetBytes));
-const ROLE = packet.office === 'product_research' ? 'product' : packet.office === 'engineering' ? 'engineering' : 'quality';
+const ROLE = packet.assignment_role === 'product_research' ? 'product' : packet.assignment_role === 'engineering' ? 'engineering' : 'quality';
 const ATTEMPT = packet.ticket_attempt_id ?? 0;
 await call('session.verify_packet', {packet_digest: admission.packet_digest, packet_bytes_b64: admission.packet_b64});
 for (const required of packet.required_reads) { const read = await call('workspace.read', {repository_relative_path: required.path}); if (read.blake3 !== required.digest) throw new Error('required read mismatch'); }
@@ -1038,32 +1041,35 @@ fn application_bundle(
         placeholders: Vec::new(),
         rendered_byte_limit: 4096,
     };
-    let office = |office: &str, system: usize, assignment: usize, tools: Vec<&str>| OfficeWireV1 {
-        office: office.to_owned(),
-        system_template: template(system),
-        assignment_template: template(assignment),
-        tools: tools.into_iter().map(str::to_owned).collect(),
-        model: ModelWireV1 {
-            // The installed receipt deliberately exercises the MVP's one
-            // provider descriptor. The value below is an inert test string;
-            // the qualified local host never calls a provider.
-            provider: "openrouter".to_owned(),
-            model_id: "provider-free".to_owned(),
-            thinking_level: "none".to_owned(),
-            context_token_limit: 100,
-            output_token_limit: 100,
-            price_input_micro_usd_per_million_tokens: 1,
-            price_output_micro_usd_per_million_tokens: 1,
-            price_cache_read_micro_usd_per_million_tokens: 1,
-            price_cache_write_micro_usd_per_million_tokens: 1,
-            capability_flags: Vec::new(),
-        },
-        limits: LimitsWireV1 {
-            turn_limit: 5,
-            wall_limit_millis: 30_000,
-            output_byte_limit: 128 * 1024,
-        },
-    };
+    let assignment_role_profile =
+        |assignment_role: &str, system: usize, assignment: usize, tools: Vec<&str>| {
+            AssignmentRoleWireV1 {
+                assignment_role: assignment_role.to_owned(),
+                system_template: template(system),
+                assignment_template: template(assignment),
+                tools: tools.into_iter().map(str::to_owned).collect(),
+                model: ModelWireV1 {
+                    // The installed receipt deliberately exercises the MVP's one
+                    // provider descriptor. The value below is an inert test string;
+                    // the qualified local host never calls a provider.
+                    provider: "openrouter".to_owned(),
+                    model_id: "provider-free".to_owned(),
+                    thinking_level: "none".to_owned(),
+                    context_token_limit: 100,
+                    output_token_limit: 100,
+                    price_input_micro_usd_per_million_tokens: 1,
+                    price_output_micro_usd_per_million_tokens: 1,
+                    price_cache_read_micro_usd_per_million_tokens: 1,
+                    price_cache_write_micro_usd_per_million_tokens: 1,
+                    capability_flags: Vec::new(),
+                },
+                limits: LimitsWireV1 {
+                    turn_limit: 5,
+                    wall_limit_millis: 30_000,
+                    output_byte_limit: 128 * 1024,
+                },
+            }
+        };
     canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
         format_version: 1,
         application_key: key.to_owned(),
@@ -1075,8 +1081,8 @@ fn application_bundle(
             delivery_mode: "local_fast_forward_only".to_owned(),
         },
         mission_template: template(0),
-        office_profiles: vec![
-            office(
+        assignment_role_profiles: vec![
+            assignment_role_profile(
                 "product_research",
                 1,
                 2,
@@ -1087,7 +1093,7 @@ fn application_bundle(
                     "product_submit_ticket",
                 ],
             ),
-            office(
+            assignment_role_profile(
                 "engineering",
                 3,
                 4,
@@ -1099,7 +1105,7 @@ fn application_bundle(
                     "candidate_submit",
                 ],
             ),
-            office(
+            assignment_role_profile(
                 "quality",
                 5,
                 6,

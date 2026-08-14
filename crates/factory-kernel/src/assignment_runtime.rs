@@ -20,8 +20,8 @@ use factory_protocol::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, AssignmentCredentialWireV1,
     AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentEvidenceWireV1, AssignmentId,
     AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1, AssignmentPacketWireV1,
-    AssignmentReadWireV1, AssignmentRuntimeWireV1, CampaignId, ContentDigest, ExpectedRevision,
-    MicroUsd, Office, ReadExactFileV1, RequiredReadV1, SealedArtifactReferenceV1,
+    AssignmentReadWireV1, AssignmentRole, AssignmentRuntimeWireV1, CampaignId, ContentDigest,
+    ExpectedRevision, MicroUsd, ReadExactFileV1, RequiredReadV1, SealedArtifactReferenceV1,
     TerminalOperationV1, TicketContractReadV1, canonical_assignment_packet_json_v1,
     parse_application_bundle_v1, render_template_v1, unsigned_assignment_packet_digest_v1,
 };
@@ -604,7 +604,7 @@ struct ApplicationMaterial {
     system_source: String,
     assignment_template: factory_protocol::TemplateArtifactV1,
     assignment_source: String,
-    profile: factory_protocol::OfficeProfileV1,
+    profile: factory_protocol::AssignmentRoleProfileV1,
 }
 
 async fn load_application_material(
@@ -612,7 +612,7 @@ async fn load_application_material(
     process: &ProcessStore,
     cas: &CasStore,
     application_revision_id: ApplicationRevisionId,
-    office: Office,
+    assignment_role: AssignmentRole,
 ) -> Result<ApplicationMaterial, AssignmentRuntimeError> {
     let row = sqlx::query!(
         "SELECT bundle_artifact_id, mission_artifact_id,
@@ -638,23 +638,25 @@ async fn load_application_material(
         AssignmentRuntimeError::Application(format!("admitted bundle is invalid: {error}"))
     })?;
     let profile = bundle
-        .office_profiles
+        .assignment_role_profiles
         .iter()
-        .find(|profile| profile.office == office)
+        .find(|profile| profile.assignment_role == assignment_role)
         .cloned()
         .ok_or_else(|| {
-            AssignmentRuntimeError::Application("admitted bundle lacks selected office".to_owned())
+            AssignmentRuntimeError::Application(
+                "admitted bundle lacks selected assignment role".to_owned(),
+            )
         })?;
-    let (system_id, assignment_id) = match office {
-        Office::ProductResearch => (
+    let (system_id, assignment_id) = match assignment_role {
+        AssignmentRole::ProductResearch => (
             artifact(row.product_research_system_template_artifact_id)?,
             artifact(row.product_research_assignment_template_artifact_id)?,
         ),
-        Office::Engineering => (
+        AssignmentRole::Engineering => (
             artifact(row.engineering_system_template_artifact_id)?,
             artifact(row.engineering_assignment_template_artifact_id)?,
         ),
-        Office::Quality => (
+        AssignmentRole::Quality => (
             artifact(row.quality_system_template_artifact_id)?,
             artifact(row.quality_assignment_template_artifact_id)?,
         ),
@@ -951,7 +953,7 @@ fn assignment_wire(
     assignment_prompt: &[u8],
     workspace_root: &str,
     staging_root: &str,
-    profile: &factory_protocol::OfficeProfileV1,
+    profile: &factory_protocol::AssignmentRoleProfileV1,
     runtime: &factory_protocol::RuntimeIdentityV1,
     required_reads: &[ReadExactFileV1],
     assignment_evidence: &[AssignmentEvidenceV1],
@@ -978,7 +980,7 @@ fn assignment_wire(
         assignment_id: assignment_id.get(),
         application_revision_id: application_revision_id.get(),
         kernel_build_id: build_id.digest().to_hex(),
-        office: office_name(office_for_target(target_kind)).to_owned(),
+        assignment_role: office_name(office_for_target(target_kind)).to_owned(),
         target,
         repository_base_identity: repository_identity(context),
         factory_base_identity: build_id.digest().to_hex(),
@@ -1099,7 +1101,7 @@ fn typed_packet(
         assignment_id,
         kernel_build_id,
         application_revision_id,
-        office: office_for_target(target_kind),
+        assignment_role: office_for_target(target_kind),
         target,
         ticket_attempt_id: ticket_attempt(target_kind),
         candidate_id: candidate(target_kind),
@@ -1120,11 +1122,11 @@ fn typed_packet(
     }
 }
 
-fn office_for_target(target: DurableAssignmentTarget) -> Office {
+fn office_for_target(target: DurableAssignmentTarget) -> AssignmentRole {
     match target {
-        DurableAssignmentTarget::Product => Office::ProductResearch,
-        DurableAssignmentTarget::Engineering { .. } => Office::Engineering,
-        DurableAssignmentTarget::Quality { .. } => Office::Quality,
+        DurableAssignmentTarget::Product => AssignmentRole::ProductResearch,
+        DurableAssignmentTarget::Engineering { .. } => AssignmentRole::Engineering,
+        DurableAssignmentTarget::Quality { .. } => AssignmentRole::Quality,
     }
 }
 fn ticket_attempt(target: DurableAssignmentTarget) -> Option<factory_protocol::TicketAttemptId> {
@@ -1440,11 +1442,11 @@ fn absolute_path(
     )
     .map_err(Into::into)
 }
-fn office_name(office: Office) -> &'static str {
-    match office {
-        Office::ProductResearch => "product_research",
-        Office::Engineering => "engineering",
-        Office::Quality => "quality",
+fn office_name(assignment_role: AssignmentRole) -> &'static str {
+    match assignment_role {
+        AssignmentRole::ProductResearch => "product_research",
+        AssignmentRole::Engineering => "engineering",
+        AssignmentRole::Quality => "quality",
     }
 }
 fn thinking_name(value: factory_protocol::ThinkingLevelV1) -> &'static str {

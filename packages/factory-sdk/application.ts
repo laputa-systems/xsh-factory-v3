@@ -3,7 +3,7 @@
  * callback, metadata, predicate, custom tool, or plugin field can cross the
  * generic kernel boundary.
  */
-export type OfficeV1 = "product_research" | "engineering" | "quality";
+export type AssignmentRoleV1 = "product_research" | "engineering" | "quality";
 
 export type ActorToolV1 =
   | "workspace_read"
@@ -63,8 +63,8 @@ export interface SessionLimitsV1 {
   readonly output_byte_limit: number;
 }
 
-export interface OfficeProfileV1 {
-  readonly office: OfficeV1;
+export interface AssignmentRoleProfileV1 {
+  readonly assignment_role: AssignmentRoleV1;
   readonly system_template: TemplateArtifactV1;
   readonly assignment_template: TemplateArtifactV1;
   readonly tools: readonly ActorToolV1[];
@@ -140,7 +140,7 @@ export interface ApplicationBundleV1 {
   readonly predecessor_bundle: string | null;
   readonly repository: RepositoryBindingV1;
   readonly mission_template: TemplateArtifactV1;
-  readonly office_profiles: readonly OfficeProfileV1[];
+  readonly assignment_role_profiles: readonly AssignmentRoleProfileV1[];
   readonly ticket_policy: TicketPolicyV1;
   readonly required_reads: readonly RequiredReadV1[];
   readonly reproducer_profiles: readonly CommandProfileV1[];
@@ -150,9 +150,9 @@ export interface ApplicationBundleV1 {
 }
 
 /** Application authoring data before source templates are hashed. */
-export type ApplicationSourceOfficeProfileV1 =
+export type ApplicationSourceAssignmentRoleProfileV1 =
   & Omit<
-    OfficeProfileV1,
+    AssignmentRoleProfileV1,
     "system_template" | "assignment_template"
   >
   & {
@@ -164,11 +164,11 @@ export type ApplicationSourceOfficeProfileV1 =
 export type ApplicationSourceBundleV1 =
   & Omit<
     ApplicationBundleV1,
-    "mission_template" | "office_profiles"
+    "mission_template" | "assignment_role_profiles"
   >
   & {
     readonly mission_template: TemplateDeclarationV1;
-    readonly office_profiles: readonly ApplicationSourceOfficeProfileV1[];
+    readonly assignment_role_profiles: readonly ApplicationSourceAssignmentRoleProfileV1[];
   };
 
 /** A validated, immutable V1 bundle with digests bound to exact source bytes. */
@@ -177,7 +177,11 @@ export type ApplicationDefinitionV1 = Readonly<ApplicationBundleV1>;
 export type ApplicationSourceDefinitionV1 = Readonly<ApplicationSourceBundleV1>;
 
 const byteLength = new TextEncoder();
-const offices: readonly OfficeV1[] = ["product_research", "engineering", "quality"];
+const assignmentRoles: readonly AssignmentRoleV1[] = [
+  "product_research",
+  "engineering",
+  "quality",
+];
 const tools: readonly ActorToolV1[] = [
   "workspace_read",
   "workspace_write",
@@ -233,7 +237,7 @@ function validateApplication(
     "predecessor_bundle",
     "repository",
     "mission_template",
-    "office_profiles",
+    "assignment_role_profiles",
     "ticket_policy",
     "required_reads",
     "reproducer_profiles",
@@ -248,7 +252,7 @@ function validateApplication(
   }
   repository(input.repository);
   template(input.mission_template, "application.mission_template", requireTemplateDigests);
-  officeProfiles(input.office_profiles, requireTemplateDigests);
+  assignmentRoleProfiles(input.assignment_role_profiles, requireTemplateDigests);
   ticketPolicy(input.ticket_policy);
   requiredReads(input.required_reads);
   commands(input.reproducer_profiles, "application.reproducer_profiles", false);
@@ -299,59 +303,62 @@ function template(
   }
 }
 
-function officeProfiles(
-  profiles: readonly (OfficeProfileV1 | ApplicationSourceOfficeProfileV1)[],
+function assignmentRoleProfiles(
+  profiles: readonly (AssignmentRoleProfileV1 | ApplicationSourceAssignmentRoleProfileV1)[],
   requireTemplateDigests: boolean,
 ): void {
-  if (profiles.length !== offices.length) {
-    fail("application.office_profiles must have every fixed office");
+  if (profiles.length !== assignmentRoles.length) {
+    fail("application.assignment_role_profiles must have every fixed assignment role");
   }
-  const known = new Set<OfficeV1>();
+  const known = new Set<AssignmentRoleV1>();
   for (const profile of profiles) {
-    exactObject(profile, "office profile", [
-      "office",
+    exactObject(profile, "assignment-role profile", [
+      "assignment_role",
       "system_template",
       "assignment_template",
       "tools",
       "model",
       "limits",
     ]);
-    if (!offices.includes(profile.office) || known.has(profile.office)) {
-      fail("application.office_profiles must have one of each fixed office");
+    if (!assignmentRoles.includes(profile.assignment_role) || known.has(profile.assignment_role)) {
+      fail("application.assignment_role_profiles must have one of each fixed assignment role");
     }
-    known.add(profile.office);
-    template(profile.system_template, "office profile.system_template", requireTemplateDigests);
+    known.add(profile.assignment_role);
+    template(profile.system_template, "assignment-role profile.system_template", requireTemplateDigests);
     template(
       profile.assignment_template,
-      "office profile.assignment_template",
+      "assignment-role profile.assignment_template",
       requireTemplateDigests,
     );
-    officeTools(profile.office, profile.tools);
+    assignmentRoleTools(profile.assignment_role, profile.tools);
     model(profile.model);
     sessionLimits(profile.limits);
   }
 }
 
-function officeTools(office: OfficeV1, values: readonly ActorToolV1[]): void {
-  if (values.length === 0) fail("office profile.tools must not be empty");
+function assignmentRoleTools(
+  assignment_role: AssignmentRoleV1,
+  values: readonly ActorToolV1[],
+): void {
+  if (values.length === 0) fail("assignment-role profile.tools must not be empty");
   const known = new Set<ActorToolV1>();
   for (const tool of values) {
-    if (!tools.includes(tool) || known.has(tool)) fail("office profile.tools is invalid");
+    if (!tools.includes(tool) || known.has(tool)) fail("assignment-role profile.tools is invalid");
     known.add(tool);
-    if (tool === "product_submit_ticket" && office !== "product_research") {
-      fail("product tool wrong office");
+    if (tool === "product_submit_ticket" && assignment_role !== "product_research") {
+      fail("product tool wrong assignment role");
     }
     if (
       (tool === "candidate_checkpoint_regression" || tool === "candidate_submit") &&
-      office !== "engineering"
+      assignment_role !== "engineering"
     ) {
-      fail("candidate tool wrong office");
+      fail("candidate tool wrong assignment role");
     }
     if (
       (tool === "quality_run_full_suite" || tool === "quality_submit_review") &&
-      office !== "quality"
+      assignment_role !== "quality"
     ) {
-      fail("quality tool wrong office");
+      fail("quality tool wrong assignment role");
     }
   }
 }

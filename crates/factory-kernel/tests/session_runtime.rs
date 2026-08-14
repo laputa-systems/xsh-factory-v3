@@ -32,8 +32,8 @@ use factory_kernel::{
 };
 use factory_protocol::{
     ASSIGNMENT_PACKET_V1_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationKey,
-    ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV1, ContentDigest,
-    CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1, Office,
+    ApplicationRevisionId, ArchitectPrincipalV1, ArtifactId, AssignmentPacketV1, AssignmentRole,
+    ContentDigest, CredentialDescriptorV1, ExpectedRevision, MicroUsd, ModelProfileV1,
     OperatorCancelCampaignRequest, PROTOCOL_VERSION_V1, ReadExactFileV1, ReadObservationV1,
     RepositoryRelativePath, RuntimeIdentityV1, SealedArtifactReferenceV1, SessionLimitsV1,
     TerminalCostV1, TerminalOperationV1,
@@ -94,7 +94,10 @@ fn real_deno_fake_actor_commits_complete_known_cost_session_provenance() {
             .await
             .expect("bounded session cost breakdown");
         assert_eq!(cost_rows.len(), 1);
-        assert_eq!(cost_rows[0].office, Office::ProductResearch);
+        assert_eq!(
+            cost_rows[0].assignment_role,
+            AssignmentRole::ProductResearch
+        );
         assert_eq!(cost_rows[0].model_provider, "fake");
         assert_eq!(
             cost_rows[0].cost,
@@ -573,7 +576,7 @@ impl RuntimeFixture {
             assignment_id: identity.assignment_id(),
             kernel_build_id: build.kernel_build_id,
             application_revision_id: application,
-            office: Office::ProductResearch,
+            assignment_role: AssignmentRole::ProductResearch,
             target: "provider-free fake actor".to_owned(),
             ticket_attempt_id: None,
             candidate_id: None,
@@ -1068,10 +1071,10 @@ fn wire_packet(
         assignment_id: packet.assignment_id.get(),
         application_revision_id: packet.application_revision_id.get(),
         kernel_build_id: packet.kernel_build_id.digest().to_hex(),
-        office: match packet.office {
-            Office::ProductResearch => "product_research",
-            Office::Engineering => "engineering",
-            Office::Quality => "quality",
+        assignment_role: match packet.assignment_role {
+            AssignmentRole::ProductResearch => "product_research",
+            AssignmentRole::Engineering => "engineering",
+            AssignmentRole::Quality => "quality",
         }
         .to_owned(),
         target: packet.target.clone(),
@@ -1226,10 +1229,10 @@ fn minimal_bundle_json(
     templates: &[(&str, ContentDigest)],
 ) -> String {
     use factory_protocol::{
-        ApplicationBundleWireV1, CommandWireV1, CommitMessageWireV1, ExecutableWireV1, GitWireV1,
-        LimitsWireV1, ModelWireV1, OfficeWireV1, RepositoryWireV1, RequiredReadWireV1,
-        TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1, ValidationWireV1,
-        canonical_application_bundle_json_v1,
+        ApplicationBundleWireV1, AssignmentRoleWireV1, CommandWireV1, CommitMessageWireV1,
+        ExecutableWireV1, GitWireV1, LimitsWireV1, ModelWireV1, RepositoryWireV1,
+        RequiredReadWireV1, TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1,
+        ValidationWireV1, canonical_application_bundle_json_v1,
     };
     let template = |index: usize| TemplateWireV1 {
         source_path: templates[index].0.to_owned(),
@@ -1251,36 +1254,37 @@ fn minimal_bundle_json(
         stderr_byte_limit: 4096,
         expected_exit_status: 0,
     };
-    let office = |name: &str, system: usize, assignment: usize| OfficeWireV1 {
-        office: name.to_owned(),
-        system_template: template(system),
-        assignment_template: template(assignment),
-        tools: if name == "product_research" {
-            vec![
-                "workspace_read".to_owned(),
-                "product_submit_ticket".to_owned(),
-            ]
-        } else {
-            vec!["workspace_read".to_owned()]
-        },
-        model: ModelWireV1 {
-            provider: "test".to_owned(),
-            model_id: "test".to_owned(),
-            thinking_level: "none".to_owned(),
-            context_token_limit: 1,
-            output_token_limit: 1,
-            price_input_micro_usd_per_million_tokens: 1,
-            price_output_micro_usd_per_million_tokens: 1,
-            price_cache_read_micro_usd_per_million_tokens: 1,
-            price_cache_write_micro_usd_per_million_tokens: 1,
-            capability_flags: Vec::new(),
-        },
-        limits: LimitsWireV1 {
-            turn_limit: 1,
-            wall_limit_millis: 10_000,
-            output_byte_limit: 4096,
-        },
-    };
+    let assignment_role_profile =
+        |name: &str, system: usize, assignment: usize| AssignmentRoleWireV1 {
+            assignment_role: name.to_owned(),
+            system_template: template(system),
+            assignment_template: template(assignment),
+            tools: if name == "product_research" {
+                vec![
+                    "workspace_read".to_owned(),
+                    "product_submit_ticket".to_owned(),
+                ]
+            } else {
+                vec!["workspace_read".to_owned()]
+            },
+            model: ModelWireV1 {
+                provider: "test".to_owned(),
+                model_id: "test".to_owned(),
+                thinking_level: "none".to_owned(),
+                context_token_limit: 1,
+                output_token_limit: 1,
+                price_input_micro_usd_per_million_tokens: 1,
+                price_output_micro_usd_per_million_tokens: 1,
+                price_cache_read_micro_usd_per_million_tokens: 1,
+                price_cache_write_micro_usd_per_million_tokens: 1,
+                capability_flags: Vec::new(),
+            },
+            limits: LimitsWireV1 {
+                turn_limit: 1,
+                wall_limit_millis: 10_000,
+                output_byte_limit: 4096,
+            },
+        };
     canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
         format_version: 1,
         application_key: application.to_owned(),
@@ -1292,10 +1296,10 @@ fn minimal_bundle_json(
             delivery_mode: "local_fast_forward_only".to_owned(),
         },
         mission_template: template(0),
-        office_profiles: vec![
-            office("product_research", 1, 2),
-            office("engineering", 3, 4),
-            office("quality", 5, 6),
+        assignment_role_profiles: vec![
+            assignment_role_profile("product_research", 1, 2),
+            assignment_role_profile("engineering", 3, 4),
+            assignment_role_profile("quality", 5, 6),
         ],
         ticket_policy: TicketPolicyWireV1 {
             low_water: 1,

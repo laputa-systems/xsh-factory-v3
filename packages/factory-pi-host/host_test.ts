@@ -173,7 +173,7 @@ function packet(
   return {
     format_version: 1,
     assignment_id: "assignment-1",
-    office: "engineering",
+    assignment_role: "engineering",
     campaign_id: "campaign-1",
     application_revision_id: "3",
     kernel_build_id: "e".repeat(64),
@@ -559,7 +559,7 @@ Deno.test("host entrypoint consumes one attested packet before Pi construction",
   const bytes = new TextEncoder().encode(canonicalJson({
     format_version: 1,
     assignment_id: 22,
-    office: source.office,
+    assignment_role: source.assignment_role,
     campaign_id: 11,
     application_revision_id: Number(source.application_revision_id),
     kernel_build_id: source.kernel_build_id,
@@ -703,7 +703,7 @@ Deno.test("artifact reading requires sealed upstream assignment evidence", async
       runAssignment(
         {
           ...source,
-          office: "product_research",
+          assignment_role: "product_research",
           ticket_attempt_id: null,
           candidate_id: null,
           tools: ["artifact_read", "work_complete"],
@@ -1151,7 +1151,7 @@ Deno.test("Candidate and Quality terminal tools call their daemon adapter before
       ? { ...source, legal_terminal_operations: [operation], tools: [operation] }
       : {
         ...source,
-        office: "quality",
+        assignment_role: "quality",
         candidate_id: "23",
         legal_terminal_operations: [operation],
         tools: [operation],
@@ -1366,7 +1366,7 @@ Deno.test("partial transcript gzip remains readable and tool allowlists are exac
   assertEquals(validateToolAllowlist(artifactPacket, [adapter]), [adapter]);
   const legacyEngineeringPacket = {
     ...artifactPacket,
-    office: "engineering",
+    assignment_role: "engineering",
     tools: ["artifact_seal", "candidate_submit"] as const,
   };
   assertEquals(

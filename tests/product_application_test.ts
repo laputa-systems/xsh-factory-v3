@@ -64,8 +64,8 @@ Deno.test("XSH Product policy exposes the bounded buffer and repeatable proposal
   assertEquals(xshProductTicketPolicyV1.target, 3);
   assertEquals(xshProductTicketPolicyV1.maximum, 5);
   assertEquals(xshProductTicketPolicyV1.proposal_maximum, 3);
-  const product = xshApplicationV1.office_profiles.find((profile) =>
-    profile.office === "product_research"
+  const product = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "product_research"
   );
   assert(product !== undefined);
   assertEquals(product.tools, [
@@ -84,11 +84,11 @@ Deno.test("XSH application pins exact repository, reads, and deterministic comma
     "/Users/josh/d/laputa-systems/xsh",
   );
   assertEquals(xshApplicationV1.repository.default_branch, "master");
-  for (const profile of xshApplicationV1.office_profiles) {
+  for (const profile of xshApplicationV1.assignment_role_profiles) {
     assertEquals(profile.system_template.placeholders, ["ASSIGNMENT_ID", "MISSION"]);
     assertEquals(
       profile.assignment_template.placeholders,
-      profile.office === "engineering"
+      profile.assignment_role === "engineering"
         ? [
           "ASSIGNMENT_ID",
           "TARGET",
@@ -98,8 +98,8 @@ Deno.test("XSH application pins exact repository, reads, and deterministic comma
         : ["ASSIGNMENT_ID", "TARGET"],
     );
   }
-  const product = xshApplicationV1.office_profiles.find((profile) =>
-    profile.office === "product_research"
+  const product = xshApplicationV1.assignment_role_profiles.find((profile) =>
+    profile.assignment_role === "product_research"
   );
   assert(product !== undefined);
   assertEquals(product.model.model_id, "openai/gpt-5.6-luna");
@@ -138,7 +138,7 @@ Deno.test("XSH Product proposal validator binds owner to a stated contract read"
 });
 
 Deno.test("XSH Quality policy exposes the independent validation and sealed review tools", () => {
-  const quality = xshApplicationV1.office_profiles.find((profile) => profile.office === "quality");
+  const quality = xshApplicationV1.assignment_role_profiles.find((profile) => profile.assignment_role === "quality");
   assert(quality !== undefined);
   assert(quality.tools.includes("artifact_seal"));
   assert(quality.tools.includes("quality_run_full_suite"));
