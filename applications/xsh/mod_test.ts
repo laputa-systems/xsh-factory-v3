@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "7037b96969423c218ecae6c6e9ac875462c68bb6bd99f6dabae2a439ef29f686"
+      "40f4de4fe4c092a30b655d85797ccf9691a79c4196db9c7f9295977e20a1b39a"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
@@ -191,7 +191,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       ],
       [
         "direct reproducer proof before submission",
-        /Do not submit if the exact direct command still exits 0/u,
+        /Do not submit if the exact\s+direct command still exits 0/u,
       ],
       [
         "in-band par-map ResultErr values",
@@ -233,10 +233,16 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     throw new Error("Engineering must bound source-inspection response size");
   }
   if (
-    engineeringProfile?.limits.turn_limit !== 18 ||
+    engineeringProfile?.limits.turn_limit !== 24 ||
     engineeringProfile.limits.wall_limit_millis !== 900_000
   ) {
     throw new Error("Engineering must use the bounded implementation budget");
+  }
+  if (
+    !/Do not run\s+`cargo test --locked --test integration` or another broad suite in Engineering/u
+      .test(engineeringSystem)
+  ) {
+    throw new Error("Engineering must leave the broad suite to independent validation");
   }
   const qualitySystem = templateText(first, "templates/quality-system.md");
   if (!/convergence gate, not open-ended research/u.test(qualitySystem)) {

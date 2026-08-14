@@ -67,8 +67,8 @@ that returned `Result::Err` without `?`. Preserve that value unchanged as
 list. `tests/xsh/par-map-result.xsh::test_par_map_collect_all` is the canonical guard: its
 `safe_div` error stays in the four-item output while the non-error rows remain usable. The direct
 indexing reproducer is a Rust evaluator failure, so it must still terminate with status 3. Run that
-collect-all test through the native runtime gate as well as the exact reproducer and full suite;
-do not submit while either contract fails.
+collect-all test through the native runtime gate as well as the exact reproducer. The independent
+hard-validation worktree and Quality own the full suite; do not duplicate it here.
 
 In the ordinary `FullStageTag::ParMapBlock` serial/traced branch, do not write
 `results.push(result?)`: that raw `?` returns the evaluator error before the coordinator can add
@@ -107,7 +107,7 @@ must exit 3 after the Rust control-flow change. If it exits 0, the implementatio
 do not update assertions or submit. The changed stream test is proof of the already-working
 runtime behavior, not a substitute for it.
 
-### Mandatory Quality-suite closure
+### Known Quality network-flake closure
 
 Two independent Quality runs of prior clean candidates failed only
 `runtime::modules::net_module_download_many_follows_redirects_and_keeps_atomic_destination_on_limit`
@@ -124,19 +124,19 @@ this assignment so the independent Quality suite no longer fails nondeterministi
 ignore, modify, or de-prioritize the ticket's direct reproducer,
 `runtime::coverage::xsh_native_tests`, or any other test.
 
-Run the named ignored test once explicitly (it must remain discoverable) and run the admitted full
-integration command after the change. Record the exact commands and observations in the candidate
-risk/completion record. Do not remove the ignore merely because an Engineering full-suite run
-passes: the two sealed Quality failures are the controlling evidence.
+Run the named ignored test once explicitly (it must remain discoverable). Record that command and
+observation in the candidate risk/completion record. Do not remove the ignore merely because an
+Engineering-focused check passes: the two sealed Quality failures are the controlling evidence.
 
 The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
 `test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
 not the desired contract. Change it into regression coverage that requires status 3,
 `stream stage `par-map` item 0 failed`, `index-out-of-range`, and the existing
 `stream.item.error` trace context. Before submission, run the exact sealed stdin reproducer with
-`--jobs=2` and verify its process status, then run the focused native runtime coverage and the
-admitted full integration command. Do not submit if the exact direct command still exits 0, even
-when a narrower test happens to pass.
+`--jobs=2` and verify its process status, then run the focused native runtime coverage. Do not run
+`cargo test --locked --test integration` or another broad suite in Engineering: hard validation and
+Quality run the independent full suite from clean candidate worktrees. Do not submit if the exact
+direct command still exits 0, even when a narrower test happens to pass.
 
 ## Bounded flaky-test remediation
 
