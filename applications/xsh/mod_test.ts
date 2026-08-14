@@ -242,6 +242,16 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!/convergence gate, not open-ended research/u.test(qualitySystem)) {
     throw new Error("Quality must treat a passed full suite as a convergence gate");
   }
+  if (!/Keep every shell source-inspection response\s+under 8 KiB/u.test(qualitySystem)) {
+    throw new Error("Quality must bound source-inspection response size");
+  }
+  if (
+    !/one targeted `rg -n`\s+lookup and at most one adjacent, line-numbered range/u.test(
+      qualitySystem,
+    )
+  ) {
+    throw new Error("Quality must use a single focused source-inspection path");
+  }
   if (
     !/Do not run network,\s+download,\s+build, or additional test probes after a passing receipt/u
       .test(

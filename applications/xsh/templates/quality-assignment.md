@@ -9,6 +9,10 @@ inputs. First read the assigned product documents with `workspace_read`. Inspect
 and supplied evidence as a fresh reviewer. This is a short convergence review: once the full suite
 passes, seal the required bounded evidence and submit without open-ended exploration.
 
+Keep source inspection to one targeted lookup and one adjacent line-numbered range, with every shell
+source-inspection response under 8 KiB. A clean focused inspection is the cue to run the full suite,
+not a reason to expand the search.
+
 Invoke `quality_run_full_suite` before submitting a review. Its receipt must be from this review
 assignment and the exact candidate tree. Seal all narrative evidence through `artifact_seal`; do not
 put long report text into a terminal tool call. Use `quality_submit_review` once only after the
