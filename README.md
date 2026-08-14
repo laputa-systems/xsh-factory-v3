@@ -16,20 +16,26 @@ sandbox. See [trust assumptions](docs/trust-assumptions.md).
 
 ## Local setup
 
-The vendored [`pi-headless`](vendor/pi-headless) submodule is the only Pi
-implementation. Factory never uses a system Pi executable or a Pi SDK resolved
-from a registry. Populate its locked build inputs and the Deno cache once:
+Factory links directly to the local `pi-agent-core-rs` checkout at
+`/Users/josh/d/pi-agent-core-rs` until that project is published. Factory never
+uses any legacy actor runtime or package-registry runtime.
+Populate both Cargo workspaces once:
 
 ```sh
 make cache
 ```
 
-Build the local headless ESM artifacts and run the aggressive factory
-qualification before committing factory changes. The Grand Architect owns
-this gate:
+Run the Rust-only qualification before committing factory changes. The Grand
+Architect owns this gate:
 
 ```sh
 make lint
+```
+
+The first full provider-free gate is:
+
+```sh
+make pi-agent-core-rs-acceptance
 ```
 
 `make factoryd-serve` deliberately introduces the OpenRouter credential only
@@ -39,21 +45,19 @@ does not itself start paid work.
 
 ## Application bundles
 
-Compile the inert XSH bundle before registering an application revision:
+The checked-in XSH V2 bundle is inert application data. Register it directly
+before activating an application revision:
 
 ```sh
-deno run --allow-read --no-prompt --frozen --cached-only applications/xsh/mod.ts \
-  > applications/xsh/bundle.v1.json
+factoryctl application register xsh \
+  --source-root applications/xsh \
+  --bundle-relative-path bundle.v2.json
 ```
 
-The compiler reads each declared template and computes its BLAKE3 identity;
-template source files do not contain hand-maintained digest values.
-
-The generated bundle is ignored. Registration re-reads it and every named
-template beneath `applications/xsh`, verifies their BLAKE3 identities, and
-adopts the immutable bytes into CAS. A campaign pins one active application
-revision; its Product, Engineering, and Quality sessions cannot see mutable
-application source.
+Registration re-reads the declared templates and policy artifacts beneath
+`applications/xsh`, verifies their BLAKE3 identities, and adopts the immutable
+bytes into CAS. A campaign pins one active application revision; its Product,
+Engineering, and Quality sessions cannot see mutable application source.
 
 Detailed command sequences, guards, and recovery rules are in
 [operations](docs/OPERATIONS.md).

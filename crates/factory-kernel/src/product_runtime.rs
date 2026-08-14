@@ -11,11 +11,11 @@
 use std::path::Path;
 
 use factory_protocol::{
-    ApplicationRevisionId, ApprovedToolV1, ArtifactId, CommandObservationV1, CommandProfileV1,
-    DurationMillis, ExecutableV1, ExpectedRevision, KernelBuildId, ProductSubmitTicketRequest,
+    ApplicationRevisionId, ApprovedToolV2, ArtifactId, CommandObservationV1, CommandProfileV2,
+    DurationMillis, ExecutableV2, ExpectedRevision, KernelBuildId, ProductSubmitTicketRequest,
     ProductTicketProposalV1, RepositoryRelativePath, SealedArtifactReferenceV1,
-    canonical_product_ticket_proposal_json_v1, parse_application_bundle_v1,
-    parse_command_profile_v1,
+    canonical_product_ticket_proposal_json_v1, parse_application_bundle_v2,
+    parse_command_profile_v2,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -81,7 +81,7 @@ pub async fn execute_product_proposal(
         .proposal_admission_context(input.application_revision_id)
         .await?;
     let bundle_bytes = registered_bytes(process, cas, context.bundle_artifact_id).await?;
-    let bundle = parse_application_bundle_v1(&bundle_bytes)
+    let bundle = parse_application_bundle_v2(&bundle_bytes)
         .map_err(|error| ProductRuntimeError::ApplicationBundle(error.to_string()))?;
     let proposal = input
         .request
@@ -92,7 +92,7 @@ pub async fn execute_product_proposal(
     let command_bytes =
         registered_reference_bytes(process, cas, input.principal, &proposal.reproducer.command)
             .await?;
-    let sealed_profile = parse_command_profile_v1(&command_bytes)
+    let sealed_profile = parse_command_profile_v2(&command_bytes)
         .map_err(|error| ProductRuntimeError::ProposalContract(error.to_string()))?;
     let admitted_profile = bundle
         .reproducer_profiles
@@ -272,9 +272,9 @@ fn git_probe(
     argv: &[&str],
 ) -> Result<String, ProductRuntimeError> {
     let command = DeterministicCommand::new(
-        CommandProfileV1 {
+        CommandProfileV2 {
             name: format!("product-discovery-git-{}", argv[0]),
-            executable: ExecutableV1::ApprovedTool(ApprovedToolV1::Git),
+            executable: ExecutableV2::ApprovedTool(ApprovedToolV2::Git),
             argv: argv.iter().map(|value| (*value).to_owned()).collect(),
             working_directory: RepositoryRelativePath::parse(".")
                 .expect("static repository root path is valid"),

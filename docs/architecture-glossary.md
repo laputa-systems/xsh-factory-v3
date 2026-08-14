@@ -102,8 +102,8 @@ inventory and Forum history outlive campaigns.
 
 ## Compact audit transcript
 
-The locally built Pi headless runtime projects its event stream before it hits
-disk. The projection retains bounded assistant text and tool diagnostics while
+The Rust `pi-agent-core-rs` host projects its event stream before it hits disk.
+The projection retains bounded assistant text and tool diagnostics while
 discarding interactive session snapshots, forks, and thinking blocks. Its gzip
 archive is one session artifact, not a PostgreSQL event log.
 

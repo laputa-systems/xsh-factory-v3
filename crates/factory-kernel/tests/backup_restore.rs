@@ -1,6 +1,6 @@
 //! Offline restore-pair qualification and negative-corruption judge.
 //!
-//! The Deno operator wrapper creates the exact blank clone, restores the
+//! The Rust operator wrapper creates the exact blank clone, restores the
 //! custom PostgreSQL dump, and copies the append-only CAS before this test is
 //! invoked.  This test never creates or drops a database.  Its one valid-pair
 //! call is read-only; the following short-lived clone-only corruptions prove
@@ -40,9 +40,9 @@ fn restored_database_and_cas_are_integrity_qualified() {
             .expect("restored database must retain one installed-build receipt");
         // `load_current_installed_runtime` decodes the receipt from the
         // restored CAS, binds it to the current durable build identity, and
-        // reruns the local Deno/Pi source, executable, and frozen-cache
-        // checks. This keeps a structurally sound artifact ledger from being
-        // mistaken for a restorable installed runtime.
+        // reruns the local Rust host and pi-agent-core source-identity checks.
+        // This keeps a structurally sound artifact ledger from being mistaken
+        // for a restorable installed runtime.
         restored_runtime
             .verify_installed_material(factory_kernel::storage::SCHEMA_IDENTITY)
             .expect("restored installed material must requalify locally");

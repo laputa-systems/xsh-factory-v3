@@ -12,9 +12,10 @@ CREATE TABLE factory.kernel_builds (
     source_digest BYTEA NOT NULL CHECK (octet_length(source_digest) = 32),
     binary_digest BYTEA NOT NULL CHECK (octet_length(binary_digest) = 32),
     schema_identity TEXT NOT NULL CHECK (octet_length(schema_identity) BETWEEN 1 AND 160),
-    deno_executable_path TEXT NOT NULL CHECK (deno_executable_path LIKE '/%' AND octet_length(deno_executable_path) <= 4096),
-    deno_version TEXT NOT NULL CHECK (octet_length(deno_version) BETWEEN 1 AND 240),
-    deno_lock_digest BYTEA NOT NULL CHECK (octet_length(deno_lock_digest) = 32),
+    host_executable_path TEXT NOT NULL CHECK (host_executable_path LIKE '/%' AND octet_length(host_executable_path) <= 4096),
+    core_head TEXT NOT NULL CHECK (octet_length(core_head) = 40 AND core_head ~ '^[0-9a-f]{40}$'),
+    core_source_digest BYTEA NOT NULL CHECK (octet_length(core_source_digest) = 32),
+    rust_toolchain TEXT NOT NULL CHECK (octet_length(rust_toolchain) BETWEEN 1 AND 240),
     -- The install transaction inserts the deferred build/artifact pair
     -- together, so this receipt is never durably absent.
     qualification_receipt_artifact_id BIGINT NOT NULL,

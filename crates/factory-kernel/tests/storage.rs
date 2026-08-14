@@ -231,6 +231,8 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             fs::write(source_root.join(path), bytes).expect("template");
             template_digests.push((path, ContentDigest::of_bytes(bytes)));
         }
+        fs::create_dir_all(source_root.join("policies")).expect("policy directory");
+        fs::write(source_root.join("policies/test.luau"), b"return {}\n").expect("policy");
         let application_key = unique("application");
         fs::write(
             source_root.join("bundle.json"),
@@ -948,9 +950,10 @@ async fn install_build(store: &KernelStore) -> InstalledBuild {
         source_digest: digest(unique_number()),
         binary_digest: digest(unique_number()),
         schema_identity: SCHEMA_IDENTITY.to_owned(),
-        deno_executable_path: "/opt/factory/deno".to_owned(),
-        deno_version: "deno 2.9.4".to_owned(),
-        deno_lock_digest: digest(unique_number()),
+        host_executable_path: "/opt/factory/factory-pi-host".to_owned(),
+        core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+        rust_toolchain: "nightly-2026-07-24".to_owned(),
+        core_source_digest: digest(unique_number()),
         qualification_receipt,
     };
     let receipt = store
@@ -993,21 +996,21 @@ fn application_bundle_json(
     templates: &[(&str, ContentDigest)],
 ) -> String {
     use factory_protocol::{
-        ApplicationBundleWireV1, AssignmentRoleWireV1, CommandWireV1, CommitMessageWireV1,
-        ExecutableWireV1, GitWireV1, LimitsWireV1, ModelWireV1, RepositoryWireV1,
-        RequiredReadWireV1, TemplateWireV1, TicketBoundsWireV1, TicketPolicyWireV1,
-        ValidationWireV1, canonical_application_bundle_json_v1,
+        ApplicationBundleWireV2, AssignmentRoleWireV2, CommandWireV2, CommitMessageWireV2,
+        ExecutableWireV2, GitWireV2, LimitsWireV2, ModelWireV2, PolicyWireV2, RepositoryWireV2,
+        RequiredReadWireV2, TemplateWireV2, TicketBoundsWireV2, TicketPolicyWireV2,
+        ValidationWireV2, canonical_application_bundle_json_v2,
     };
 
-    let template = |index: usize| TemplateWireV1 {
+    let template = |index: usize| TemplateWireV2 {
         source_path: templates[index].0.to_owned(),
         digest: templates[index].1.to_hex(),
         placeholders: Vec::new(),
         rendered_byte_limit: 4096,
     };
-    let command = |name: &str| CommandWireV1 {
+    let command = |name: &str| CommandWireV2 {
         name: name.to_owned(),
-        executable: ExecutableWireV1 {
+        executable: ExecutableWireV2 {
             approved_tool: Some("cargo".to_owned()),
             repository_path: None,
         },
@@ -1021,12 +1024,18 @@ fn application_bundle_json(
     };
     let assignment_role_profile =
         |assignment_role: &str, system_index: usize, assignment_index: usize| {
-            AssignmentRoleWireV1 {
+            AssignmentRoleWireV2 {
                 assignment_role: assignment_role.to_owned(),
                 system_template: template(system_index),
                 assignment_template: template(assignment_index),
+                policy: PolicyWireV2 {
+                    source_path: "policies/test.luau".to_owned(),
+                    digest: ContentDigest::of_bytes(b"return {}\n").to_hex(),
+                    byte_limit: 1024,
+                    entrypoint: "factory_policy".to_owned(),
+                },
                 tools: vec!["workspace_read".to_owned()],
-                model: ModelWireV1 {
+                model: ModelWireV2 {
                     provider: "test".to_owned(),
                     model_id: "test-model".to_owned(),
                     thinking_level: "none".to_owned(),
@@ -1038,18 +1047,18 @@ fn application_bundle_json(
                     price_cache_write_micro_usd_per_million_tokens: 0,
                     capability_flags: Vec::new(),
                 },
-                limits: LimitsWireV1 {
+                limits: LimitsWireV2 {
                     turn_limit: 1,
                     wall_limit_millis: 1,
                     output_byte_limit: 4096,
                 },
             }
         };
-    canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
-        format_version: 1,
+    canonical_application_bundle_json_v2(&ApplicationBundleWireV2 {
+        format_version: 2,
         application_key: application_key.to_owned(),
         predecessor_bundle: None,
-        repository: RepositoryWireV1 {
+        repository: RepositoryWireV2 {
             repository_key: repository_key.to_owned(),
             canonical_local_path: repository_path.to_owned(),
             default_branch: "main".to_owned(),
@@ -1061,37 +1070,37 @@ fn application_bundle_json(
             assignment_role_profile("engineering", 3, 4),
             assignment_role_profile("quality", 5, 6),
         ],
-        ticket_policy: TicketPolicyWireV1 {
+        ticket_policy: TicketPolicyWireV2 {
             low_water: 1,
             target: 1,
             maximum: 2,
             proposal_maximum: 1,
-            ticket_bounds: TicketBoundsWireV1 {
+            ticket_bounds: TicketBoundsWireV2 {
                 narrative_byte_limit: 1,
                 acceptance_criteria_limit: 1,
                 contract_read_limit: 1,
             },
         },
-        required_reads: vec![RequiredReadWireV1 {
+        required_reads: vec![RequiredReadWireV2 {
             path: "AGENTS.md".to_owned(),
             reason: "test".to_owned(),
         }],
         reproducer_profiles: Vec::new(),
-        validation_profiles: ValidationWireV1 {
+        validation_profiles: ValidationWireV2 {
             focused: vec![command("focused")],
             full: vec![command("full")],
         },
-        git_policy: GitWireV1 {
+        git_policy: GitWireV2 {
             forbidden_paths: Vec::new(),
             delivery_mode: "local_fast_forward_only".to_owned(),
             provenance_trailers_required: true,
         },
-        commit_message_policy: CommitMessageWireV1 {
+        commit_message_policy: CommitMessageWireV2 {
             subject_byte_limit: 1,
             body_byte_limit: 1,
         },
     })
-    .expect("test bundle uses the canonical V1 serializer")
+    .expect("test bundle uses the canonical V2 serializer")
 }
 
 async fn store() -> KernelStore {

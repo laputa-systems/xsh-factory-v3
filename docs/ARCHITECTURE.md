@@ -7,7 +7,7 @@ policy belong only in `applications/xsh` and its templates.
 ```text
 application source -> sealed application revision -> assignment packet
                                                        |
-Pi headless host -> local framed descriptor -> Rust kernel -> PostgreSQL + CAS
+Rust pi-agent-core host -> local framed descriptor -> Rust kernel -> PostgreSQL + CAS
                                                        |
                                                 isolated ../xsh worktrees
                                                        |
@@ -22,9 +22,9 @@ identity, repository qualification, worktree/tree capture, validation, commit
 construction, and delivery. PostgreSQL holds mutable lifecycle and audit
 relations; CAS holds immutable bytes.
 
-The Deno SDK validates closed client shapes. `factory-pi-host` adapts the
-sealed assignment packet to a locally built Pi headless runtime and the framed
-kernel descriptor. It has no independent lifecycle authority.
+`factory-pi-host` validates closed host shapes, adapts the sealed assignment
+packet to `pi-agent-core-rs`, and speaks the framed kernel descriptor. It has
+no independent lifecycle authority.
 
 The XSH application declares only data: exact repository pin, templates,
 allowed tools, model descriptors, required reads, reproducer/validation

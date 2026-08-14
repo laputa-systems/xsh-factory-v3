@@ -77,7 +77,7 @@ pub struct HarnessSpecV1 {
     pub assignment_role: AssignmentRole,
     pub objective: String,
     pub context_items: Vec<ContextItemV1>,
-    pub capabilities: Vec<crate::ActorToolV1>,
+    pub capabilities: Vec<crate::ActorToolV2>,
     pub remaining_campaign_allowance: MicroUsd,
 }
 

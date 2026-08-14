@@ -3,16 +3,15 @@
 ## Grand Architect qualification
 
 `make lint` is the single aggressive source qualification before the Grand
-Architect commits factory changes. It builds the local Pi headless artifacts,
-formats Rust and Deno source, applies Rust clippy fixes, checks Rust and Deno
-source, and runs their unit/integration tests without provider calls or remote
-Git. Use focused `cargo test` or `deno test` while changing one boundary; do
-not use `make lint` as the ordinary inner-loop command.
+Architect commits factory changes. It tests the local `pi-agent-core-rs`
+workspace, formats Rust source, applies Rust clippy fixes, checks the Factory
+workspace, and runs its unit/integration tests without provider calls or
+remote Git. Use focused `cargo test` while changing one boundary; do not use
+`make lint` as the ordinary inner-loop command.
 
-The local Pi audit projector has focused Deno coverage in
-`vendor/pi-headless/packages/coding-agent/test/headless-audit.test.ts`; the
-factory host has projection/gzip and framed-protocol coverage in
-`packages/factory-pi-host/*_test.ts`.
+The Rust agent core has focused event-observer and trace coverage in its own
+workspace. The Factory host has projection, framed-protocol, and policy bridge
+coverage in `crates/factory-pi-host`.
 
 ## PostgreSQL and SQLx checks
 
@@ -32,7 +31,8 @@ migration.
 
 ## Complete provider-free acceptance
 
-`make provider-free-acceptance` composes ordinary checks, PostgreSQL authority,
+`make pi-agent-core-rs-acceptance` composes the legacy-source absence guard,
+ordinary checks, PostgreSQL authority,
 candidate/delivery transitions, real XSH bundle admission, generic vertical
 flow, and backup/restore qualification. It requires distinct externally
 created disposable databases and explicit backup variables; see

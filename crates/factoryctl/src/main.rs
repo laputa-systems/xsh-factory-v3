@@ -7,6 +7,9 @@
 //! actors receive neither this CLI surface nor a reconnectable operator
 //! listener.
 
+mod backup_restore;
+mod xsh_bundle;
+
 use std::{
     env,
     ffi::OsString,
@@ -20,7 +23,7 @@ use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, AuditShowResponse, CampaignReceiptResponse,
-    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV1,
+    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV2,
     ForumListThreadsRequestV1, ForumListTopicsRequestV1, ForumPostsResponseV1,
     ForumReadThreadRequestV1, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1,
     ForumTopicsResponseV1, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
@@ -52,6 +55,9 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         CliCommand::Init(command) => {
             smol::unblock(move || spawn_factoryd_init(&command)).await?;
+        }
+        CliCommand::BackupRestore(arguments) => {
+            smol::unblock(move || backup_restore::run(arguments)).await?;
         }
         CliCommand::DaemonStatus(connection) => {
             let status = OperatorClient::new(connection.socket_path)
@@ -1255,6 +1261,7 @@ impl CandidateDecision {
 #[derive(Debug, PartialEq, Eq)]
 enum CliCommand {
     Init(InitCommand),
+    BackupRestore(backup_restore::BackupRestoreArguments),
     DaemonStatus(ConnectionArgs),
     Sponsor {
         base: ArchitectBaseArgs,
@@ -1322,15 +1329,9 @@ struct InitCommand {
     kernel_source_files: Vec<String>,
     cargo_executable: PathBuf,
     git_executable: PathBuf,
-    deno_executable: PathBuf,
-    pi_host_source_root: PathBuf,
-    pi_host_source_files: Vec<String>,
-    pi_host_entrypoint: PathBuf,
-    deno_config: PathBuf,
-    deno_lock: PathBuf,
-    deno_dir: PathBuf,
-    pi_host_cache_probe: String,
-    pi_version: String,
+    host_executable: PathBuf,
+    host_source_root: PathBuf,
+    host_source_files: Vec<String>,
     openrouter_credential_environment: String,
 }
 
@@ -1338,6 +1339,12 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
     let mut values = arguments.into_iter();
     match values.next().as_deref() {
         Some("init") => parse_init(values.collect()).map(CliCommand::Init),
+        Some("backup-restore") => match values.next().as_deref() {
+            Some("qualify") => backup_restore::parse_options(&values.collect::<Vec<_>>())
+                .map(CliCommand::BackupRestore)
+                .map_err(|error| error.to_string()),
+            _ => Err("expected `backup-restore qualify`".to_owned()),
+        },
         Some("daemon") => match values.next().as_deref() {
             Some("status") => parse_status(values.collect()),
             _ => Err("expected `daemon status`".to_owned()),
@@ -1537,8 +1544,9 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         ));
     }
     let kernel_source_files = closed_kernel_source_files(&installation_root)?;
-    let pi_host_source_root = installation_root.join("packages");
-    let pi_host_source_files = closed_regular_file_inventory(&pi_host_source_root)?;
+    let host_source_root = installation_root.join("crates/factory-pi-host");
+    let host_source_files = closed_regular_file_inventory(&host_source_root)?;
+    let host_executable = resolve_host_executable(&installation_root)?;
     let factoryd = match factoryd {
         Some(factoryd) => factoryd,
         None => default_factoryd_executable()?,
@@ -1551,15 +1559,9 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         kernel_source_files,
         cargo_executable: resolve_executable("cargo")?,
         git_executable: resolve_executable("git")?,
-        deno_executable: resolve_executable("deno")?,
-        pi_host_source_root: pi_host_source_root.clone(),
-        pi_host_source_files,
-        pi_host_entrypoint: pi_host_source_root.join("factory-pi-host/main.ts"),
-        deno_config: installation_root.join("deno.json"),
-        deno_lock: installation_root.join("deno.lock"),
-        deno_dir: runtime_root.join("deno"),
-        pi_host_cache_probe: "factory-pi-host/cache-probe.ts".to_owned(),
-        pi_version: "0.84.1".to_owned(),
+        host_executable,
+        host_source_root,
+        host_source_files,
         openrouter_credential_environment: openrouter_credential_environment
             .unwrap_or_else(|| "OPENROUTER_API_KEY".to_owned()),
     })
@@ -1589,10 +1591,33 @@ fn discover_installation_root() -> Result<PathBuf, String> {
 fn is_installation_root(path: &Path) -> bool {
     path.join("Cargo.toml").is_file()
         && path.join("Cargo.lock").is_file()
-        && path.join("deno.json").is_file()
-        && path.join("deno.lock").is_file()
+        && path.join("crates/factory-pi-host/Cargo.toml").is_file()
         && path.join("schema/migrations").is_dir()
-        && path.join("packages/factory-pi-host/main.ts").is_file()
+        && path.join("crates/factory-pi-host/src/main.rs").is_file()
+}
+
+fn resolve_host_executable(installation_root: &Path) -> Result<PathBuf, String> {
+    [
+        installation_root.join("target/debug/factory-pi-host"),
+        installation_root.join("target/release/factory-pi-host"),
+    ]
+    .into_iter()
+    .find_map(|path| {
+        let canonical = exact_regular_file("factory-pi-host executable", &path).ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(&canonical).ok()?.permissions().mode();
+            if mode & 0o111 == 0 {
+                return None;
+            }
+        }
+        Some(canonical)
+    })
+    .ok_or_else(|| {
+        "cannot find an executable factory-pi-host binary; build it before `factoryctl init`"
+            .to_owned()
+    })
 }
 
 fn default_factoryd_executable() -> Result<PathBuf, String> {
@@ -1755,31 +1780,17 @@ fn factoryd_init_arguments(command: &InitCommand, factoryd: &Path) -> Vec<OsStri
     push_path_argument(&mut arguments, "--git-executable", &command.git_executable);
     push_path_argument(
         &mut arguments,
-        "--deno-executable",
-        &command.deno_executable,
+        "--host-executable",
+        &command.host_executable,
     );
     push_path_argument(
         &mut arguments,
-        "--pi-host-source-root",
-        &command.pi_host_source_root,
+        "--host-source-root",
+        &command.host_source_root,
     );
-    for source_file in &command.pi_host_source_files {
-        push_argument(&mut arguments, "--pi-host-source-file", source_file);
+    for source_file in &command.host_source_files {
+        push_argument(&mut arguments, "--host-source-file", source_file);
     }
-    push_path_argument(
-        &mut arguments,
-        "--pi-host-entrypoint",
-        &command.pi_host_entrypoint,
-    );
-    push_path_argument(&mut arguments, "--deno-config", &command.deno_config);
-    push_path_argument(&mut arguments, "--deno-lock", &command.deno_lock);
-    push_path_argument(&mut arguments, "--deno-dir", &command.deno_dir);
-    push_argument(
-        &mut arguments,
-        "--pi-host-cache-probe",
-        &command.pi_host_cache_probe,
-    );
-    push_argument(&mut arguments, "--pi-version", &command.pi_version);
     push_argument(
         &mut arguments,
         "--provider-credential-environment",
@@ -2537,7 +2548,7 @@ fn parse_openrouter_credential_environment(value: String) -> Result<String, Stri
                 .to_owned()
         })?
         .to_owned();
-    CredentialDescriptorV1::Environment {
+    CredentialDescriptorV2::Environment {
         name: environment.clone(),
     }
     .validate()
@@ -2545,6 +2556,12 @@ fn parse_openrouter_credential_environment(value: String) -> Result<String, Stri
         "--provider-credential-environment must name a non-empty uppercase environment variable"
             .to_owned()
     })?;
+    if matches!(environment.as_str(), "NO_COLOR" | "PATH") {
+        return Err(
+            "--provider-credential-environment cannot use the kernel-owned NO_COLOR or PATH name"
+                .to_owned(),
+        );
+    }
     Ok(environment)
 }
 
@@ -2597,7 +2614,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl <init|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl forum <topics|threads|read|search> ... (legacy reads only)"
+    "usage:\n  factoryctl <init|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
 }
 
 #[cfg(test)]
@@ -2716,14 +2733,9 @@ mod tests {
                 factoryd,
                 kernel_source_root,
                 kernel_source_files,
-                pi_host_source_root,
-                pi_host_source_files,
-                pi_host_entrypoint,
-                deno_config,
-                deno_lock,
-                deno_dir,
-                pi_host_cache_probe,
-                pi_version,
+                host_executable,
+                host_source_root,
+                host_source_files,
                 openrouter_credential_environment,
                 ..
             }) if factoryd == *"/opt/factory/bin/factoryd"
@@ -2731,15 +2743,10 @@ mod tests {
                 && kernel_source_files.contains(&"Cargo.lock".to_owned())
                 && kernel_source_files.contains(&"schema/migrations/0001_initial_authority.sql".to_owned())
                 && kernel_source_files.contains(&"crates/factoryd/src/main.rs".to_owned())
-                && pi_host_source_root == installation_root().join("packages")
-                && pi_host_source_files.contains(&"factory-pi-host/main.ts".to_owned())
-                && pi_host_source_files.contains(&"factory-sdk/protocol.ts".to_owned())
-                && pi_host_entrypoint == installation_root().join("packages/factory-pi-host/main.ts")
-                && deno_config == installation_root().join("deno.json")
-                && deno_lock == installation_root().join("deno.lock")
-                && deno_dir == *"/tmp/factory-runtime/deno"
-                && pi_host_cache_probe == "factory-pi-host/cache-probe.ts"
-                && pi_version == "0.84.1"
+                && host_executable == installation_root().join("target/debug/factory-pi-host")
+                && host_source_root == installation_root().join("crates/factory-pi-host")
+                && host_source_files.contains(&"Cargo.toml".to_owned())
+                && host_source_files.contains(&"src/main.rs".to_owned())
                 && openrouter_credential_environment == "OPENROUTER_API_KEY"
         ));
 
@@ -2815,7 +2822,9 @@ mod tests {
         );
         assert!(Path::new(argument_value(&arguments, "--cargo-executable")).is_absolute());
         assert!(Path::new(argument_value(&arguments, "--git-executable")).is_absolute());
-        assert_argument_value(&arguments, "--pi-version", "0.84.1");
+        assert!(arguments.contains(&"--host-executable"));
+        assert!(arguments.contains(&"--host-source-root"));
+        assert!(arguments.contains(&"--host-source-file"));
         assert_argument_value(
             &arguments,
             "--provider-credential-environment",

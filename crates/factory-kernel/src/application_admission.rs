@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use factory_protocol::{
-    ApplicationBundleV1, ApplicationRelativePath, AssignmentRole, ContentDigest, ExpectedRevision,
+    ApplicationBundleV2, ApplicationRelativePath, AssignmentRole, ContentDigest, ExpectedRevision,
 };
 use sqlx::{Postgres, Transaction};
 
@@ -49,10 +49,15 @@ impl AdmitCompiledApplication {
 
 #[derive(Clone, Debug)]
 struct SealedApplicationInputs {
-    bundle: ApplicationBundleV1,
+    bundle: ApplicationBundleV2,
     bundle_seal: CasArtifact,
     mission_seal: CasArtifact,
     template_seals: Vec<CasArtifact>,
+    /// Policy sources are deliberately not assigned artifact-table IDs.  The
+    /// V2 bundle carries their immutable digests, and admission makes those
+    /// digests physically durable in CAS before the application revision can
+    /// become visible.  The order is the closed `AssignmentRole::ALL` order.
+    policy_seals: Vec<CasArtifact>,
 }
 
 impl KernelStore {
@@ -347,7 +352,7 @@ fn seal_application_inputs(
 ) -> Result<SealedApplicationInputs, StoreError> {
     let bundle_seal = cas.adopt(&command.source_root, &command.bundle_relative_path)?;
     let bundle_bytes = cas.read_verified(bundle_seal.digest())?;
-    let (bundle, bundle_digest) = factory_protocol::admit_application_bundle_v1(&bundle_bytes)
+    let (bundle, bundle_digest) = factory_protocol::admit_application_bundle_v2(&bundle_bytes)
         .map_err(|error| StoreError::InvalidApplicationBundle(error.to_string()))?;
     if bundle_digest != bundle_seal.digest() {
         return Err(StoreError::ApplicationBundleDigestMismatch);
@@ -374,18 +379,32 @@ fn seal_application_inputs(
             Some(office),
         )?);
     }
+    let mut policy_seals = Vec::with_capacity(AssignmentRole::ALL.len());
+    for office in AssignmentRole::ALL {
+        let profile = bundle
+            .assignment_role_profiles
+            .iter()
+            .find(|profile| profile.assignment_role == office)
+            .ok_or(StoreError::ApplicationTemplateCountMismatch)?;
+        policy_seals.push(adopt_declared_policy(
+            cas,
+            &command.source_root,
+            &profile.policy,
+        )?);
+    }
     Ok(SealedApplicationInputs {
         bundle,
         bundle_seal,
         mission_seal,
         template_seals: seals,
+        policy_seals,
     })
 }
 
 fn adopt_declared_template(
     cas: &CasStore,
     source_root: &std::path::Path,
-    template: &factory_protocol::TemplateArtifactV1,
+    template: &factory_protocol::TemplateArtifactV2,
     assignment_role: Option<AssignmentRole>,
 ) -> Result<CasArtifact, StoreError> {
     let seal = cas.adopt(source_root, template.source_path.as_str())?;
@@ -399,9 +418,29 @@ fn adopt_declared_template(
     Ok(seal)
 }
 
+/// Adopts one role policy into CAS and verifies it against the complete V2
+/// policy declaration.  Policy bytes never receive a source-root path at
+/// actor runtime: the bundle's digest is the runtime lookup key.
+fn adopt_declared_policy(
+    cas: &CasStore,
+    source_root: &std::path::Path,
+    policy: &factory_protocol::ActorPolicyArtifactV2,
+) -> Result<CasArtifact, StoreError> {
+    let seal = cas.adopt(source_root, policy.source_path.as_str())?;
+    if seal.digest() != policy.digest {
+        return Err(StoreError::ApplicationPolicyDigestMismatch {
+            path: policy.source_path.as_str().to_owned(),
+        });
+    }
+    let bytes = cas.read_verified(seal.digest())?;
+    factory_protocol::seal_policy_artifact_v2(policy, &bytes)
+        .map_err(|error| StoreError::InvalidApplicationPolicy(error.to_string()))?;
+    Ok(seal)
+}
+
 fn validate_template_bytes(
     bytes: &[u8],
-    template: &factory_protocol::TemplateArtifactV1,
+    template: &factory_protocol::TemplateArtifactV2,
     assignment_role: Option<AssignmentRole>,
 ) -> Result<(), StoreError> {
     let source = std::str::from_utf8(bytes).map_err(|_| StoreError::InvalidTemplateUtf8 {
@@ -499,6 +538,7 @@ impl SealedApplicationInputs {
         for seal in std::iter::once(self.bundle_seal)
             .chain(std::iter::once(self.mission_seal))
             .chain(self.template_seals.iter().copied())
+            .chain(self.policy_seals.iter().copied())
         {
             bytes.extend_from_slice(&seal.digest().as_bytes());
             bytes.extend_from_slice(&seal.byte_length().to_be_bytes());
@@ -562,7 +602,7 @@ mod tests {
         path: &str,
         source: &[u8],
         placeholders: &[&str],
-    ) -> (CasStore, PathBuf, factory_protocol::TemplateArtifactV1) {
+    ) -> (CasStore, PathBuf, factory_protocol::TemplateArtifactV2) {
         let root = std::env::temp_dir().join(format!(
             "factory-application-admission-{}-{}",
             std::process::id(),
@@ -573,13 +613,13 @@ mod tests {
         let source_root = root.join("source");
         fs::create_dir(&source_root).expect("source root");
         fs::write(source_root.join(path), source).expect("template source");
-        let template = factory_protocol::TemplateArtifactV1 {
+        let template = factory_protocol::TemplateArtifactV2 {
             source_path: ApplicationRelativePath::parse(path).expect("path"),
             digest: ContentDigest::of_bytes(source),
             placeholders: placeholders
                 .iter()
                 .map(|value| {
-                    factory_protocol::TemplatePlaceholderV1::parse(*value).expect("placeholder")
+                    factory_protocol::TemplatePlaceholderV2::parse(*value).expect("placeholder")
                 })
                 .collect(),
             rendered_byte_limit: 4096,
@@ -668,6 +708,44 @@ mod tests {
         assert!(matches!(
             adopt_declared_template(&cas, &source_root, &template, None),
             Err(StoreError::InvalidTemplateUtf8 { .. })
+        ));
+    }
+
+    #[test]
+    fn policy_is_adopted_and_verified_by_declared_digest_and_limit() {
+        let root = std::env::temp_dir().join(format!(
+            "factory-application-policy-{}-{}",
+            std::process::id(),
+            NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let cas = CasStore::new_with_seed(root.join("runtime"), 4096, 1).expect("CAS");
+        let source_root = root.join("source");
+        fs::create_dir_all(source_root.join("policies")).expect("policy directory");
+        let source = b"return { factory_policy = function() return {} end }\n";
+        fs::write(source_root.join("policies/test.luau"), source).expect("policy source");
+        let policy = factory_protocol::ActorPolicyArtifactV2 {
+            source_path: ApplicationRelativePath::parse("policies/test.luau").expect("path"),
+            digest: ContentDigest::of_bytes(source),
+            byte_limit: source.len() as u32,
+            entrypoint: factory_protocol::PolicyEntrypointV2::FactoryPolicy,
+        };
+        let seal = adopt_declared_policy(&cas, &source_root, &policy).expect("sealed policy");
+        assert_eq!(seal.digest(), policy.digest);
+        assert_eq!(cas.read_verified(policy.digest).expect("CAS read"), source);
+
+        let mut too_small = policy.clone();
+        too_small.byte_limit = (source.len() - 1) as u32;
+        assert!(matches!(
+            adopt_declared_policy(&cas, &source_root, &too_small),
+            Err(StoreError::InvalidApplicationPolicy(_))
+        ));
+
+        let mut wrong_digest = policy;
+        wrong_digest.digest = ContentDigest::of_bytes(b"different");
+        assert!(matches!(
+            adopt_declared_policy(&cas, &source_root, &wrong_digest),
+            Err(StoreError::ApplicationPolicyDigestMismatch { .. })
         ));
     }
 }

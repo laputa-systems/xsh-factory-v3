@@ -25,24 +25,24 @@ use factory_kernel::ticket_store::{
     ClaimOutcome, ClaimSponsoredTicket, CurrentHeadRequalification, SubmitTicketProposal,
 };
 use factory_protocol::{
-    ASSIGNMENT_PACKET_V1_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationBundleWireV1,
-    ApplicationRevisionId, ArchitectDecisionKindV1, ArchitectPrincipalV1,
-    AssignmentCredentialWireV1, AssignmentEvidenceRoleV1, AssignmentEvidenceV1,
-    AssignmentEvidenceWireV1, AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1,
-    AssignmentPacketWireV1, AssignmentReadWireV1, AssignmentRole, AssignmentRoleWireV1,
-    AssignmentRuntimeWireV1, CandidateDecisionRequestV1, CandidateDecisionV1,
-    CandidateSubmissionV1, CommandWireV1, CommitMessageWireV1, ContentDigest,
-    CredentialDescriptorV1, DurationMillis, ExecutableWireV1, ExpectedRevision, GitWireV1,
-    KernelBuildId, LimitsWireV1, MicroUsd, ModelProfileV1, ModelWireV1, ProcessCustodyV1,
-    QualityReviewSubmissionV1, ReadExactFileV1, ReleaseDecisionV1, RepositoryObjectIdV1,
-    RepositoryRelativePath, RepositoryWireV1, RuntimeIdentityV1, SealedArtifactReferenceV1,
-    SessionLimitsV1, SponsorshipDecisionV1, StopReasonV1, TemplateWireV1, TerminalOperationV1,
-    TerminalReportV1, ThinkingLevelV1, TicketBoundsWireV1, TicketPolicyWireV1, UsageTotalsV1,
-    ValidationWireV1, canonical_application_bundle_json_v1, canonical_assignment_packet_json_v1,
-    unsigned_assignment_packet_digest_v1,
+    ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, AggregateRevision, ApplicationBundleWireV2,
+    ApplicationRevisionId, ArchitectDecisionKindV1, ArchitectPrincipalV1, AssignmentEvidenceRoleV2,
+    AssignmentEvidenceV2, AssignmentEvidenceWireV2, AssignmentLimitsWireV2, AssignmentModelWireV2,
+    AssignmentPacketV2, AssignmentPacketWireV2, AssignmentReadWireV2, AssignmentRole,
+    AssignmentRoleWireV2, AssignmentRuntimeWireV2, CandidateDecisionRequestV1, CandidateDecisionV1,
+    CandidateSubmissionV1, CommandWireV2, CommitMessageWireV2, ContentDigest, DurationMillis,
+    ExecutableWireV2, ExpectedRevision, GitWireV2, KernelBuildId, LimitsWireV2, MicroUsd,
+    ModelProfileV2, ModelWireV2, PolicyEntrypointV2, PolicyWireV2, ProcessCustodyV1,
+    QualityReviewSubmissionV1, ReadExactFileV2, ReleaseDecisionV1, RepositoryObjectIdV1,
+    RepositoryRelativePath, RepositoryWireV2, RuntimeIdentityV2, SealedArtifactReferenceV1,
+    SessionLimitsV2, SponsorshipDecisionV1, StopReasonV1, TemplateWireV2, TerminalOperationV1,
+    TerminalReportV1, ThinkingLevelV2, TicketBoundsWireV2, TicketPolicyWireV2, UsageTotalsV1,
+    ValidationWireV2, canonical_application_bundle_json_v2, canonical_assignment_packet_json_v2,
+    unsigned_assignment_packet_digest_v2,
 };
 
 static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
+const POLICY_BYTES: &[u8] = b"return { factory_policy = function() end }\n";
 
 #[test]
 #[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
@@ -804,7 +804,7 @@ impl Fixture {
         let staging = self.build.cas.runtime_root().join("staging");
         fs::create_dir_all(&workspace).expect("workspace");
         fs::write(workspace.join("AGENTS.md"), b"exact required read").expect("required read");
-        let read = ReadExactFileV1 {
+        let read = ReadExactFileV2 {
             path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
             digest: ContentDigest::of_bytes(b"exact required read"),
             reason: "authority contract".to_owned(),
@@ -823,8 +823,8 @@ impl Fixture {
             .reserve_assignment_identity()
             .await
             .expect("assignment identity");
-        let mut packet = AssignmentPacketV1 {
-            format_version: ASSIGNMENT_PACKET_V1_FORMAT,
+        let mut packet = AssignmentPacketV2 {
+            format_version: ASSIGNMENT_PACKET_V2_FORMAT,
             campaign_id: self.campaign_id,
             assignment_id: identity.assignment_id(),
             kernel_build_id: self.build.kernel_build_id,
@@ -842,8 +842,8 @@ impl Fixture {
             assignment_evidence: if assignment_role == AssignmentRole::ProductResearch {
                 Vec::new()
             } else {
-                vec![AssignmentEvidenceV1 {
-                    role: AssignmentEvidenceRoleV1::TicketProposal,
+                vec![AssignmentEvidenceV2 {
+                    role: AssignmentEvidenceRoleV2::TicketProposal,
                     artifact_id: system.artifact_id,
                     digest: system.sealed.digest(),
                     byte_length: system.sealed.byte_length(),
@@ -852,10 +852,14 @@ impl Fixture {
             system_prompt_artifact_id: system.artifact_id,
             assignment_prompt_artifact_id: assignment_prompt.artifact_id,
             required_read_manifest_artifact_id: manifest.artifact_id,
+            policy_digest: ContentDigest::of_bytes(POLICY_BYTES),
+            policy_byte_limit: POLICY_BYTES.len() as u32,
+            policy_bytes: POLICY_BYTES.to_vec(),
+            policy_entrypoint: PolicyEntrypointV2::FactoryPolicy,
             workspace_root: AbsoluteHostPath::parse(workspace.to_str().unwrap()).unwrap(),
             staging_root: AbsoluteHostPath::parse(staging.to_str().unwrap()).unwrap(),
             model: model(),
-            limits: SessionLimitsV1 {
+            limits: SessionLimitsV2 {
                 turn_limit: 1,
                 wall_limit: DurationMillis::new(10_000),
                 output_byte_limit: 4_096,
@@ -868,10 +872,10 @@ impl Fixture {
             packet_digest: digest(unique_number()),
         };
         let mut wire = packet_wire(&packet, b"system", b"assignment");
-        let packet_digest = unsigned_assignment_packet_digest_v1(&wire).expect("unsigned packet");
+        let packet_digest = unsigned_assignment_packet_digest_v2(&wire).expect("unsigned packet");
         wire.packet_digest = packet_digest.to_hex();
         packet.packet_digest = packet_digest;
-        let packet_bytes = canonical_assignment_packet_json_v1(&wire)
+        let packet_bytes = canonical_assignment_packet_json_v2(&wire)
             .expect("canonical packet")
             .into_bytes();
         let packet_artifact = register(&self.store, &self.build, "packet", &packet_bytes).await;
@@ -1009,7 +1013,7 @@ impl Fixture {
 struct LiveSession {
     session_id: factory_protocol::SessionId,
     session_revision: AggregateRevision,
-    packet: AssignmentPacketV1,
+    packet: AssignmentPacketV2,
     packet_bytes: Vec<u8>,
     packet_artifact: CasArtifact,
     manifest_artifact_id: factory_protocol::ArtifactId,
@@ -1069,9 +1073,10 @@ async fn install_build(store: &KernelStore) -> InstalledBuild {
                 source_digest: digest(unique_number()),
                 binary_digest: digest(unique_number()),
                 schema_identity: SCHEMA_IDENTITY.to_owned(),
-                deno_executable_path: "/opt/factory/deno".to_owned(),
-                deno_version: "2.9.4".to_owned(),
-                deno_lock_digest: digest(unique_number()),
+                host_executable_path: "/opt/factory/factory-pi-host".to_owned(),
+                core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+                rust_toolchain: "nightly-2026-07-24".to_owned(),
+                core_source_digest: digest(unique_number()),
                 qualification_receipt: qualification,
             },
         )
@@ -1144,6 +1149,8 @@ async fn admit_application(
         fs::write(root.join(path), &bytes).expect("template");
         templates.push((*path, ContentDigest::of_bytes(bytes.as_bytes())));
     }
+    fs::create_dir_all(root.join("policies")).expect("policy directory");
+    fs::write(root.join("policies/test.luau"), b"return {}\n").expect("policy");
     let application_key = unique("application");
     let bundle = bundle_json(
         &application_key,
@@ -1202,11 +1209,11 @@ fn object(character: char) -> RepositoryObjectIdV1 {
     RepositoryObjectIdV1::parse(character.to_string().repeat(40)).expect("object ID")
 }
 
-fn model() -> ModelProfileV1 {
-    ModelProfileV1 {
+fn model() -> ModelProfileV2 {
+    ModelProfileV2 {
         provider: "provider-free".to_owned(),
         model_id: "fixture".to_owned(),
-        thinking_level: ThinkingLevelV1::None,
+        thinking_level: ThinkingLevelV2::None,
         context_token_limit: 1,
         output_token_limit: 1,
         price_input_micro_usd_per_million_tokens: MicroUsd::new(1),
@@ -1217,22 +1224,17 @@ fn model() -> ModelProfileV1 {
     }
 }
 
-fn runtime() -> RuntimeIdentityV1 {
-    RuntimeIdentityV1 {
-        deno_executable: AbsoluteHostPath::parse("/opt/factory/deno").unwrap(),
-        deno_version: "2.9.4".to_owned(),
-        source_graph_digest: digest(1),
-        resolved_dependency_graph_digest: digest(2),
-        deno_json_digest: digest(3),
-        deno_lock_digest: digest(4),
-        pi_version: "fixture".to_owned(),
-        credential: CredentialDescriptorV1::PiAuthStore {
-            path: factory_protocol::RuntimeRelativePath::parse("credentials/fixture").unwrap(),
-        },
+fn runtime() -> RuntimeIdentityV2 {
+    RuntimeIdentityV2 {
+        host_executable: AbsoluteHostPath::parse("/opt/factory/factory-pi-host").unwrap(),
+        core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+        core_source_digest: digest(1),
+        rust_toolchain: "nightly-2026-07-24".to_owned(),
+        credential_env: "FAKE_PROVIDER_KEY".to_owned(),
     }
 }
 
-fn canonical_manifest(reads: &[ReadExactFileV1]) -> Vec<u8> {
+fn canonical_manifest(reads: &[ReadExactFileV2]) -> Vec<u8> {
     let mut bytes = b"factory-read-manifest-v1\0".to_vec();
     bytes.extend_from_slice(&(reads.len() as u32).to_be_bytes());
     for read in reads {
@@ -1246,12 +1248,12 @@ fn canonical_manifest(reads: &[ReadExactFileV1]) -> Vec<u8> {
 }
 
 fn packet_wire(
-    packet: &AssignmentPacketV1,
+    packet: &AssignmentPacketV2,
     system_prompt: &[u8],
     assignment_prompt: &[u8],
-) -> AssignmentPacketWireV1 {
-    AssignmentPacketWireV1 {
-        format_version: 1,
+) -> AssignmentPacketWireV2 {
+    AssignmentPacketWireV2 {
+        format_version: 2,
         campaign_id: packet.campaign_id.get(),
         assignment_id: packet.assignment_id.get(),
         application_revision_id: packet.application_revision_id.get(),
@@ -1272,7 +1274,7 @@ fn packet_wire(
         assignment_evidence: packet
             .assignment_evidence
             .iter()
-            .map(|evidence| AssignmentEvidenceWireV1 {
+            .map(|evidence| AssignmentEvidenceWireV2 {
                 role: evidence.role.wire_name().to_owned(),
                 artifact_id: evidence.artifact_id.get(),
                 digest: evidence.digest.to_hex(),
@@ -1286,9 +1288,13 @@ fn packet_wire(
         assignment_prompt_digest: ContentDigest::of_bytes(assignment_prompt).to_hex(),
         system_prompt_bytes_b64: base64(system_prompt),
         assignment_prompt_bytes_b64: base64(assignment_prompt),
+        policy_digest: packet.policy_digest.to_hex(),
+        policy_byte_limit: packet.policy_byte_limit,
+        policy_bytes_b64: base64(&packet.policy_bytes),
+        policy_entrypoint: packet.policy_entrypoint.as_str().to_owned(),
         workspace_root: packet.workspace_root.as_str().to_owned(),
         staging_root: packet.staging_root.as_str().to_owned(),
-        model: AssignmentModelWireV1 {
+        model: AssignmentModelWireV2 {
             provider: packet.model.provider.clone(),
             model_id: packet.model.model_id.clone(),
             thinking_level: "none".to_owned(),
@@ -1312,32 +1318,22 @@ fn packet_wire(
                 .get(),
             capability_flags: Vec::new(),
         },
-        limits: AssignmentLimitsWireV1 {
+        limits: AssignmentLimitsWireV2 {
             turn_limit: packet.limits.turn_limit,
             wall_limit_millis: packet.limits.wall_limit.get(),
             output_byte_limit: packet.limits.output_byte_limit,
         },
-        runtime: AssignmentRuntimeWireV1 {
-            deno_executable: packet.runtime.deno_executable.as_str().to_owned(),
-            deno_version: packet.runtime.deno_version.clone(),
-            source_graph_digest: packet.runtime.source_graph_digest.to_hex(),
-            resolved_dependency_graph_digest: packet
-                .runtime
-                .resolved_dependency_graph_digest
-                .to_hex(),
-            deno_json_digest: packet.runtime.deno_json_digest.to_hex(),
-            deno_lock_digest: packet.runtime.deno_lock_digest.to_hex(),
-            pi_version: packet.runtime.pi_version.clone(),
-            credential_source: AssignmentCredentialWireV1 {
-                kind: "pi_auth_store".to_owned(),
-                name: None,
-                path: Some("credentials/fixture".to_owned()),
-            },
+        runtime: AssignmentRuntimeWireV2 {
+            host_executable: packet.runtime.host_executable.as_str().to_owned(),
+            core_head: packet.runtime.core_head.clone(),
+            core_source_digest: packet.runtime.core_source_digest.to_hex(),
+            rust_toolchain: packet.runtime.rust_toolchain.clone(),
+            credential_env: packet.runtime.credential_env.clone(),
         },
         required_reads: packet
             .required_reads
             .iter()
-            .map(|read| AssignmentReadWireV1 {
+            .map(|read| AssignmentReadWireV2 {
                 path: read.path.as_str().to_owned(),
                 digest: read.digest.to_hex(),
                 reason: read.reason.clone(),
@@ -1357,15 +1353,15 @@ fn bundle_json(
     repository_path: &str,
     templates: &[(&str, ContentDigest)],
 ) -> String {
-    let template = |index: usize| TemplateWireV1 {
+    let template = |index: usize| TemplateWireV2 {
         source_path: templates[index].0.to_owned(),
         digest: templates[index].1.to_hex(),
         placeholders: Vec::new(),
         rendered_byte_limit: 4_096,
     };
-    let command = |name: &str| CommandWireV1 {
+    let command = |name: &str| CommandWireV2 {
         name: name.to_owned(),
-        executable: ExecutableWireV1 {
+        executable: ExecutableWireV2 {
             approved_tool: Some("cargo".to_owned()),
             repository_path: None,
         },
@@ -1378,12 +1374,18 @@ fn bundle_json(
         expected_exit_status: 0,
     };
     let assignment_role_profile =
-        |name: &str, system: usize, assignment: usize| AssignmentRoleWireV1 {
+        |name: &str, system: usize, assignment: usize| AssignmentRoleWireV2 {
             assignment_role: name.to_owned(),
             system_template: template(system),
             assignment_template: template(assignment),
+            policy: PolicyWireV2 {
+                source_path: "policies/test.luau".to_owned(),
+                digest: ContentDigest::of_bytes(b"return {}\n").to_hex(),
+                byte_limit: 1024,
+                entrypoint: "factory_policy".to_owned(),
+            },
             tools: vec!["workspace_read".to_owned()],
-            model: ModelWireV1 {
+            model: ModelWireV2 {
                 provider: "fixture".to_owned(),
                 model_id: "fixture".to_owned(),
                 thinking_level: "none".to_owned(),
@@ -1395,17 +1397,17 @@ fn bundle_json(
                 price_cache_write_micro_usd_per_million_tokens: 1,
                 capability_flags: Vec::new(),
             },
-            limits: LimitsWireV1 {
+            limits: LimitsWireV2 {
                 turn_limit: 1,
                 wall_limit_millis: 10_000,
                 output_byte_limit: 4_096,
             },
         };
-    canonical_application_bundle_json_v1(&ApplicationBundleWireV1 {
-        format_version: 1,
+    canonical_application_bundle_json_v2(&ApplicationBundleWireV2 {
+        format_version: 2,
         application_key: application_key.to_owned(),
         predecessor_bundle: None,
-        repository: RepositoryWireV1 {
+        repository: RepositoryWireV2 {
             repository_key: repository_key.to_owned(),
             canonical_local_path: repository_path.to_owned(),
             default_branch: "main".to_owned(),
@@ -1417,32 +1419,32 @@ fn bundle_json(
             assignment_role_profile("engineering", 3, 4),
             assignment_role_profile("quality", 5, 6),
         ],
-        ticket_policy: TicketPolicyWireV1 {
+        ticket_policy: TicketPolicyWireV2 {
             low_water: 1,
             target: 1,
             maximum: 1,
             proposal_maximum: 1,
-            ticket_bounds: TicketBoundsWireV1 {
+            ticket_bounds: TicketBoundsWireV2 {
                 narrative_byte_limit: 1,
                 acceptance_criteria_limit: 1,
                 contract_read_limit: 1,
             },
         },
-        required_reads: vec![factory_protocol::RequiredReadWireV1 {
+        required_reads: vec![factory_protocol::RequiredReadWireV2 {
             path: "AGENTS.md".to_owned(),
             reason: "authority contract".to_owned(),
         }],
         reproducer_profiles: Vec::new(),
-        validation_profiles: ValidationWireV1 {
+        validation_profiles: ValidationWireV2 {
             focused: vec![command("focused")],
             full: vec![command("full")],
         },
-        git_policy: GitWireV1 {
+        git_policy: GitWireV2 {
             forbidden_paths: Vec::new(),
             delivery_mode: "local_fast_forward_only".to_owned(),
             provenance_trailers_required: true,
         },
-        commit_message_policy: CommitMessageWireV1 {
+        commit_message_policy: CommitMessageWireV2 {
             subject_byte_limit: 120,
             body_byte_limit: 8_192,
         },

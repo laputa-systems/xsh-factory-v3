@@ -11,7 +11,18 @@ fn generic_rust_source_has_no_product_vocabulary_or_application_source_dependenc
         .expect("crate directory is readable")
         .flat_map(|entry| {
             let entry = entry.expect("directory entry is readable");
-            collect_rust_sources(&entry.path().join("src"))
+            let name = entry.file_name();
+            // The protocol, kernel, and actor host are the generic boundary.
+            // `factoryctl` is the explicitly product-facing application compiler
+            // entrypoint, so it is intentionally outside this direction check.
+            if matches!(
+                name.to_str(),
+                Some("factory-protocol" | "factory-kernel" | "factory-pi-host")
+            ) {
+                collect_rust_sources(&entry.path().join("src"))
+            } else {
+                Vec::new()
+            }
         })
         .collect::<Vec<_>>();
 

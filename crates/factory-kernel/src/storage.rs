@@ -64,7 +64,7 @@ pub use application_admission::AdmitCompiledApplication;
 mod application_activation;
 pub use application_activation::{ActivateApplicationRevision, ApplicationActivationReceipt};
 
-/// The narrow physical connection owner used by the kernel. Actors and Deno
+/// The narrow physical connection owner used by the kernel. Actors and the Rust
 /// code never receive its database URL or pool.
 #[derive(Clone, Debug)]
 pub struct KernelStore {
@@ -268,7 +268,7 @@ impl KernelStore {
         let build_digest = command.build_id.digest().as_bytes();
         let source_digest = command.source_digest.as_bytes();
         let binary_digest = command.binary_digest.as_bytes();
-        let deno_lock_digest = command.deno_lock_digest.as_bytes();
+        let core_source_digest = command.core_source_digest.as_bytes();
         let qualification_digest = qualification.digest().as_bytes();
         let qualification_path = cas.object_relative_path(qualification.digest())?;
         let existing_qualification = sqlx::query!(
@@ -314,18 +314,19 @@ impl KernelStore {
         sqlx::query!(
             "INSERT INTO factory.kernel_builds (
                 id, build_digest, source_digest, binary_digest, schema_identity,
-                deno_executable_path, deno_version, deno_lock_digest,
+                host_executable_path, core_head, core_source_digest, rust_toolchain,
                 qualification_receipt_artifact_id, is_current, revision
              ) OVERRIDING SYSTEM VALUE
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11)",
             build_id,
             &build_digest[..],
             &source_digest[..],
             &binary_digest[..],
             command.schema_identity,
-            command.deno_executable_path,
-            command.deno_version,
-            &deno_lock_digest[..],
+            command.host_executable_path,
+            command.core_head,
+            &core_source_digest[..],
+            command.rust_toolchain,
             qualification_artifact_id,
             resulting_revision,
         )
@@ -382,6 +383,9 @@ impl KernelStore {
     ) -> Result<KernelBuildReceipt, StoreError> {
         let receipt_bytes = command.receipt.encode()?;
         let qualification_receipt = cas.adopt_kernel_bytes(&receipt_bytes)?;
+        let runtime_identity = command
+            .receipt
+            .runtime_identity_for_provider("openrouter")?;
         self.install_kernel_build(
             cas,
             &InstallKernelBuild {
@@ -392,12 +396,13 @@ impl KernelStore {
                 source_digest: command.receipt.kernel_source_digest(),
                 binary_digest: command.receipt.kernel_binary_digest(),
                 schema_identity: command.receipt.schema_identity().to_owned(),
-                deno_executable_path: installed_path(
-                    "Deno executable",
-                    command.receipt.runtime().deno_executable(),
+                host_executable_path: installed_path(
+                    "Rust host executable",
+                    command.receipt.runtime().host_executable(),
                 )?,
-                deno_version: command.receipt.runtime().deno_version().to_owned(),
-                deno_lock_digest: command.receipt.runtime().deno_lock_digest(),
+                core_head: runtime_identity.core_head,
+                core_source_digest: runtime_identity.core_source_digest,
+                rust_toolchain: runtime_identity.rust_toolchain,
                 qualification_receipt,
             },
         )
@@ -673,7 +678,7 @@ impl KernelStore {
     /// Restores the one current installed-build receipt from its durable CAS
     /// seal, proves it still names the current database build, and reruns the
     /// provider-free local material checks. This is the only read path by
-    /// which later assignment composition recovers Deno/Pi identity and the
+    /// which later assignment composition recovers Rust host/core identity and the
     /// configured credential *name*; secret values never enter this API.
     pub async fn load_current_installed_runtime(
         &self,
@@ -1195,9 +1200,10 @@ pub struct InstallKernelBuild {
     pub source_digest: ContentDigest,
     pub binary_digest: ContentDigest,
     pub schema_identity: String,
-    pub deno_executable_path: String,
-    pub deno_version: String,
-    pub deno_lock_digest: ContentDigest,
+    pub host_executable_path: String,
+    pub core_head: String,
+    pub core_source_digest: ContentDigest,
+    pub rust_toolchain: String,
     /// Physically sealed qualification evidence. The install operation
     /// verifies it again before opening the durable transaction.
     pub qualification_receipt: CasArtifact,
@@ -1205,7 +1211,7 @@ pub struct InstallKernelBuild {
 
 /// Narrow bootstrap command for one closed installed-build receipt. Unlike
 /// [`InstallKernelBuild`], callers cannot separately supply its source,
-/// binary, Deno, or qualification-artifact facts.
+/// binary, Rust host, or qualification-artifact facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallQualifiedKernelBuild {
     pub principal: String,
@@ -1222,13 +1228,27 @@ impl InstallKernelBuild {
         if self.schema_identity != SCHEMA_IDENTITY {
             return Err(StoreError::InstalledSchemaIdentityMismatch);
         }
-        if !self.deno_executable_path.starts_with('/') {
+        if !self.host_executable_path.starts_with('/') {
             return Err(StoreError::InvalidAbsolutePath {
-                field: "Deno executable path",
+                field: "Rust host executable path",
             });
         }
-        validate_text("Deno executable path", &self.deno_executable_path, 4096)?;
-        validate_text("Deno version", &self.deno_version, 240)?;
+        validate_text(
+            "Rust host executable path",
+            &self.host_executable_path,
+            4096,
+        )?;
+        if self.core_head.len() != 40
+            || !self
+                .core_head
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(StoreError::InvalidCommandComponent {
+                field: "pi-agent-core HEAD",
+            });
+        }
+        validate_text("Rust toolchain", &self.rust_toolchain, 240)?;
         Ok(())
     }
 
@@ -1242,9 +1262,10 @@ impl InstallKernelBuild {
         hasher.update(&self.source_digest.as_bytes());
         hasher.update(&self.binary_digest.as_bytes());
         hash_string(&mut hasher, &self.schema_identity);
-        hash_string(&mut hasher, &self.deno_executable_path);
-        hash_string(&mut hasher, &self.deno_version);
-        hasher.update(&self.deno_lock_digest.as_bytes());
+        hash_string(&mut hasher, &self.host_executable_path);
+        hash_string(&mut hasher, &self.core_head);
+        hasher.update(&self.core_source_digest.as_bytes());
+        hash_string(&mut hasher, &self.rust_toolchain);
         hasher.update(&self.qualification_receipt.digest().as_bytes());
         hasher.update(&self.qualification_receipt.byte_length().to_be_bytes());
         ContentDigest::from_bytes(*hasher.finalize().as_bytes())
@@ -1520,6 +1541,9 @@ pub enum StoreError {
     #[error("application template {path:?} digest does not match its declaration")]
     ApplicationTemplateDigestMismatch { path: String },
 
+    #[error("application policy {path:?} digest does not match its declaration")]
+    ApplicationPolicyDigestMismatch { path: String },
+
     #[error("application bundle must declare exactly seven template artifacts")]
     ApplicationTemplateCountMismatch,
 
@@ -1528,6 +1552,9 @@ pub enum StoreError {
 
     #[error("application bundle is not valid closed Rust data: {0}")]
     InvalidApplicationBundle(String),
+
+    #[error("application policy is not valid closed Luau data: {0}")]
+    InvalidApplicationPolicy(String),
 
     #[error("application repository binding does not match the registered repository")]
     RepositoryBindingMismatch,

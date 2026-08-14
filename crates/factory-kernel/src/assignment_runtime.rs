@@ -17,15 +17,14 @@ use std::{
 };
 
 use factory_protocol::{
-    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, AssignmentCredentialWireV1,
-    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentEvidenceWireV1, AssignmentId,
-    AssignmentLimitsWireV1, AssignmentModelWireV1, AssignmentPacketV1, AssignmentPacketWireV1,
-    AssignmentReadWireV1, AssignmentRole, AssignmentRuntimeWireV1, CampaignId, ContentDigest,
-    ContextInclusionClassV1, ContextItemV1, ContextReferenceV1, ExpectedRevision,
-    HARNESS_COMPILER_VERSION_V1, HarnessSpecV1, MicroUsd, OfficeId, ReadExactFileV1,
-    RequiredReadV1, SealedArtifactReferenceV1, TerminalOperationV1, TicketContractReadV1,
-    canonical_assignment_packet_json_v1, parse_application_bundle_v1, render_template_v1,
-    unsigned_assignment_packet_digest_v1,
+    AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, AssignmentEvidenceRoleV2,
+    AssignmentEvidenceV2, AssignmentEvidenceWireV2, AssignmentId, AssignmentLimitsWireV2,
+    AssignmentModelWireV2, AssignmentPacketV2, AssignmentPacketWireV2, AssignmentReadWireV2,
+    AssignmentRole, AssignmentRuntimeWireV2, CampaignId, ContentDigest, ContextInclusionClassV1,
+    ContextItemV1, ContextReferenceV1, ExpectedRevision, HARNESS_COMPILER_VERSION_V1,
+    HarnessSpecV1, MicroUsd, OfficeId, ReadExactFileV2, RequiredReadV2, SealedArtifactReferenceV1,
+    TerminalOperationV1, TicketContractReadV1, canonical_assignment_packet_json_v2,
+    parse_application_bundle_v2, render_template_v2, unsigned_assignment_packet_digest_v2,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -339,15 +338,16 @@ pub async fn materialize_and_launch_assignment(
             workspace_root.as_str(),
             staging_absolute.as_str(),
             &application.profile,
+            &application.policy_bytes,
             &runtime,
             &required_reads,
             &assignment_evidence,
             campaign.remaining,
             campaign.revision,
         )?;
-        let packet_digest = unsigned_assignment_packet_digest_v1(&wire)?;
+        let packet_digest = unsigned_assignment_packet_digest_v2(&wire)?;
         wire.packet_digest = packet_digest.to_hex();
-        let packet_bytes = canonical_assignment_packet_json_v1(&wire)?.into_bytes();
+        let packet_bytes = canonical_assignment_packet_json_v2(&wire)?.into_bytes();
         let packet = typed_packet(
             assignment_id,
             request.campaign_id,
@@ -362,6 +362,8 @@ pub async fn materialize_and_launch_assignment(
             staging_absolute,
             application.profile.model.clone(),
             application.profile.limits.clone(),
+            application.profile.policy.clone(),
+            application.policy_bytes.clone(),
             runtime,
             required_reads.clone(),
             assignment_evidence,
@@ -465,7 +467,7 @@ pub async fn materialize_and_launch_assignment(
                 required_reads,
                 candidate_quality_runtime,
             },
-            installed.runtime(),
+            installed,
         )
         .await?;
         Ok((assignment_receipt.resulting_revision, session))
@@ -623,11 +625,15 @@ fn with_cleanup_failure(
 
 struct ApplicationMaterial {
     mission: String,
-    system_template: factory_protocol::TemplateArtifactV1,
+    system_template: factory_protocol::TemplateArtifactV2,
     system_source: String,
-    assignment_template: factory_protocol::TemplateArtifactV1,
+    assignment_template: factory_protocol::TemplateArtifactV2,
     assignment_source: String,
-    profile: factory_protocol::AssignmentRoleProfileV1,
+    profile: factory_protocol::AssignmentRoleProfileV2,
+    /// Policy bytes are loaded from the admitted CAS digest. The host packet
+    /// carries these bytes inline so it never consults application source
+    /// paths after admission.
+    policy_bytes: Vec<u8>,
 }
 
 async fn load_application_material(
@@ -657,7 +663,7 @@ async fn load_application_material(
         factory_protocol::ArtifactId::new(value).map_err(Into::into)
     };
     let bundle = registered_bytes(process, cas, artifact(row.bundle_artifact_id)?).await?;
-    let bundle = parse_application_bundle_v1(&bundle).map_err(|error| {
+    let bundle = parse_application_bundle_v2(&bundle).map_err(|error| {
         AssignmentRuntimeError::Application(format!("admitted bundle is invalid: {error}"))
     })?;
     let profile = bundle
@@ -699,6 +705,14 @@ async fn load_application_material(
         &profile.assignment_template,
         "assignment template",
     )?;
+    let policy_bytes = cas.read_verified(profile.policy.digest)?;
+    if policy_bytes.len() > profile.policy.byte_limit as usize
+        || ContentDigest::of_bytes(&policy_bytes) != profile.policy.digest
+    {
+        return Err(AssignmentRuntimeError::Application(
+            "admitted policy bytes differ from its declared digest or limit".to_owned(),
+        ));
+    }
     let mission = render_declared_template(&bundle.mission_template, &mission, &BTreeMap::new())?;
     let mission = String::from_utf8(mission).map_err(|_| {
         AssignmentRuntimeError::Application("rendered mission is not UTF-8".to_owned())
@@ -710,6 +724,7 @@ async fn load_application_material(
         assignment_template: profile.assignment_template.clone(),
         assignment_source,
         profile,
+        policy_bytes,
     })
 }
 
@@ -724,7 +739,7 @@ async fn registered_bytes(
 
 fn checked_template_bytes(
     bytes: Vec<u8>,
-    template: &factory_protocol::TemplateArtifactV1,
+    template: &factory_protocol::TemplateArtifactV2,
     label: &'static str,
 ) -> Result<String, AssignmentRuntimeError> {
     if ContentDigest::of_bytes(&bytes) != template.digest {
@@ -737,10 +752,10 @@ fn checked_template_bytes(
 }
 
 fn exact_required_reads(
-    application_required_reads: &[RequiredReadV1],
+    application_required_reads: &[RequiredReadV2],
     ticket_contract_reads: &[TicketContractReadV1],
     workspace: &Path,
-) -> Result<Vec<ReadExactFileV1>, AssignmentRuntimeError> {
+) -> Result<Vec<ReadExactFileV2>, AssignmentRuntimeError> {
     let mut values = Vec::new();
     for read in application_required_reads {
         values.push((read.path.clone(), read.reason.clone()));
@@ -758,7 +773,7 @@ fn exact_required_reads(
             // and its digest proves both the application and ticket contract.
             continue;
         }
-        result.push(ReadExactFileV1 {
+        result.push(ReadExactFileV2 {
             digest: WorkspaceReadAuthority::digest_materialized_required_read(
                 workspace,
                 path.clone(),
@@ -894,7 +909,7 @@ fn prompt_values(
 }
 
 fn render_declared_template(
-    template: &factory_protocol::TemplateArtifactV1,
+    template: &factory_protocol::TemplateArtifactV2,
     source: &str,
     values: &BTreeMap<String, String>,
 ) -> Result<Vec<u8>, AssignmentRuntimeError> {
@@ -911,7 +926,7 @@ fn render_declared_template(
             Ok((placeholder.as_str().to_owned(), value.clone()))
         })
         .collect::<Result<BTreeMap<_, _>, AssignmentRuntimeError>>()?;
-    Ok(render_template_v1(template, source, &values)?)
+    Ok(render_template_v2(template, source, &values)?)
 }
 
 /// Closed compiler input. All members are resolved durable facts or admitted
@@ -923,8 +938,8 @@ struct HarnessCompileInput<'a> {
     office_id: OfficeId,
     assignment_role: AssignmentRole,
     target_facts: &'a HarnessTargetFacts,
-    assignment_evidence: &'a [AssignmentEvidenceV1],
-    required_reads: &'a [ReadExactFileV1],
+    assignment_evidence: &'a [AssignmentEvidenceV2],
+    required_reads: &'a [ReadExactFileV2],
     required_manifest_artifact_id: factory_protocol::ArtifactId,
     remaining_campaign_allowance: MicroUsd,
     application: &'a ApplicationMaterial,
@@ -1193,29 +1208,16 @@ fn assignment_wire(
     assignment_prompt: &[u8],
     workspace_root: &str,
     staging_root: &str,
-    profile: &factory_protocol::AssignmentRoleProfileV1,
-    runtime: &factory_protocol::RuntimeIdentityV1,
-    required_reads: &[ReadExactFileV1],
-    assignment_evidence: &[AssignmentEvidenceV1],
+    profile: &factory_protocol::AssignmentRoleProfileV2,
+    policy_bytes: &[u8],
+    runtime: &factory_protocol::RuntimeIdentityV2,
+    required_reads: &[ReadExactFileV2],
+    assignment_evidence: &[AssignmentEvidenceV2],
     remaining: MicroUsd,
     revision: AggregateRevision,
-) -> Result<AssignmentPacketWireV1, AssignmentRuntimeError> {
-    let credential_source = match &runtime.credential {
-        factory_protocol::CredentialDescriptorV1::Environment { name } => {
-            AssignmentCredentialWireV1 {
-                kind: "environment".to_owned(),
-                name: Some(name.clone()),
-                path: None,
-            }
-        }
-        factory_protocol::CredentialDescriptorV1::PiAuthStore { .. } => {
-            return Err(AssignmentRuntimeError::Application(
-                "MVP materializer does not admit a Pi auth store".to_owned(),
-            ));
-        }
-    };
-    Ok(AssignmentPacketWireV1 {
-        format_version: factory_protocol::ASSIGNMENT_PACKET_V1_FORMAT,
+) -> Result<AssignmentPacketWireV2, AssignmentRuntimeError> {
+    Ok(AssignmentPacketWireV2 {
+        format_version: factory_protocol::ASSIGNMENT_PACKET_V2_FORMAT,
         campaign_id: campaign_id.get(),
         assignment_id: assignment_id.get(),
         application_revision_id: application_revision_id.get(),
@@ -1233,9 +1235,13 @@ fn assignment_wire(
         assignment_prompt_digest: ContentDigest::of_bytes(assignment_prompt).to_hex(),
         system_prompt_bytes_b64: base64(system_prompt),
         assignment_prompt_bytes_b64: base64(assignment_prompt),
+        policy_digest: profile.policy.digest.to_hex(),
+        policy_byte_limit: profile.policy.byte_limit,
+        policy_bytes_b64: base64(policy_bytes),
+        policy_entrypoint: profile.policy.entrypoint.as_str().to_owned(),
         workspace_root: workspace_root.to_owned(),
         staging_root: staging_root.to_owned(),
-        model: AssignmentModelWireV1 {
+        model: AssignmentModelWireV2 {
             provider: profile.model.provider.clone(),
             model_id: profile.model.model_id.clone(),
             thinking_level: thinking_name(profile.model.thinking_level).to_owned(),
@@ -1262,28 +1268,25 @@ fn assignment_wire(
                 .capability_flags
                 .iter()
                 .map(|flag| match flag {
-                    factory_protocol::ModelCapabilityV1::Reasoning => "reasoning".to_owned(),
+                    factory_protocol::ModelCapabilityV2::Reasoning => "reasoning".to_owned(),
                 })
                 .collect(),
         },
-        limits: AssignmentLimitsWireV1 {
+        limits: AssignmentLimitsWireV2 {
             turn_limit: profile.limits.turn_limit,
             wall_limit_millis: profile.limits.wall_limit.get(),
             output_byte_limit: profile.limits.output_byte_limit,
         },
-        runtime: AssignmentRuntimeWireV1 {
-            deno_executable: runtime.deno_executable.as_str().to_owned(),
-            deno_version: runtime.deno_version.clone(),
-            source_graph_digest: runtime.source_graph_digest.to_hex(),
-            resolved_dependency_graph_digest: runtime.resolved_dependency_graph_digest.to_hex(),
-            deno_json_digest: runtime.deno_json_digest.to_hex(),
-            deno_lock_digest: runtime.deno_lock_digest.to_hex(),
-            pi_version: runtime.pi_version.clone(),
-            credential_source,
+        runtime: AssignmentRuntimeWireV2 {
+            host_executable: runtime.host_executable.as_str().to_owned(),
+            core_head: runtime.core_head.clone(),
+            core_source_digest: runtime.core_source_digest.to_hex(),
+            rust_toolchain: runtime.rust_toolchain.clone(),
+            credential_env: runtime.credential_env.clone(),
         },
         required_reads: required_reads
             .iter()
-            .map(|read| AssignmentReadWireV1 {
+            .map(|read| AssignmentReadWireV2 {
                 path: read.path.as_str().to_owned(),
                 digest: read.digest.to_hex(),
                 reason: read.reason.clone(),
@@ -1291,7 +1294,7 @@ fn assignment_wire(
             .collect(),
         assignment_evidence: assignment_evidence
             .iter()
-            .map(|evidence| AssignmentEvidenceWireV1 {
+            .map(|evidence| AssignmentEvidenceWireV2 {
                 role: evidence.role.wire_name().to_owned(),
                 artifact_id: evidence.artifact_id.get(),
                 digest: evidence.digest.to_hex(),
@@ -1326,17 +1329,19 @@ fn typed_packet(
     required_read_manifest_artifact_id: factory_protocol::ArtifactId,
     workspace_root: AbsoluteHostPath,
     staging_root: AbsoluteHostPath,
-    model: factory_protocol::ModelProfileV1,
-    limits: factory_protocol::SessionLimitsV1,
-    runtime: factory_protocol::RuntimeIdentityV1,
-    required_reads: Vec<ReadExactFileV1>,
-    assignment_evidence: Vec<AssignmentEvidenceV1>,
+    model: factory_protocol::ModelProfileV2,
+    limits: factory_protocol::SessionLimitsV2,
+    policy: factory_protocol::ActorPolicyArtifactV2,
+    policy_bytes: Vec<u8>,
+    runtime: factory_protocol::RuntimeIdentityV2,
+    required_reads: Vec<ReadExactFileV2>,
+    assignment_evidence: Vec<AssignmentEvidenceV2>,
     remaining_campaign_allowance: MicroUsd,
     revision: AggregateRevision,
     packet_digest: ContentDigest,
-) -> AssignmentPacketV1 {
-    AssignmentPacketV1 {
-        format_version: factory_protocol::ASSIGNMENT_PACKET_V1_FORMAT,
+) -> AssignmentPacketV2 {
+    AssignmentPacketV2 {
+        format_version: factory_protocol::ASSIGNMENT_PACKET_V2_FORMAT,
         campaign_id,
         assignment_id,
         kernel_build_id,
@@ -1348,6 +1353,10 @@ fn typed_packet(
         system_prompt_artifact_id,
         assignment_prompt_artifact_id,
         required_read_manifest_artifact_id,
+        policy_digest: policy.digest,
+        policy_byte_limit: policy.byte_limit,
+        policy_bytes,
+        policy_entrypoint: policy.entrypoint,
         workspace_root,
         staging_root,
         model,
@@ -1398,10 +1407,10 @@ fn terminal_operations(target: DurableAssignmentTarget) -> Vec<TerminalOperation
 fn exact_assignment_evidence(
     target: DurableAssignmentTarget,
     context: &DurableAssignmentLaunchContext,
-) -> Result<Vec<AssignmentEvidenceV1>, AssignmentRuntimeError> {
+) -> Result<Vec<AssignmentEvidenceV2>, AssignmentRuntimeError> {
     let mut values = Vec::new();
-    let mut push = |role: AssignmentEvidenceRoleV1, reference: SealedArtifactReferenceV1| {
-        values.push(AssignmentEvidenceV1 {
+    let mut push = |role: AssignmentEvidenceRoleV2, reference: SealedArtifactReferenceV1| {
+        values.push(AssignmentEvidenceV2 {
             role,
             artifact_id: reference.artifact_id,
             digest: reference.digest,
@@ -1412,7 +1421,7 @@ fn exact_assignment_evidence(
         DurableAssignmentTarget::Product => {
             if context.evidence.proposal.is_some() || context.evidence.candidate.is_some() {
                 return Err(AssignmentRuntimeError::Application(
-                    "Product context unexpectedly carries upstream evidence".to_owned(),
+                    "Product context unexpectedly carries external evidence".to_owned(),
                 ));
             }
         }
@@ -1423,46 +1432,46 @@ fn exact_assignment_evidence(
                 )
             })?;
             push(
-                AssignmentEvidenceRoleV1::TicketProposal,
+                AssignmentEvidenceRoleV2::TicketProposal,
                 proposal.proposal.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::TicketNarrative,
+                AssignmentEvidenceRoleV2::TicketNarrative,
                 proposal.narrative.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::TicketEvidence,
+                AssignmentEvidenceRoleV2::TicketEvidence,
                 proposal.evidence.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerCommand,
+                AssignmentEvidenceRoleV2::ReproducerCommand,
                 proposal.reproducer_command.clone(),
             );
             if let Some(stdin) = &proposal.reproducer_stdin {
-                push(AssignmentEvidenceRoleV1::ReproducerStdin, stdin.clone());
+                push(AssignmentEvidenceRoleV2::ReproducerStdin, stdin.clone());
             }
             push(
-                AssignmentEvidenceRoleV1::ReproducerExpectedStdout,
+                AssignmentEvidenceRoleV2::ReproducerExpectedStdout,
                 proposal.expected_observation.stdout.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerExpectedStderr,
+                AssignmentEvidenceRoleV2::ReproducerExpectedStderr,
                 proposal.expected_observation.stderr.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerFirstActualStdout,
+                AssignmentEvidenceRoleV2::ReproducerFirstActualStdout,
                 proposal.first_observation.stdout.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerFirstActualStderr,
+                AssignmentEvidenceRoleV2::ReproducerFirstActualStderr,
                 proposal.first_observation.stderr.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerSecondActualStdout,
+                AssignmentEvidenceRoleV2::ReproducerSecondActualStdout,
                 proposal.second_observation.stdout.clone(),
             );
             push(
-                AssignmentEvidenceRoleV1::ReproducerSecondActualStderr,
+                AssignmentEvidenceRoleV2::ReproducerSecondActualStderr,
                 proposal.second_observation.stderr.clone(),
             );
             if let DurableAssignmentTarget::Quality { .. } = target {
@@ -1472,59 +1481,59 @@ fn exact_assignment_evidence(
                     )
                 })?;
                 push(
-                    AssignmentEvidenceRoleV1::ChangedPaths,
+                    AssignmentEvidenceRoleV2::ChangedPaths,
                     candidate.changed_paths.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::RegressionPatch,
+                    AssignmentEvidenceRoleV2::RegressionPatch,
                     candidate.regression_patch.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::RegressionCommandSet,
+                    AssignmentEvidenceRoleV2::RegressionCommandSet,
                     candidate.regression_command_set.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::RegressionLog,
+                    AssignmentEvidenceRoleV2::RegressionLog,
                     candidate.regression_log.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::CandidatePatch,
+                    AssignmentEvidenceRoleV2::CandidatePatch,
                     candidate.candidate_patch.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::EngineeringReport,
+                    AssignmentEvidenceRoleV2::EngineeringReport,
                     candidate.engineering_report.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::EngineeringRisks,
+                    AssignmentEvidenceRoleV2::EngineeringRisks,
                     candidate.engineering_risks.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::HardValidationCommandSet,
+                    AssignmentEvidenceRoleV2::HardValidationCommandSet,
                     candidate.hard_validation_command_set.clone(),
                 );
                 push(
-                    AssignmentEvidenceRoleV1::HardValidationLog,
+                    AssignmentEvidenceRoleV2::HardValidationLog,
                     candidate.hard_validation_log.clone(),
                 );
                 if let Some(probes) = &candidate.prior_quality_additional_probes {
                     push(
-                        AssignmentEvidenceRoleV1::QualityAdditionalProbes,
+                        AssignmentEvidenceRoleV2::QualityAdditionalProbes,
                         probes.clone(),
                     );
                 }
                 if let Some(rationale) = &candidate.prior_quality_rationale {
                     push(
-                        AssignmentEvidenceRoleV1::QualityRationale,
+                        AssignmentEvidenceRoleV2::QualityRationale,
                         rationale.clone(),
                     );
                 }
                 if let Some(risks) = &candidate.prior_quality_risks {
-                    push(AssignmentEvidenceRoleV1::QualityRisks, risks.clone());
+                    push(AssignmentEvidenceRoleV2::QualityRisks, risks.clone());
                 }
                 if let Some(rationale) = &candidate.architect_rationale {
                     push(
-                        AssignmentEvidenceRoleV1::ExternalDecisionRationale,
+                        AssignmentEvidenceRoleV2::ExternalDecisionRationale,
                         rationale.clone(),
                     );
                 }
@@ -1553,8 +1562,8 @@ fn exact_assignment_evidence(
 
 fn target_text(
     target_facts: &HarnessTargetFacts,
-    evidence: &[AssignmentEvidenceV1],
-    required_reads: &[ReadExactFileV1],
+    evidence: &[AssignmentEvidenceV2],
+    required_reads: &[ReadExactFileV2],
 ) -> Result<String, AssignmentRuntimeError> {
     let target = match target_facts {
         HarnessTargetFacts::Product => "product-research".to_owned(),
@@ -1595,7 +1604,7 @@ fn target_text(
 /// terminology; none of it may leak through this model-visible rendering.
 fn append_target_evidence(
     rendered: &mut String,
-    evidence: &[AssignmentEvidenceV1],
+    evidence: &[AssignmentEvidenceV2],
 ) -> Result<(), AssignmentRuntimeError> {
     for reference in evidence {
         rendered.push('\n');
@@ -1621,7 +1630,7 @@ fn append_target_evidence(
 /// ticket contract paths from narrative prose or a failed tool invocation.
 fn append_target_required_reads(
     rendered: &mut String,
-    required_reads: &[ReadExactFileV1],
+    required_reads: &[ReadExactFileV2],
 ) -> Result<(), AssignmentRuntimeError> {
     if required_reads.is_empty() {
         return Ok(());
@@ -1671,13 +1680,13 @@ fn office_name(assignment_role: AssignmentRole) -> &'static str {
         AssignmentRole::Quality => "quality",
     }
 }
-fn thinking_name(value: factory_protocol::ThinkingLevelV1) -> &'static str {
+fn thinking_name(value: factory_protocol::ThinkingLevelV2) -> &'static str {
     match value {
-        factory_protocol::ThinkingLevelV1::None => "none",
-        factory_protocol::ThinkingLevelV1::Low => "low",
-        factory_protocol::ThinkingLevelV1::Medium => "medium",
-        factory_protocol::ThinkingLevelV1::High => "high",
-        factory_protocol::ThinkingLevelV1::XHigh => "xhigh",
+        factory_protocol::ThinkingLevelV2::None => "none",
+        factory_protocol::ThinkingLevelV2::Low => "low",
+        factory_protocol::ThinkingLevelV2::Medium => "medium",
+        factory_protocol::ThinkingLevelV2::High => "high",
+        factory_protocol::ThinkingLevelV2::XHigh => "xhigh",
     }
 }
 fn terminal_name(value: TerminalOperationV1) -> &'static str {
@@ -1687,29 +1696,29 @@ fn terminal_name(value: TerminalOperationV1) -> &'static str {
         TerminalOperationV1::QualitySubmitReview => "quality_submit_review",
     }
 }
-fn tool_name(value: factory_protocol::ActorToolV1) -> &'static str {
+fn tool_name(value: factory_protocol::ActorToolV2) -> &'static str {
     match value {
-        factory_protocol::ActorToolV1::WorkspaceRead => "workspace_read",
-        factory_protocol::ActorToolV1::WorkspaceWrite => "workspace_write",
-        factory_protocol::ActorToolV1::WorkspaceEdit => "workspace_edit",
-        factory_protocol::ActorToolV1::WorkspaceSearch => "workspace_search",
-        factory_protocol::ActorToolV1::WorkspaceList => "workspace_list",
-        factory_protocol::ActorToolV1::Shell => "shell",
-        factory_protocol::ActorToolV1::ForumSearch => "forum_search",
-        factory_protocol::ActorToolV1::ForumListTopics => "forum_list_topics",
-        factory_protocol::ActorToolV1::ForumListThreads => "forum_list_threads",
-        factory_protocol::ActorToolV1::ForumReadThread => "forum_read_thread",
-        factory_protocol::ActorToolV1::PublicationCreate => "publication_create",
-        factory_protocol::ActorToolV1::ArtifactSeal => "artifact_seal",
-        factory_protocol::ActorToolV1::ArtifactRead => "artifact_read",
-        factory_protocol::ActorToolV1::ProductSubmitTicket => "product_submit_ticket",
-        factory_protocol::ActorToolV1::CandidateCheckpointRegression => {
+        factory_protocol::ActorToolV2::WorkspaceRead => "workspace_read",
+        factory_protocol::ActorToolV2::WorkspaceWrite => "workspace_write",
+        factory_protocol::ActorToolV2::WorkspaceEdit => "workspace_edit",
+        factory_protocol::ActorToolV2::WorkspaceSearch => "workspace_search",
+        factory_protocol::ActorToolV2::WorkspaceList => "workspace_list",
+        factory_protocol::ActorToolV2::Shell => "shell",
+        factory_protocol::ActorToolV2::ForumSearch => "forum_search",
+        factory_protocol::ActorToolV2::ForumListTopics => "forum_list_topics",
+        factory_protocol::ActorToolV2::ForumListThreads => "forum_list_threads",
+        factory_protocol::ActorToolV2::ForumReadThread => "forum_read_thread",
+        factory_protocol::ActorToolV2::PublicationCreate => "publication_create",
+        factory_protocol::ActorToolV2::ArtifactSeal => "artifact_seal",
+        factory_protocol::ActorToolV2::ArtifactRead => "artifact_read",
+        factory_protocol::ActorToolV2::ProductSubmitTicket => "product_submit_ticket",
+        factory_protocol::ActorToolV2::CandidateCheckpointRegression => {
             "candidate_checkpoint_regression"
         }
-        factory_protocol::ActorToolV1::CandidateSubmit => "candidate_submit",
-        factory_protocol::ActorToolV1::QualityRunFullSuite => "quality_run_full_suite",
-        factory_protocol::ActorToolV1::QualitySubmitReview => "quality_submit_review",
-        factory_protocol::ActorToolV1::WorkComplete => "work_complete",
+        factory_protocol::ActorToolV2::CandidateSubmit => "candidate_submit",
+        factory_protocol::ActorToolV2::QualityRunFullSuite => "quality_run_full_suite",
+        factory_protocol::ActorToolV2::QualitySubmitReview => "quality_submit_review",
+        factory_protocol::ActorToolV2::WorkComplete => "work_complete",
     }
 }
 
@@ -1743,8 +1752,8 @@ mod tests {
 
     #[test]
     fn target_evidence_uses_neutral_external_decision_vocabulary() {
-        let evidence = [AssignmentEvidenceV1 {
-            role: AssignmentEvidenceRoleV1::ExternalDecisionRationale,
+        let evidence = [AssignmentEvidenceV2 {
+            role: AssignmentEvidenceRoleV2::ExternalDecisionRationale,
             artifact_id: factory_protocol::ArtifactId::new(7).unwrap(),
             digest: ContentDigest::of_bytes(b"external decision rationale"),
             byte_length: 27,
@@ -1761,12 +1770,12 @@ mod tests {
     #[test]
     fn target_names_each_packet_bound_workspace_read_before_mutation() {
         let reads = [
-            ReadExactFileV1 {
+            ReadExactFileV2 {
                 path: factory_protocol::RepositoryRelativePath::parse("docs/contract.md").unwrap(),
                 digest: ContentDigest::of_bytes(b"contract"),
                 reason: "defines the assigned runtime behavior".to_owned(),
             },
-            ReadExactFileV1 {
+            ReadExactFileV2 {
                 path: factory_protocol::RepositoryRelativePath::parse("src/runtime.rs").unwrap(),
                 digest: ContentDigest::of_bytes(b"runtime"),
                 reason: "owns the assigned implementation boundary".to_owned(),
@@ -1797,7 +1806,7 @@ mod tests {
         let path = factory_protocol::RepositoryRelativePath::parse("docs/contract.md").unwrap();
 
         let reads = exact_required_reads(
-            &[RequiredReadV1 {
+            &[RequiredReadV2 {
                 path: path.clone(),
                 reason: "application orientation".to_owned(),
             }],
@@ -1887,8 +1896,8 @@ mod tests {
                 },
             ],
             capabilities: vec![
-                factory_protocol::ActorToolV1::WorkspaceRead,
-                factory_protocol::ActorToolV1::ArtifactRead,
+                factory_protocol::ActorToolV2::WorkspaceRead,
+                factory_protocol::ActorToolV2::ArtifactRead,
             ],
             remaining_campaign_allowance: MicroUsd::new(42),
         };

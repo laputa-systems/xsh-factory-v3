@@ -1,13 +1,14 @@
-//! Installed Deno/Pi runtime identity at the session-launch boundary.
+//! Installed Rust host and `pi-agent-core-rs` identity at the
+//! session-launch boundary.
 //!
-//! The assignment packet names the qualified runtime facts, but a packet is
-//! not proof that those bytes still exist on this host. This module retains a
+//! The assignment packet names qualified runtime facts, but a packet is not
+//! proof that those bytes still exist on this host. This module retains a
 //! finite installed manifest and rechecks it immediately before a host is
-//! spawned. It deliberately has no HTTP, package resolver, ambient-home, or
-//! provider path: dependency acquisition is an installation-time effect.
-//! Qualification records Deno's actual `info --json` graph; later preflight
-//! executes one explicit inert module with Deno's supported `--cached-only`
-//! graph/typecheck path and never asks Deno to acquire dependencies.
+//! spawned. The host is one exact Rust executable; its dependencies are Cargo
+//! source material from the hard-coded local `pi-agent-core-rs` checkout.
+//! Qualification refuses a dirty checkout and records its exact `HEAD` plus a
+//! deterministic source inventory. No interpreter, ambient home, or provider
+//! request is involved.
 
 use std::{
     collections::BTreeSet,
@@ -17,14 +18,14 @@ use std::{
     io::{self, Read},
     os::fd::RawFd,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::Command,
     sync::Arc,
 };
 
 use factory_protocol::{
-    AbsoluteHostPath, AssignmentPacketV1, ContentDigest, CredentialDescriptorV1, KernelBuildId,
-    RuntimeIdentityV1, RuntimeRelativePath, parse_assignment_packet_v1,
-    unsigned_assignment_packet_digest_v1,
+    AbsoluteHostPath, AssignmentPacketV2, ContentDigest, CredentialDescriptorV2, KernelBuildId,
+    RuntimeIdentityV2, RuntimeRelativePath, parse_assignment_packet_v2,
+    unsigned_assignment_packet_digest_v2,
 };
 use thiserror::Error;
 
@@ -45,33 +46,65 @@ const MAX_SOURCE_GRAPH_FILES: usize = 1_024;
 const MAX_HOST_SOURCE_GRAPH_FILES: usize = 256;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
 const SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-installed-source-graph-v1\0";
+const PI_AGENT_CORE_SOURCE_DOMAIN: &[u8] = b"factory-v3-pi-agent-core-source-v1\0";
 const KERNEL_SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-kernel-source-graph-v1\0";
 const KERNEL_BUILD_DOMAIN: &[u8] = b"factory-v3-kernel-build-v1\0";
-const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-v3\0";
+const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-rust-host-v1\0";
 const MAX_RECEIPT_BYTES: usize = 256 * 1024;
 const OPENROUTER_PROVIDER: &str = "openrouter";
-const PINNED_DENO_VERSION: &str = "2.9.4";
-const PINNED_PI_VERSION: &str = "0.84.1";
+const PI_AGENT_CORE_ROOT: &str = "/Users/josh/d/pi-agent-core-rs";
+const RUST_HOST_IDENTITY: &str = "factory-pi-host-rust-v1";
+const RUST_TOOLCHAIN: &str = "nightly-2026-07-24";
+const PI_AGENT_CORE_HEAD_MAX_BYTES: usize = 128;
 
-/// Explicit installation inputs for one immutable Deno/Pi runtime.
+/// Explicit installation inputs for one immutable Rust agent runtime.
 ///
 /// This is kernel/operator input during a stopped-daemon deployment, never an
 /// actor wire request. `host_source_files` must enumerate the complete regular
 /// file inventory under `host_source_root`; an omitted local import is a
-/// qualification error. The cache probe is an explicit source-relative module
-/// with no host startup action (normally `factory-pi-host/cache-probe.ts`); it proves
-/// the already-qualified graph/typecheck is available from the sealed cache.
+/// qualification error. The executable digest and exact local core checkout
+/// are the complete runtime identity; no startup probe or ambient package
+/// metadata is consulted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledRuntimeQualification {
-    pub deno_executable: PathBuf,
+    /// Exact `factory-pi-host` executable selected by stopped-daemon
+    /// installation. The path must resolve to a regular executable file.
+    pub host_executable: PathBuf,
     pub host_source_root: PathBuf,
-    pub host_entrypoint: PathBuf,
-    pub deno_config: PathBuf,
-    pub deno_lock: PathBuf,
-    pub deno_dir: PathBuf,
     pub host_source_files: Vec<RuntimeRelativePath>,
-    pub cache_probe_module: RuntimeRelativePath,
-    pub pi_version: String,
+}
+
+/// Exact local source identity of `pi-agent-core-rs`. The checkout is a
+/// temporary bootstrap provenance mechanism and is intentionally fixed to one
+/// absolute path until the project is published and can be pinned normally.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PiAgentCoreQualification {
+    root: PathBuf,
+    head: String,
+    files: Vec<InstalledSourceFile>,
+    source_digest: ContentDigest,
+}
+
+impl PiAgentCoreQualification {
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn head(&self) -> &str {
+        &self.head
+    }
+
+    #[must_use]
+    pub fn files(&self) -> &[InstalledSourceFile] {
+        &self.files
+    }
+
+    #[must_use]
+    pub const fn source_digest(&self) -> ContentDigest {
+        self.source_digest
+    }
 }
 
 /// One exact local source file accepted by installation qualification.
@@ -93,14 +126,14 @@ impl InstalledSourceFile {
     }
 }
 
-/// Exact `deno --version` streams captured during qualification.
+/// Exact host identity streams retained during qualification.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DenoVersionOutput {
+pub struct HostIdentityOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
 }
 
-impl DenoVersionOutput {
+impl HostIdentityOutput {
     #[must_use]
     pub fn stdout(&self) -> &[u8] {
         &self.stdout
@@ -392,12 +425,11 @@ impl InstalledApprovedToolsQualificationV1 {
         })
     }
 
-    fn command_runner(&self, deno: &Path) -> Result<CommandRunner, InstalledRuntimeError> {
+    fn command_runner(&self) -> Result<CommandRunner, InstalledRuntimeError> {
         self.verify_installed_material()?;
         let tools = ApprovedToolExecutables::new(
             ExactExecutable::discover(&self.cargo.path)?,
             ExactExecutable::discover(&self.git.path)?,
-            ExactExecutable::discover(deno)?,
         );
         CommandRunner::new(tools, DEFAULT_TERMINATION_GRACE).map_err(Into::into)
     }
@@ -512,6 +544,7 @@ impl InstalledKernelBuildReceiptV1 {
             approved_tools.identity_digest(),
             runtime.identity_digest()?,
             &schema_identity,
+            &openrouter_credential_environment,
         )?);
         Self::new(
             kernel_build_id,
@@ -543,13 +576,21 @@ impl InstalledKernelBuildReceiptV1 {
         validate_absolute_receipt_path("kernel source root", &kernel_source_root)?;
         validate_absolute_receipt_path("kernel binary", &kernel_binary)?;
         validate_text("schema identity", &schema_identity)?;
-        CredentialDescriptorV1::Environment {
+        CredentialDescriptorV2::Environment {
             name: openrouter_credential_environment.clone(),
         }
         .validate()
         .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
             reason: "OpenRouter credential environment name is invalid",
         })?;
+        if matches!(
+            openrouter_credential_environment.as_str(),
+            "NO_COLOR" | "PATH"
+        ) {
+            return Err(InstalledRuntimeError::ReceiptInvalid {
+                reason: "credential environment name is reserved by kernel process custody",
+            });
+        }
         let kernel_source_files = normalize_kernel_source_files(kernel_source_files)?;
         if kernel_source_graph_digest(&kernel_source_files)? != kernel_source_digest {
             return Err(InstalledRuntimeError::ReceiptInvalid {
@@ -562,6 +603,7 @@ impl InstalledKernelBuildReceiptV1 {
             approved_tools.identity_digest(),
             runtime.identity_digest()?,
             &schema_identity,
+            &openrouter_credential_environment,
         )?;
         if kernel_build_id.digest() != expected {
             return Err(InstalledRuntimeError::ReceiptInvalid {
@@ -626,9 +668,7 @@ impl InstalledKernelBuildReceiptV1 {
     ) -> Result<InstalledKernelExecutionTools, InstalledRuntimeError> {
         self.approved_tools.verify_installed_material()?;
         Ok(InstalledKernelExecutionTools {
-            command_runner: self
-                .approved_tools
-                .command_runner(self.runtime.deno_executable())?,
+            command_runner: self.approved_tools.command_runner()?,
             git_custody: self.approved_tools.git_custody(git_runtime_root)?,
         })
     }
@@ -645,19 +685,19 @@ impl InstalledKernelBuildReceiptV1 {
     pub fn runtime_identity_for_provider(
         &self,
         provider: &str,
-    ) -> Result<RuntimeIdentityV1, InstalledRuntimeError> {
+    ) -> Result<RuntimeIdentityV2, InstalledRuntimeError> {
         if provider != OPENROUTER_PROVIDER {
             return Err(InstalledRuntimeError::UnsupportedCredentialProvider {
                 provider: provider.to_owned(),
             });
         }
         self.runtime
-            .runtime_identity(CredentialDescriptorV1::Environment {
+            .runtime_identity(CredentialDescriptorV2::Environment {
                 name: self.openrouter_credential_environment.clone(),
             })
     }
 
-    /// Builds the exact Deno/Pi host process contract for the installed
+    /// Builds the exact Rust host process contract for the installed
     /// runtime. `credential_environment` comes from the operator process only
     /// at spawn time; this receipt compares its name with configuration but
     /// never reads, stores, logs, or returns its value.
@@ -676,13 +716,9 @@ impl InstalledKernelBuildReceiptV1 {
             return Err(InstalledRuntimeError::CredentialEnvironmentMissing);
         }
         let spawn = PiHostSpawnSpec::new_for_assignment(
-            self.runtime.deno_executable.clone(),
-            self.runtime.host_entrypoint.clone(),
-            self.runtime.deno_config.clone(),
-            self.runtime.deno_lock.clone(),
+            self.runtime.host_executable.clone(),
             working_directory,
             actor_source_fd,
-            self.runtime.deno_dir.clone(),
             vec![credential_environment],
         )?;
         Ok(spawn.with_kernel_tool_path(self.approved_tools.actor_tool_path()?)?)
@@ -843,6 +879,7 @@ impl InstalledKernelBuildReceiptV1 {
                 self.approved_tools.identity_digest(),
                 self.runtime.identity_digest()?,
                 &self.schema_identity,
+                &self.openrouter_credential_environment,
             )?
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
@@ -853,50 +890,64 @@ impl InstalledKernelBuildReceiptV1 {
     }
 }
 
+impl SessionRuntimeVerifier for InstalledKernelBuildReceiptV1 {
+    fn verify_packet(
+        &self,
+        packet: &AssignmentPacketV2,
+        canonical_packet_bytes: &[u8],
+    ) -> Result<(), RuntimeVerificationError> {
+        self.runtime
+            .verify_packet_bytes(packet, canonical_packet_bytes)
+    }
+
+    fn verify_runtime(
+        &self,
+        packet: &AssignmentPacketV2,
+        spawn: &PiHostSpawnSpec,
+    ) -> Result<(), RuntimeVerificationError> {
+        self.runtime
+            .verify_installed_material()
+            .and_then(|()| {
+                if packet.runtime.credential_env != self.openrouter_credential_environment {
+                    return Err(InstalledRuntimeError::RuntimeDrift {
+                        evidence: "assignment packet credential environment is not the installed provider configuration",
+                    });
+                }
+                self.runtime.verify_runtime_identity(packet, spawn)
+            })
+            .map_err(|error| RuntimeVerificationError::RuntimeIdentity(error.to_string()))
+    }
+}
+
 /// Closed installed runtime manifest retained by the daemon's build authority.
 ///
-/// It has no open metadata map: each field supports one launch invariant. The
-/// frozen cache directory itself is execution material, not a second package
-/// authority. Its graph identity is the checked receipt digest carried in the
+/// It has no open metadata map: each field supports one launch invariant. Its
+/// source graph identity is the checked receipt digest carried in the
 /// assignment packet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledRuntimeManifest {
-    deno_executable: PathBuf,
-    deno_version: String,
-    deno_version_output: DenoVersionOutput,
+    host_executable: PathBuf,
+    host_identity: String,
+    host_identity_output: HostIdentityOutput,
     host_source_root: PathBuf,
-    host_entrypoint: PathBuf,
-    deno_config: PathBuf,
-    deno_lock: PathBuf,
-    deno_dir: PathBuf,
     source_files: Vec<InstalledSourceFile>,
     source_graph_digest: ContentDigest,
-    deno_json_digest: ContentDigest,
-    deno_lock_digest: ContentDigest,
-    resolved_dependency_graph_digest: ContentDigest,
-    cache_probe_module: RuntimeRelativePath,
-    pi_version: String,
+    host_binary_digest: ContentDigest,
+    core_lock_digest: ContentDigest,
+    /// Exact local `pi-agent-core-rs` checkout qualification. This is part of
+    /// the installed runtime identity and is rechecked before every launch.
+    pi_agent_core: PiAgentCoreQualification,
 }
 
 impl InstalledRuntimeManifest {
-    /// Qualifies the exact local Deno/Pi material used by a stopped daemon.
+    /// Qualifies the exact local Rust host/core material used by a stopped
+    /// daemon. No interpreter, script, or ambient package authority is used.
     ///
-    /// Qualification captures Deno's complete version output, seals every
-    /// explicit host-source file, and canonicalizes Deno's actual resolved
-    /// module graph under the build-specific cache. It may populate that cache
-    /// while the daemon is stopped. Later verification is strictly cached-only
-    /// and never starts the Pi host entrypoint.
+    /// Qualification captures the Rust host identity, seals every explicit
+    /// host-source file, and records the exact local core checkout.
     pub fn qualify(
         qualification: InstalledRuntimeQualification,
     ) -> Result<Self, InstalledRuntimeError> {
-        validate_text("Pi SDK version", &qualification.pi_version)?;
-        if qualification.pi_version != PINNED_PI_VERSION {
-            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Pi SDK",
-                expected: PINNED_PI_VERSION,
-                actual: qualification.pi_version,
-            });
-        }
         if qualification.host_source_files.is_empty() {
             return Err(InstalledRuntimeError::EmptySourceGraph);
         }
@@ -907,108 +958,54 @@ impl InstalledRuntimeManifest {
             });
         }
 
-        let deno_executable =
-            canonical_regular_file("Deno executable", &qualification.deno_executable)?;
+        let host_executable = canonical_executable_file(
+            "Rust agent host executable",
+            &qualification.host_executable,
+        )?;
         let host_source_root =
             canonical_directory("Pi host source root", &qualification.host_source_root)?;
-        let host_entrypoint =
-            canonical_regular_file("Pi host entrypoint", &qualification.host_entrypoint)?;
-        if !host_entrypoint.starts_with(&host_source_root) {
-            return Err(InstalledRuntimeError::EntrypointOutsideSourceRoot);
-        }
-        let deno_config = canonical_regular_file("Deno config", &qualification.deno_config)?;
-        let deno_lock = canonical_regular_file("Deno lock", &qualification.deno_lock)?;
-        let deno_dir = canonical_directory("DENO_DIR", &qualification.deno_dir)?;
+        // The host executable is the sole launch artifact. Source bytes are
+        // provenance only and are sealed independently from the executable.
         let (source_files, source_graph_digest) =
             seal_source_graph(&host_source_root, qualification.host_source_files)?;
-        let entrypoint_relative = host_entrypoint
-            .strip_prefix(&host_source_root)
-            .map_err(|_| InstalledRuntimeError::EntrypointOutsideSourceRoot)?;
-        let entrypoint_relative =
-            RuntimeRelativePath::parse(entrypoint_relative.to_string_lossy().to_string())
-                .map_err(|_| InstalledRuntimeError::EntrypointOutsideSourceRoot)?;
-        if !source_files
-            .iter()
-            .any(|file| file.relative_path == entrypoint_relative)
-        {
-            return Err(InstalledRuntimeError::EntrypointNotInSourceGraph);
-        }
-        if !source_files
-            .iter()
-            .any(|file| file.relative_path == qualification.cache_probe_module)
-        {
-            return Err(InstalledRuntimeError::CacheProbeNotInSourceGraph);
-        }
-        if qualification.cache_probe_module == entrypoint_relative {
-            return Err(InstalledRuntimeError::CacheProbeIsHostEntrypoint);
-        }
-
-        let deno_json_digest = digest_regular_file("Deno config", &deno_config)?;
-        let deno_lock_digest = digest_regular_file("Deno lock", &deno_lock)?;
-        let (deno_version, deno_version_output) = run_deno_version(&deno_executable)?;
-        if deno_version != PINNED_DENO_VERSION {
-            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Deno",
-                expected: PINNED_DENO_VERSION,
-                actual: deno_version,
-            });
-        }
-        populate_frozen_deno_cache(
-            &deno_executable,
-            &host_source_root,
-            &host_entrypoint,
-            &deno_config,
-            &deno_lock,
-            &deno_dir,
-        )?;
-        let resolved_dependency_graph_digest = qualify_deno_module_graph(
-            &deno_executable,
-            &host_source_root,
-            &host_entrypoint,
-            &deno_config,
-            &deno_lock,
-            &deno_dir,
-            &source_files,
-        )?;
+        let pi_agent_core = qualify_pi_agent_core()?;
+        // The host identity is a closed Rust-host marker, not a process probe.
+        let host_identity = RUST_HOST_IDENTITY.to_owned();
+        let host_identity_output = HostIdentityOutput {
+            stdout: host_identity.as_bytes().to_vec(),
+            stderr: Vec::new(),
+        };
+        let core_lock = pi_agent_core.root.join("Cargo.lock");
+        let host_binary_digest = digest_regular_file("Rust host executable", &host_executable)?;
+        let core_lock_digest = digest_regular_file("pi-agent-core Cargo.lock", &core_lock)?;
         let manifest = Self {
-            deno_executable,
-            deno_version,
-            deno_version_output,
+            host_executable,
+            host_identity,
+            host_identity_output,
             host_source_root,
-            host_entrypoint,
-            deno_config,
-            deno_lock,
-            deno_dir,
             source_files,
             source_graph_digest,
-            deno_json_digest,
-            deno_lock_digest,
-            resolved_dependency_graph_digest,
-            cache_probe_module: qualification.cache_probe_module,
-            pi_version: qualification.pi_version,
+            host_binary_digest,
+            core_lock_digest,
+            pi_agent_core,
         };
         manifest.verify_installed_material()?;
         Ok(manifest)
     }
 
     #[must_use]
-    pub fn deno_executable(&self) -> &Path {
-        &self.deno_executable
+    pub fn host_executable(&self) -> &Path {
+        &self.host_executable
     }
 
     #[must_use]
-    pub fn deno_version(&self) -> &str {
-        &self.deno_version
+    pub fn host_identity(&self) -> &str {
+        &self.host_identity
     }
 
     #[must_use]
-    pub fn deno_version_output(&self) -> &DenoVersionOutput {
-        &self.deno_version_output
-    }
-
-    #[must_use]
-    pub fn host_entrypoint(&self) -> &Path {
-        &self.host_entrypoint
+    pub fn host_identity_output(&self) -> &HostIdentityOutput {
+        &self.host_identity_output
     }
 
     /// Canonical root containing every explicitly qualified local host source
@@ -1019,24 +1016,8 @@ impl InstalledRuntimeManifest {
     }
 
     #[must_use]
-    pub fn deno_config(&self) -> &Path {
-        &self.deno_config
-    }
-
-    #[must_use]
-    pub fn deno_lock(&self) -> &Path {
-        &self.deno_lock
-    }
-
-    #[must_use]
-    pub fn deno_dir(&self) -> &Path {
-        &self.deno_dir
-    }
-
-    /// The explicit safe module used only for cached graph/typecheck preflight.
-    #[must_use]
-    pub fn cache_probe_module(&self) -> &RuntimeRelativePath {
-        &self.cache_probe_module
+    pub fn core_root(&self) -> &Path {
+        &self.pi_agent_core.root
     }
 
     #[must_use]
@@ -1050,23 +1031,13 @@ impl InstalledRuntimeManifest {
     }
 
     #[must_use]
-    pub const fn deno_json_digest(&self) -> ContentDigest {
-        self.deno_json_digest
+    pub const fn host_binary_digest(&self) -> ContentDigest {
+        self.host_binary_digest
     }
 
     #[must_use]
-    pub const fn deno_lock_digest(&self) -> ContentDigest {
-        self.deno_lock_digest
-    }
-
-    #[must_use]
-    pub const fn resolved_dependency_graph_digest(&self) -> ContentDigest {
-        self.resolved_dependency_graph_digest
-    }
-
-    #[must_use]
-    pub fn pi_version(&self) -> &str {
-        &self.pi_version
+    pub const fn core_lock_digest(&self) -> ContentDigest {
+        self.core_lock_digest
     }
 
     /// Constructs the closed packet runtime identity from material already
@@ -1074,29 +1045,33 @@ impl InstalledRuntimeManifest {
     /// credential descriptor; this method never obtains a credential value.
     pub fn runtime_identity(
         &self,
-        credential: CredentialDescriptorV1,
-    ) -> Result<RuntimeIdentityV1, InstalledRuntimeError> {
+        credential: CredentialDescriptorV2,
+    ) -> Result<RuntimeIdentityV2, InstalledRuntimeError> {
         credential
             .validate()
             .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
                 reason: "credential descriptor is invalid",
             })?;
-        let deno_executable =
-            AbsoluteHostPath::parse(path_utf8("Deno executable", &self.deno_executable)?).map_err(
-                |_| InstalledRuntimeError::ReceiptInvalid {
-                    reason: "Deno executable path is not a valid absolute host path",
-                },
-            )?;
-        Ok(RuntimeIdentityV1 {
-            deno_executable,
-            deno_version: self.deno_version.clone(),
-            source_graph_digest: self.source_graph_digest,
-            resolved_dependency_graph_digest: self.resolved_dependency_graph_digest,
-            deno_json_digest: self.deno_json_digest,
-            deno_lock_digest: self.deno_lock_digest,
-            pi_version: self.pi_version.clone(),
-            credential,
-        })
+        let host_executable =
+            AbsoluteHostPath::parse(path_utf8("Rust host executable", &self.host_executable)?)
+                .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                    reason: "Rust host executable path is not a valid absolute host path",
+                })?;
+        let identity = RuntimeIdentityV2 {
+            host_executable,
+            core_head: self.pi_agent_core.head.clone(),
+            core_source_digest: self.pi_agent_core.source_digest,
+            rust_toolchain: RUST_TOOLCHAIN.to_owned(),
+            credential_env: match credential {
+                CredentialDescriptorV2::Environment { name } => name,
+            },
+        };
+        identity
+            .validate()
+            .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                reason: "installed runtime identity is invalid",
+            })?;
+        Ok(identity)
     }
 
     fn identity_digest(&self) -> Result<ContentDigest, InstalledRuntimeError> {
@@ -1106,15 +1081,11 @@ impl InstalledRuntimeManifest {
     }
 
     fn encode_receipt_fields(&self, bytes: &mut Vec<u8>) -> Result<(), InstalledRuntimeError> {
-        append_receipt_path(bytes, &self.deno_executable)?;
-        append_receipt_text(bytes, &self.deno_version)?;
-        append_receipt_bytes(bytes, self.deno_version_output.stdout())?;
-        append_receipt_bytes(bytes, self.deno_version_output.stderr())?;
+        append_receipt_path(bytes, &self.host_executable)?;
+        append_receipt_text(bytes, &self.host_identity)?;
+        append_receipt_bytes(bytes, self.host_identity_output.stdout())?;
+        append_receipt_bytes(bytes, self.host_identity_output.stderr())?;
         append_receipt_path(bytes, &self.host_source_root)?;
-        append_receipt_path(bytes, &self.host_entrypoint)?;
-        append_receipt_path(bytes, &self.deno_config)?;
-        append_receipt_path(bytes, &self.deno_lock)?;
-        append_receipt_path(bytes, &self.deno_dir)?;
         append_receipt_u32(
             bytes,
             u32::try_from(self.source_files.len()).map_err(|_| {
@@ -1128,34 +1099,42 @@ impl InstalledRuntimeManifest {
             append_receipt_bytes(bytes, &file.digest.as_bytes())?;
         }
         append_receipt_bytes(bytes, &self.source_graph_digest.as_bytes())?;
-        append_receipt_bytes(bytes, &self.deno_json_digest.as_bytes())?;
-        append_receipt_bytes(bytes, &self.deno_lock_digest.as_bytes())?;
-        append_receipt_bytes(bytes, &self.resolved_dependency_graph_digest.as_bytes())?;
-        append_receipt_text(bytes, self.cache_probe_module.as_str())?;
-        append_receipt_text(bytes, &self.pi_version)
+        append_receipt_bytes(bytes, &self.host_binary_digest.as_bytes())?;
+        append_receipt_bytes(bytes, &self.core_lock_digest.as_bytes())?;
+        append_receipt_path(bytes, &self.pi_agent_core.root)?;
+        append_receipt_text(bytes, &self.pi_agent_core.head)?;
+        append_receipt_u32(
+            bytes,
+            u32::try_from(self.pi_agent_core.files.len()).map_err(|_| {
+                InstalledRuntimeError::ReceiptInvalid {
+                    reason: "pi-agent-core source graph exceeds receipt bound",
+                }
+            })?,
+        );
+        for file in &self.pi_agent_core.files {
+            append_receipt_text(bytes, file.relative_path.as_str())?;
+            append_receipt_bytes(bytes, &file.digest.as_bytes())?;
+        }
+        append_receipt_bytes(bytes, &self.pi_agent_core.source_digest.as_bytes())
     }
 
     fn decode_receipt_fields(
         cursor: &mut ReceiptCursor<'_>,
     ) -> Result<Self, InstalledRuntimeError> {
-        let deno_executable = cursor.absolute_path("Deno executable")?;
-        let deno_version = cursor.text("Deno version")?;
-        let deno_version_output = DenoVersionOutput {
+        let host_executable = cursor.absolute_path("Rust host executable")?;
+        let host_identity = cursor.text("Rust host identity")?;
+        let host_identity_output = HostIdentityOutput {
             stdout: cursor.bytes()?.to_vec(),
             stderr: cursor.bytes()?.to_vec(),
         };
-        if deno_version_output.stdout.len() > MAX_VERSION_OUTPUT_BYTES
-            || deno_version_output.stderr.len() > MAX_VERSION_OUTPUT_BYTES
+        if host_identity_output.stdout.len() > MAX_VERSION_OUTPUT_BYTES
+            || host_identity_output.stderr.len() > MAX_VERSION_OUTPUT_BYTES
         {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Deno version output exceeds receipt bound",
+                reason: "Rust host identity output exceeds receipt bound",
             });
         }
         let host_source_root = cursor.absolute_path("Pi host source root")?;
-        let host_entrypoint = cursor.absolute_path("Pi host entrypoint")?;
-        let deno_config = cursor.absolute_path("Deno config")?;
-        let deno_lock = cursor.absolute_path("Deno lock")?;
-        let deno_dir = cursor.absolute_path("DENO_DIR")?;
         let source_count =
             usize::try_from(cursor.u32()?).map_err(|_| InstalledRuntimeError::ReceiptInvalid {
                 reason: "Pi host source count cannot be represented",
@@ -1184,90 +1163,61 @@ impl InstalledRuntimeManifest {
                 reason: "Pi host source graph digest does not match receipt files",
             });
         }
-        let deno_json_digest = cursor.digest()?;
-        let deno_lock_digest = cursor.digest()?;
-        let resolved_dependency_graph_digest = cursor.digest()?;
-        let cache_probe_module =
-            RuntimeRelativePath::parse(cursor.bounded_text("Pi host cache probe module", 4_096)?)
-                .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host cache probe module is invalid",
+        let host_binary_digest = cursor.digest()?;
+        let core_lock_digest = cursor.digest()?;
+        validate_text("Rust host identity", &host_identity)?;
+        let core_root = cursor.absolute_path("pi-agent-core checkout root")?;
+        let core_head = cursor.bounded_text("pi-agent-core HEAD", PI_AGENT_CORE_HEAD_MAX_BYTES)?;
+        validate_text("pi-agent-core HEAD", &core_head)?;
+        let core_count =
+            usize::try_from(cursor.u32()?).map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                reason: "pi-agent-core source count cannot be represented",
             })?;
-        let pi_version = cursor.text("Pi SDK version")?;
-        validate_text("Deno version", &deno_version)?;
-        validate_text("Pi SDK version", &pi_version)?;
-        if deno_version != PINNED_DENO_VERSION {
-            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Deno",
-                expected: PINNED_DENO_VERSION,
-                actual: deno_version,
-            });
-        }
-        if pi_version != PINNED_PI_VERSION {
-            return Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Pi SDK",
-                expected: PINNED_PI_VERSION,
-                actual: pi_version,
-            });
-        }
-        if !host_entrypoint.starts_with(&host_source_root) {
+        if core_count == 0 || core_count > MAX_SOURCE_GRAPH_FILES {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host entrypoint is outside source root",
+                reason: "pi-agent-core source graph count is invalid",
             });
         }
-        let entrypoint_relative =
-            host_entrypoint
-                .strip_prefix(&host_source_root)
-                .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                    reason: "Pi host entrypoint is outside source root",
-                })?;
-        let entrypoint_relative = RuntimeRelativePath::parse(
-            entrypoint_relative.to_string_lossy().to_string(),
-        )
-        .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-            reason: "Pi host entrypoint cannot be represented",
-        })?;
-        if !source_files
-            .iter()
-            .any(|file| file.relative_path == entrypoint_relative)
-        {
-            return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host entrypoint is absent from source graph",
+        let mut core_files = Vec::with_capacity(core_count);
+        for _ in 0..core_count {
+            let relative_path = RuntimeRelativePath::parse(
+                cursor.bounded_text("pi-agent-core source file", 4_096)?,
+            )
+            .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                reason: "pi-agent-core source file path is invalid",
+            })?;
+            core_files.push(InstalledSourceFile {
+                relative_path,
+                digest: cursor.digest()?,
             });
         }
-        if !source_files
-            .iter()
-            .any(|file| file.relative_path == cache_probe_module)
-        {
+        let core_files = normalize_host_source_files(core_files)?;
+        let core_source_digest = cursor.digest()?;
+        if pi_agent_core_source_digest(&core_files)? != core_source_digest {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host cache probe module is absent from source graph",
-            });
-        }
-        if cache_probe_module == entrypoint_relative {
-            return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host cache probe must not be the host entrypoint",
+                reason: "pi-agent-core source graph digest does not match receipt files",
             });
         }
         Ok(Self {
-            deno_executable,
-            deno_version,
-            deno_version_output,
+            host_executable,
+            host_identity,
+            host_identity_output,
             host_source_root,
-            host_entrypoint,
-            deno_config,
-            deno_lock,
-            deno_dir,
             source_files,
             source_graph_digest,
-            deno_json_digest,
-            deno_lock_digest,
-            resolved_dependency_graph_digest,
-            cache_probe_module,
-            pi_version,
+            host_binary_digest,
+            core_lock_digest,
+            pi_agent_core: PiAgentCoreQualification {
+                root: core_root,
+                head: core_head,
+                files: core_files,
+                source_digest: core_source_digest,
+            },
         })
     }
 
-    /// Rechecks every mutable installed file plus the frozen Deno cache graph.
-    /// This function is provider-free and never starts the Pi SDK host.
+    /// Rechecks every mutable installed file and the exact local core
+    /// checkout. This function is provider-free and never starts the host.
     pub fn verify_installed_material(&self) -> Result<(), InstalledRuntimeError> {
         if canonical_directory("Pi host source root", &self.host_source_root)?
             != self.host_source_root
@@ -1276,42 +1226,29 @@ impl InstalledRuntimeManifest {
                 evidence: "canonical Pi host source-root path changed",
             });
         }
-        if canonical_regular_file("Deno executable", &self.deno_executable)? != self.deno_executable
+        if canonical_executable_file("Rust agent host executable", &self.host_executable)?
+            != self.host_executable
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical Deno executable path changed",
+                evidence: "canonical Rust agent host executable path changed",
             });
         }
-        if canonical_regular_file("Pi host entrypoint", &self.host_entrypoint)?
-            != self.host_entrypoint
+        if digest_regular_file("Rust agent host executable", &self.host_executable)?
+            != self.host_binary_digest
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical Pi host entrypoint path changed",
+                evidence: "Rust agent host executable digest changed",
             });
         }
-        if canonical_regular_file("Deno config", &self.deno_config)? != self.deno_config {
+        if canonical_directory("pi-agent-core checkout", &self.pi_agent_core.root)?
+            != self.pi_agent_core.root
+            || digest_regular_file(
+                "pi-agent-core Cargo.lock",
+                &self.pi_agent_core.root.join("Cargo.lock"),
+            )? != self.core_lock_digest
+        {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical Deno config path changed",
-            });
-        }
-        if canonical_regular_file("Deno lock", &self.deno_lock)? != self.deno_lock {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical Deno lock path changed",
-            });
-        }
-        if canonical_directory("DENO_DIR", &self.deno_dir)? != self.deno_dir {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical DENO_DIR path changed",
-            });
-        }
-        if digest_regular_file("Deno config", &self.deno_config)? != self.deno_json_digest {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Deno config digest changed",
-            });
-        }
-        if digest_regular_file("Deno lock", &self.deno_lock)? != self.deno_lock_digest {
-            return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Deno lock digest changed",
+                evidence: "pi-agent-core lockfile identity changed",
             });
         }
         let source_paths = self
@@ -1326,30 +1263,20 @@ impl InstalledRuntimeManifest {
                 evidence: "Pi host source graph digest changed",
             });
         }
-        let (version, output) = run_deno_version(&self.deno_executable)?;
-        if version != self.deno_version || output != self.deno_version_output {
+        if self.host_identity != RUST_HOST_IDENTITY
+            || self.host_identity_output.stdout() != RUST_HOST_IDENTITY.as_bytes()
+            || !self.host_identity_output.stderr().is_empty()
+        {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "exact Deno --version output changed",
+                evidence: "Rust host identity changed",
             });
         }
-        run_frozen_cache_probe(self)?;
-        // The cached-only probe above makes a cache miss fail before this
-        // `info --no-remote` observation. With the complete graph already
-        // proven cache-resident, Deno cannot acquire npm/jsr/remote material;
-        // this re-derives the canonical graph identity instead of merely
-        // testing that some cache files exist.
-        let observed_dependency_graph_digest = qualify_deno_module_graph(
-            &self.deno_executable,
-            &self.host_source_root,
-            &self.host_entrypoint,
-            &self.deno_config,
-            &self.deno_lock,
-            &self.deno_dir,
-            &self.source_files,
-        )?;
-        if observed_dependency_graph_digest != self.resolved_dependency_graph_digest {
+        let observed_core = qualify_pi_agent_core()?;
+        if observed_core != self.pi_agent_core
+            || observed_core.source_digest != self.pi_agent_core.source_digest
+        {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Deno resolved dependency graph digest changed",
+                evidence: "pi-agent-core checkout HEAD or source identity changed",
             });
         }
         Ok(())
@@ -1357,7 +1284,7 @@ impl InstalledRuntimeManifest {
 
     fn verify_packet_bytes(
         &self,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
         canonical_packet_bytes: &[u8],
     ) -> Result<(), RuntimeVerificationError> {
         if canonical_packet_bytes.is_empty() {
@@ -1366,22 +1293,19 @@ impl InstalledRuntimeManifest {
         packet
             .validate()
             .map_err(|error| RuntimeVerificationError::PacketContract(error.to_string()))?;
-        let wire = parse_assignment_packet_v1(canonical_packet_bytes)
+        let wire = parse_assignment_packet_v2(canonical_packet_bytes)
             .map_err(|error| RuntimeVerificationError::PacketContract(error.to_string()))?;
-        let computed = unsigned_assignment_packet_digest_v1(&wire)
+        let computed = unsigned_assignment_packet_digest_v2(&wire)
             .map_err(|error| RuntimeVerificationError::PacketContract(error.to_string()))?;
         if computed != packet.packet_digest || wire.packet_digest != packet.packet_digest.to_hex() {
             return Err(RuntimeVerificationError::PacketSealMismatch);
         }
         if wire.assignment_id != packet.assignment_id.get()
-            || wire.runtime.deno_executable != packet.runtime.deno_executable.as_str()
-            || wire.runtime.deno_version != packet.runtime.deno_version
-            || wire.runtime.source_graph_digest != packet.runtime.source_graph_digest.to_hex()
-            || wire.runtime.deno_json_digest != packet.runtime.deno_json_digest.to_hex()
-            || wire.runtime.deno_lock_digest != packet.runtime.deno_lock_digest.to_hex()
-            || wire.runtime.pi_version != packet.runtime.pi_version
-            || wire.runtime.resolved_dependency_graph_digest
-                != packet.runtime.resolved_dependency_graph_digest.to_hex()
+            || wire.runtime.host_executable != packet.runtime.host_executable.as_str()
+            || wire.runtime.core_head != packet.runtime.core_head
+            || wire.runtime.core_source_digest != packet.runtime.core_source_digest.to_hex()
+            || wire.runtime.rust_toolchain != packet.runtime.rust_toolchain
+            || wire.runtime.credential_env != packet.runtime.credential_env
         {
             return Err(RuntimeVerificationError::PacketContract(
                 "canonical packet runtime identity differs from typed assignment".to_owned(),
@@ -1392,17 +1316,13 @@ impl InstalledRuntimeManifest {
 
     fn verify_runtime_identity(
         &self,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
         spawn: &PiHostSpawnSpec,
     ) -> Result<(), InstalledRuntimeError> {
-        if packet.runtime.deno_executable.as_str() != self.deno_executable.to_string_lossy()
-            || packet.runtime.deno_version != self.deno_version
-            || packet.runtime.source_graph_digest != self.source_graph_digest
-            || packet.runtime.deno_json_digest != self.deno_json_digest
-            || packet.runtime.deno_lock_digest != self.deno_lock_digest
-            || packet.runtime.pi_version != self.pi_version
-            || packet.runtime.resolved_dependency_graph_digest
-                != self.resolved_dependency_graph_digest
+        if packet.runtime.host_executable.as_str() != self.host_executable.to_string_lossy()
+            || packet.runtime.core_head != self.pi_agent_core.head
+            || packet.runtime.core_source_digest != self.pi_agent_core.source_digest
+            || packet.runtime.rust_toolchain != RUST_TOOLCHAIN
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
                 evidence: "assignment packet runtime identity is not the installed manifest",
@@ -1410,11 +1330,7 @@ impl InstalledRuntimeManifest {
         }
 
         let expected_workspace = Path::new(packet.workspace_root.as_str());
-        if spawn.executable() != self.deno_executable
-            || spawn.host_entrypoint() != self.host_entrypoint
-            || spawn.deno_config() != self.deno_config
-            || spawn.deno_lock() != self.deno_lock
-            || spawn.deno_dir() != Some(self.deno_dir.as_path())
+        if spawn.executable() != self.host_executable
             || spawn.working_directory() != expected_workspace
             || spawn.actor_source_fd() != 0
         {
@@ -1423,45 +1339,13 @@ impl InstalledRuntimeManifest {
             });
         }
 
-        let expected_arguments = [
-            OsString::from("run"),
-            OsString::from("-A"),
-            OsString::from("--no-prompt"),
-            OsString::from("--frozen"),
-            OsString::from("--cached-only"),
-            OsString::from("--config"),
-            self.deno_config.as_os_str().to_owned(),
-            OsString::from("--lock"),
-            self.deno_lock.as_os_str().to_owned(),
-            self.host_entrypoint.as_os_str().to_owned(),
-        ];
-        if spawn.arguments() != expected_arguments {
+        if !spawn.arguments().is_empty() {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Pi host launch arguments are not the frozen cached-only Deno command",
+                evidence: "Rust host launch unexpectedly carries command-line runtime state",
             });
         }
         verify_credential_environment(packet, spawn)?;
         Ok(())
-    }
-}
-
-impl SessionRuntimeVerifier for InstalledRuntimeManifest {
-    fn verify_packet(
-        &self,
-        packet: &AssignmentPacketV1,
-        canonical_packet_bytes: &[u8],
-    ) -> Result<(), RuntimeVerificationError> {
-        self.verify_packet_bytes(packet, canonical_packet_bytes)
-    }
-
-    fn verify_runtime(
-        &self,
-        packet: &AssignmentPacketV1,
-        spawn: &PiHostSpawnSpec,
-    ) -> Result<(), RuntimeVerificationError> {
-        self.verify_installed_material()
-            .and_then(|()| self.verify_runtime_identity(packet, spawn))
-            .map_err(|error| RuntimeVerificationError::RuntimeIdentity(error.to_string()))
     }
 }
 
@@ -1537,12 +1421,169 @@ fn source_graph_digest_for(
     Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
 }
 
+fn pi_agent_core_source_digest(
+    files: &[InstalledSourceFile],
+) -> Result<ContentDigest, InstalledRuntimeError> {
+    if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
+        return Err(InstalledRuntimeError::CoreSourceGraphInvalid { count: files.len() });
+    }
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(PI_AGENT_CORE_SOURCE_DOMAIN);
+    for file in files {
+        let path = file.relative_path.as_str().as_bytes();
+        let length =
+            u32::try_from(path.len()).map_err(|_| InstalledRuntimeError::SourcePathTooLong {
+                path: file.relative_path.as_str().to_owned(),
+            })?;
+        hasher.update(&length.to_be_bytes());
+        hasher.update(path);
+        hasher.update(&file.digest.as_bytes());
+    }
+    Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
+}
+
+/// Qualifies the temporary local `pi-agent-core-rs` source checkout. A clean
+/// Git status is mandatory: a dirty checkout is not a reproducible runtime
+/// input even when its current `HEAD` happens to match the receipt. The
+/// source inventory excludes only Git's private metadata and Cargo build
+/// output; all tracked or untracked project material that can affect Cargo
+/// resolution is otherwise bound by digest.
+fn qualify_pi_agent_core() -> Result<PiAgentCoreQualification, InstalledRuntimeError> {
+    let root = canonical_directory("pi-agent-core checkout", Path::new(PI_AGENT_CORE_ROOT))?;
+    let git = find_git_executable()?;
+    let head_output = Command::new(&git)
+        .arg("-C")
+        .arg(&root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map_err(|source| InstalledRuntimeError::CoreGitCommand {
+            operation: "rev-parse HEAD",
+            source,
+        })?;
+    if !head_output.status.success() {
+        return Err(InstalledRuntimeError::CoreGitCommandFailed {
+            operation: "rev-parse HEAD",
+            status: head_output.status.code(),
+        });
+    }
+    let head = String::from_utf8(head_output.stdout)
+        .map_err(|_| InstalledRuntimeError::CoreHeadInvalid)?
+        .trim()
+        .to_owned();
+    if head.len() != 40
+        || !head
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(InstalledRuntimeError::CoreHeadInvalid);
+    }
+
+    let status = Command::new(&git)
+        .arg("-C")
+        .arg(&root)
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .output()
+        .map_err(|source| InstalledRuntimeError::CoreGitCommand {
+            operation: "status",
+            source,
+        })?;
+    if !status.status.success() {
+        return Err(InstalledRuntimeError::CoreGitCommandFailed {
+            operation: "status",
+            status: status.status.code(),
+        });
+    }
+    if !status.stdout.is_empty() {
+        return Err(InstalledRuntimeError::CoreCheckoutDirty);
+    }
+
+    let mut files = inventory_core_files(&root, &git)?;
+    files.sort_by(|left, right| {
+        left.relative_path
+            .as_str()
+            .cmp(right.relative_path.as_str())
+    });
+    if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
+        return Err(InstalledRuntimeError::CoreSourceGraphInvalid { count: files.len() });
+    }
+    let source_digest = pi_agent_core_source_digest(&files)?;
+    Ok(PiAgentCoreQualification {
+        root,
+        head,
+        files,
+        source_digest,
+    })
+}
+
+fn inventory_core_files(
+    root: &Path,
+    git: &Path,
+) -> Result<Vec<InstalledSourceFile>, InstalledRuntimeError> {
+    let output = Command::new(git)
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z"])
+        .output()
+        .map_err(|source| InstalledRuntimeError::CoreGitCommand {
+            operation: "ls-files",
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(InstalledRuntimeError::CoreGitCommandFailed {
+            operation: "ls-files",
+            status: output.status.code(),
+        });
+    }
+    let mut files = Vec::new();
+    for raw in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|raw| !raw.is_empty())
+    {
+        let relative =
+            std::str::from_utf8(raw).map_err(|_| InstalledRuntimeError::CoreHeadInvalid)?;
+        let relative_path = RuntimeRelativePath::parse(relative.to_owned()).map_err(|_| {
+            InstalledRuntimeError::SourceGraphPathInvalid {
+                path: relative.to_owned(),
+            }
+        })?;
+        let path = root.join(relative_path.as_str());
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|source| InstalledRuntimeError::Metadata {
+                field: "pi-agent-core source file",
+                path: path.clone(),
+                source,
+            })?;
+        if metadata.file_type().is_symlink() {
+            return Err(InstalledRuntimeError::SourceGraphSymlink { path });
+        }
+        if !metadata.is_file() {
+            return Err(InstalledRuntimeError::NotRegularFile {
+                field: "pi-agent-core source file",
+                path,
+            });
+        }
+        files.push(InstalledSourceFile {
+            relative_path,
+            digest: digest_regular_file("pi-agent-core source file", &path)?,
+        });
+    }
+    Ok(files)
+}
+
+fn find_git_executable() -> Result<PathBuf, InstalledRuntimeError> {
+    ["/usr/bin/git", "/opt/homebrew/bin/git"]
+        .iter()
+        .map(Path::new)
+        .find(|path| path.is_file())
+        .map(Path::to_owned)
+        .ok_or(InstalledRuntimeError::CoreGitUnavailable)
+}
+
 /// Proves that the declared source graph closes every local filesystem input
-/// available under the host root. Deno can resolve a new local import during a
-/// preflight check, so hashing only an operator-provided subset would make the
-/// source-graph receipt dishonest. This deliberately overbinds harmless local
-/// files such as tests and package metadata; the installed host root should be
-/// kept narrow (normally repository `packages/`).
+/// available under the host root. Hashing only an operator-provided subset
+/// would make the source-graph receipt dishonest. This deliberately overbinds
+/// harmless local files such as tests and package metadata.
 fn require_complete_host_source_inventory(
     source_root: &Path,
     declared: &[RuntimeRelativePath],
@@ -1708,6 +1749,7 @@ fn kernel_build_digest(
     approved_tools_digest: ContentDigest,
     runtime_digest: ContentDigest,
     schema_identity: &str,
+    credential_environment: &str,
 ) -> Result<ContentDigest, InstalledRuntimeError> {
     let mut bytes = Vec::new();
     append_receipt_bytes(&mut bytes, KERNEL_BUILD_DOMAIN)?;
@@ -1716,6 +1758,7 @@ fn kernel_build_digest(
     append_receipt_bytes(&mut bytes, &approved_tools_digest.as_bytes())?;
     append_receipt_text(&mut bytes, schema_identity)?;
     append_receipt_bytes(&mut bytes, &runtime_digest.as_bytes())?;
+    append_receipt_text(&mut bytes, credential_environment)?;
     Ok(ContentDigest::of_bytes(&bytes))
 }
 
@@ -1737,7 +1780,7 @@ fn path_utf8(field: &'static str, path: &Path) -> Result<String, InstalledRuntim
         .map(ToOwned::to_owned)
         .ok_or(InstalledRuntimeError::ReceiptInvalid {
             reason: match field {
-                "Deno executable" => "Deno executable path is not valid UTF-8",
+                "Rust host executable" => "Rust host executable path is not valid UTF-8",
                 _ => "receipt path is not valid UTF-8",
             },
         })
@@ -1969,247 +2012,15 @@ fn digest_regular_file(
     Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
 }
 
-fn run_deno_version(
-    deno_executable: &Path,
-) -> Result<(String, DenoVersionOutput), InstalledRuntimeError> {
-    let output = exact_deno_command(deno_executable)
-        .arg("--version")
-        .output()
-        .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: "--version",
-            source,
-        })?;
-    ensure_success(&output)?;
-    if output.stdout.len() > MAX_VERSION_OUTPUT_BYTES
-        || output.stderr.len() > MAX_VERSION_OUTPUT_BYTES
-    {
-        return Err(InstalledRuntimeError::VersionOutputTooLarge);
-    }
-    let stdout = std::str::from_utf8(&output.stdout)
-        .map_err(|_| InstalledRuntimeError::VersionOutputNotUtf8)?;
-    let version = stdout
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("deno "))
-        .and_then(|line| line.split_ascii_whitespace().next())
-        .filter(|version| !version.is_empty())
-        .ok_or(InstalledRuntimeError::VersionOutputInvalid)?
-        .to_owned();
-    validate_text("Deno version", &version)?;
-    Ok((
-        version,
-        DenoVersionOutput {
-            stdout: output.stdout,
-            stderr: output.stderr,
-        },
-    ))
-}
-
-fn run_frozen_cache_probe(
-    manifest: &InstalledRuntimeManifest,
-) -> Result<(), InstalledRuntimeError> {
-    let cache_probe = manifest
-        .host_source_root
-        .join(manifest.cache_probe_module.as_str());
-    let output = exact_deno_command(&manifest.deno_executable)
-        .env("DENO_DIR", &manifest.deno_dir)
-        .current_dir(&manifest.host_source_root)
-        // Deno 2.9 does not accept `--cached-only` for `check`, but it does
-        // for `run --check`. The qualified probe module is intentionally not
-        // the host entrypoint, so this proves the full graph/typecheck cache
-        // without binding FD0 or starting a Pi actor.
-        .arg("run")
-        .arg("--check")
-        .arg("--frozen")
-        .arg("--cached-only")
-        .arg("--config")
-        .arg(&manifest.deno_config)
-        .arg("--lock")
-        .arg(&manifest.deno_lock)
-        .arg(cache_probe)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: "run --check --frozen --cached-only",
-            source,
-        })?;
-    if !output.success() {
-        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
-            status: output.code(),
-        });
-    }
-    Ok(())
-}
-
-/// Populates one build-specific cache during stopped-daemon installation.
-/// This command resolves the frozen lock but cannot execute the actor or call
-/// a model provider. Every later verification and spawn is cached-only.
-fn populate_frozen_deno_cache(
-    deno_executable: &Path,
-    host_source_root: &Path,
-    host_entrypoint: &Path,
-    deno_config: &Path,
-    deno_lock: &Path,
-    deno_dir: &Path,
-) -> Result<(), InstalledRuntimeError> {
-    let status = exact_deno_command(deno_executable)
-        .env("DENO_DIR", deno_dir)
-        .current_dir(host_source_root)
-        .arg("cache")
-        .arg("--frozen")
-        .arg("--config")
-        .arg(deno_config)
-        .arg("--lock")
-        .arg(deno_lock)
-        .arg(host_entrypoint)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: "cache --frozen",
-            source,
-        })?;
-    if !status.success() {
-        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
-            status: status.code(),
-        });
-    }
-    Ok(())
-}
-
-/// Captures Deno's actual resolved graph while installation is allowed to
-/// use the populated build-specific cache. It does not trust an operator
-/// declaration for the packet's dependency identity. Qualification and
-/// re-verification intentionally run this same `--no-remote` command: Deno
-/// 2.9 emits a different JSON shape when the flag is omitted, even with an
-/// identical graph. The frozen lock and cached-only execution probe provide
-/// the remote-package integrity and availability fences.
-fn qualify_deno_module_graph(
-    deno_executable: &Path,
-    host_source_root: &Path,
-    host_entrypoint: &Path,
-    deno_config: &Path,
-    deno_lock: &Path,
-    deno_dir: &Path,
-    source_files: &[InstalledSourceFile],
-) -> Result<ContentDigest, InstalledRuntimeError> {
-    let output = exact_deno_command(deno_executable)
-        .env("DENO_DIR", deno_dir)
-        .current_dir(host_source_root)
-        .arg("info")
-        .arg("--json")
-        .arg("--frozen")
-        .arg("--no-remote")
-        .arg("--config")
-        .arg(deno_config)
-        .arg("--lock")
-        .arg(deno_lock)
-        .arg(host_entrypoint)
-        .output()
-        .map_err(|source| InstalledRuntimeError::DenoCommand {
-            operation: "info --json --frozen --no-remote",
-            source,
-        })?;
-    if !output.status.success() {
-        return Err(InstalledRuntimeError::FrozenCacheProbeFailed {
-            status: output.status.code(),
-        });
-    }
-    if output.stdout.len() > MAX_RECEIPT_BYTES {
-        return Err(InstalledRuntimeError::DenoModuleGraphTooLarge);
-    }
-    let graph: miniserde::json::Value = miniserde::json::from_str(
-        std::str::from_utf8(&output.stdout)
-            .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?,
-    )
-    .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?;
-    let modules = object_array_field(&graph, "modules")?;
-    let declared = source_files
-        .iter()
-        .map(|source| source.relative_path.as_str().to_owned())
-        .collect::<BTreeSet<_>>();
-    for module in modules {
-        let specifier = object_string_field(module, "specifier")?;
-        if !specifier.starts_with("file:") {
-            continue;
-        }
-        let local = object_string_field(module, "local")?;
-        let local = PathBuf::from(local);
-        let canonical = canonical_regular_file("Deno local module", &local)?;
-        let relative = canonical.strip_prefix(host_source_root).map_err(|_| {
-            InstalledRuntimeError::DenoLocalModuleOutsideSourceRoot {
-                path: canonical.clone(),
-            }
-        })?;
-        let relative = relative
-            .to_str()
-            .ok_or(InstalledRuntimeError::DenoModuleGraphInvalid)?;
-        let relative = RuntimeRelativePath::parse(relative.to_owned())
-            .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?;
-        if !declared.contains(relative.as_str()) {
-            return Err(InstalledRuntimeError::DenoLocalModuleUndeclared {
-                path: relative.as_str().to_owned(),
-            });
-        }
-    }
-    Ok(ContentDigest::of_bytes(
-        miniserde::json::to_string(&graph).as_bytes(),
-    ))
-}
-
-fn object_array_field<'a>(
-    value: &'a miniserde::json::Value,
-    field: &'static str,
-) -> Result<&'a miniserde::json::Array, InstalledRuntimeError> {
-    let miniserde::json::Value::Object(object) = value else {
-        return Err(InstalledRuntimeError::DenoModuleGraphInvalid);
-    };
-    match object.get(field) {
-        Some(miniserde::json::Value::Array(array)) => Ok(array),
-        _ => Err(InstalledRuntimeError::DenoModuleGraphInvalid),
-    }
-}
-
-fn object_string_field<'a>(
-    value: &'a miniserde::json::Value,
-    field: &'static str,
-) -> Result<&'a str, InstalledRuntimeError> {
-    let miniserde::json::Value::Object(object) = value else {
-        return Err(InstalledRuntimeError::DenoModuleGraphInvalid);
-    };
-    match object.get(field) {
-        Some(miniserde::json::Value::String(value)) if !value.is_empty() => Ok(value),
-        _ => Err(InstalledRuntimeError::DenoModuleGraphInvalid),
-    }
-}
-
-fn exact_deno_command(deno_executable: &Path) -> Command {
-    let mut command = Command::new(deno_executable);
-    command.env_clear();
-    command.env("DENO_NO_UPDATE_CHECK", "1");
-    command.env("NO_COLOR", "1");
-    command
-}
-
 /// Only the selected credential environment name may cross into a provider
 /// host. The manifest deliberately checks names and fixed kernel values, never
 /// secret values; those remain process-local and are never persisted here.
 fn verify_credential_environment(
-    packet: &AssignmentPacketV1,
+    packet: &AssignmentPacketV2,
     spawn: &PiHostSpawnSpec,
 ) -> Result<(), InstalledRuntimeError> {
     let environment = spawn.environment();
-    let deno_dir = spawn
-        .deno_dir()
-        .ok_or(InstalledRuntimeError::RuntimeDrift {
-            evidence: "Pi host environment has no build-specific DENO_DIR",
-        })?;
-    let fixed = [
-        (OsStr::new("DENO_NO_UPDATE_CHECK"), OsStr::new("1")),
-        (OsStr::new("NO_COLOR"), OsStr::new("1")),
-        (OsStr::new("DENO_DIR"), deno_dir.as_os_str()),
-    ];
+    let fixed = [(OsStr::new("NO_COLOR"), OsStr::new("1"))];
     for (name, expected_value) in fixed {
         if environment
             .iter()
@@ -2220,11 +2031,10 @@ fn verify_credential_environment(
             != 1
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Pi host environment omits or changes a kernel-owned runtime variable",
+                evidence: "Rust host environment omits or changes a kernel-owned runtime variable",
             });
         }
     }
-
     if environment
         .iter()
         .filter(|(name, value)| name == OsStr::new("PATH") && !value.is_empty())
@@ -2232,42 +2042,28 @@ fn verify_credential_environment(
         != 1
     {
         return Err(InstalledRuntimeError::RuntimeDrift {
-            evidence: "Pi host environment omits the kernel-owned approved-tool path",
+            evidence: "Rust host environment omits the kernel-owned approved-tool path",
         });
     }
-
-    let selected_credential = match &packet.runtime.credential {
-        factory_protocol::CredentialDescriptorV1::Environment { name } => Some(name.as_str()),
-        factory_protocol::CredentialDescriptorV1::PiAuthStore { .. } => None,
-    };
-    let fixed_names = ["DENO_NO_UPDATE_CHECK", "NO_COLOR", "DENO_DIR", "PATH"];
+    let selected_credential = packet.runtime.credential_env.as_str();
+    let fixed_names = ["NO_COLOR", "PATH"];
     for (name, value) in environment {
         let Some(name) = name.to_str() else {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Pi host environment contains a non-UTF-8 name",
+                evidence: "Rust host environment contains a non-UTF-8 name",
             });
         };
         if fixed_names.contains(&name) {
             continue;
         }
-        if selected_credential == Some(name) && !value.is_empty() {
+        if selected_credential == name && !value.is_empty() {
             continue;
         }
         return Err(InstalledRuntimeError::RuntimeDrift {
-            evidence: "Pi host environment contains an unselected or empty credential variable",
+            evidence: "Rust host environment contains an unselected or empty credential variable",
         });
     }
     Ok(())
-}
-
-fn ensure_success(output: &Output) -> Result<(), InstalledRuntimeError> {
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(InstalledRuntimeError::DenoVersionFailed {
-            status: output.status.code(),
-        })
-    }
 }
 
 fn validate_text(field: &'static str, value: &str) -> Result<(), InstalledRuntimeError> {
@@ -2286,6 +2082,31 @@ pub enum InstalledRuntimeError {
 
     #[error("provider {provider:?} has no credential source in this installed build")]
     UnsupportedCredentialProvider { provider: String },
+
+    #[error("pi-agent-core checkout is not clean")]
+    CoreCheckoutDirty,
+
+    #[error("pi-agent-core checkout has no usable Git executable")]
+    CoreGitUnavailable,
+
+    #[error("could not execute Git {operation}: {source}")]
+    CoreGitCommand {
+        operation: &'static str,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Git {operation} failed with status {status:?}")]
+    CoreGitCommandFailed {
+        operation: &'static str,
+        status: Option<i32>,
+    },
+
+    #[error("pi-agent-core HEAD is not a full hexadecimal commit identity")]
+    CoreHeadInvalid,
+
+    #[error("pi-agent-core source inventory is invalid ({count} files)")]
+    CoreSourceGraphInvalid { count: usize },
 
     #[error("spawn credential environment name differs from the installed provider configuration")]
     CredentialEnvironmentMismatch,
@@ -2357,18 +2178,6 @@ pub enum InstalledRuntimeError {
     #[error("Pi host source path {path:?} cannot be represented")]
     SourcePathTooLong { path: String },
 
-    #[error("Pi host entrypoint is outside the qualified source root")]
-    EntrypointOutsideSourceRoot,
-
-    #[error("Pi host entrypoint is absent from the qualified source graph")]
-    EntrypointNotInSourceGraph,
-
-    #[error("Pi host cache probe module is absent from the qualified source graph")]
-    CacheProbeNotInSourceGraph,
-
-    #[error("Pi host cache probe module must not be the actor host entrypoint")]
-    CacheProbeIsHostEntrypoint,
-
     #[error("cannot read {field} at {path:?}: {source}")]
     Read {
         field: &'static str,
@@ -2377,687 +2186,6 @@ pub enum InstalledRuntimeError {
         source: io::Error,
     },
 
-    #[error("could not execute Deno {operation}: {source}")]
-    DenoCommand {
-        operation: &'static str,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("Deno --version failed with status {status:?}")]
-    DenoVersionFailed { status: Option<i32> },
-
-    #[error("Deno --version output exceeds the qualified bound")]
-    VersionOutputTooLarge,
-
-    #[error("Deno --version stdout is not UTF-8")]
-    VersionOutputNotUtf8,
-
-    #[error("Deno --version stdout does not begin with a Deno version")]
-    VersionOutputInvalid,
-
-    #[error("{component} version must be {expected}, found {actual}")]
-    RuntimeVersionNotPinned {
-        component: &'static str,
-        expected: &'static str,
-        actual: String,
-    },
-
-    #[error("frozen cached-only Deno graph probe failed with status {status:?}")]
-    FrozenCacheProbeFailed { status: Option<i32> },
-
-    #[error("Deno local-module graph receipt is malformed")]
-    DenoModuleGraphInvalid,
-
-    #[error("Deno local-module graph receipt exceeds the installed receipt bound")]
-    DenoModuleGraphTooLarge,
-
-    #[error("Deno resolved local module escapes the Pi host source root: {path:?}")]
-    DenoLocalModuleOutsideSourceRoot { path: PathBuf },
-
-    #[error("Deno resolved an undeclared local host module {path:?}")]
-    DenoLocalModuleUndeclared { path: String },
-
     #[error("installed runtime drift: {evidence}")]
     RuntimeDrift { evidence: &'static str },
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        fs,
-        os::unix::fs::PermissionsExt,
-        path::{Path, PathBuf},
-    };
-
-    use super::*;
-    use factory_protocol::{
-        AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
-        AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentRole, CampaignId,
-        CredentialDescriptorV1, DurationMillis, KernelBuildId, MicroUsd, ModelProfileV1,
-        ReadExactFileV1, RepositoryRelativePath, SessionLimitsV1, TerminalOperationV1,
-        ThinkingLevelV1,
-    };
-
-    struct Fixture {
-        root: PathBuf,
-        deno: PathBuf,
-        cargo: PathBuf,
-        git: PathBuf,
-        source_root: PathBuf,
-        entrypoint: PathBuf,
-        config: PathBuf,
-        lock: PathBuf,
-        cache: PathBuf,
-    }
-
-    impl Fixture {
-        fn new(label: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "factory-v3-installed-runtime-{label}-{}-{}",
-                std::process::id(),
-                fastrand::u64(..)
-            ));
-            fs::create_dir(&root).expect("fixture root");
-            let bin = root.join("bin");
-            let source_root = root.join("host");
-            let cache = root.join("deno-cache");
-            fs::create_dir(&bin).expect("bin");
-            fs::create_dir(&source_root).expect("host source root");
-            fs::create_dir(&cache).expect("cache");
-            fs::write(cache.join("qualified"), b"cache material").expect("cache marker");
-            let deno = bin.join("deno");
-            fs::write(
-                &deno,
-                "#!/bin/sh\n\
-                 if [ \"$1\" = \"--version\" ]; then\n\
-                   printf 'deno 2.9.4 (stable)\\n'; printf 'v8 fake\\n'; printf 'typescript fake\\n'; exit 0\n\
-                 fi\n\
-                 if [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then\n\
-                   for value in \"$@\"; do entrypoint=\"$value\"; done\n\
-                   directory=$(dirname \"$entrypoint\")\n\
-                   printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"},{\"specifier\":\"file://%s/support.ts\",\"local\":\"%s/support.ts\"}]}' \"$entrypoint\" \"$entrypoint\" \"$directory\" \"$directory\"; exit 0\n\
-                 fi\n\
-                 if [ \"$1\" = \"cache\" ]; then exit 0; fi\n\
-                 if { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\n\
-                 exit 17\n",
-            )
-            .expect("fake deno");
-            fs::set_permissions(&deno, fs::Permissions::from_mode(0o755))
-                .expect("make fake deno executable");
-            let cargo = bin.join("cargo");
-            let git = bin.join("git");
-            for tool in [&cargo, &git, &bin.join("rustc"), &bin.join("rustdoc")] {
-                fs::write(tool, "#!/bin/sh\nexit 0\n").expect("fake approved executable");
-                fs::set_permissions(tool, fs::Permissions::from_mode(0o755))
-                    .expect("make fake approved executable executable");
-            }
-            let entrypoint = source_root.join("main.ts");
-            fs::write(&entrypoint, "import './support.ts';\n").expect("entrypoint");
-            fs::write(source_root.join("support.ts"), "export const value = 1;\n")
-                .expect("support source");
-            let config = root.join("deno.json");
-            let lock = root.join("deno.lock");
-            fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
-            fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
-            Self {
-                root,
-                deno,
-                cargo,
-                git,
-                source_root,
-                entrypoint,
-                config,
-                lock,
-                cache,
-            }
-        }
-
-        fn qualification(&self) -> InstalledRuntimeQualification {
-            InstalledRuntimeQualification {
-                deno_executable: self.deno.clone(),
-                host_source_root: self.source_root.clone(),
-                host_entrypoint: self.entrypoint.clone(),
-                deno_config: self.config.clone(),
-                deno_lock: self.lock.clone(),
-                deno_dir: self.cache.clone(),
-                host_source_files: vec![
-                    RuntimeRelativePath::parse("main.ts").expect("main path"),
-                    RuntimeRelativePath::parse("support.ts").expect("support path"),
-                ],
-                cache_probe_module: RuntimeRelativePath::parse("support.ts")
-                    .expect("safe cache probe path"),
-                pi_version: "0.84.1".to_owned(),
-            }
-        }
-
-        fn qualify(&self) -> InstalledRuntimeManifest {
-            InstalledRuntimeManifest::qualify(self.qualification()).expect("qualify fake runtime")
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
-    fn assert_drift(result: Result<(), InstalledRuntimeError>, evidence: &'static str) {
-        assert!(matches!(
-            result,
-            Err(InstalledRuntimeError::RuntimeDrift { evidence: actual }) if actual == evidence
-        ));
-    }
-
-    fn packet(manifest: &InstalledRuntimeManifest, workspace: &Path) -> AssignmentPacketV1 {
-        AssignmentPacketV1 {
-            format_version: factory_protocol::ASSIGNMENT_PACKET_V1_FORMAT,
-            campaign_id: CampaignId::new(1).unwrap(),
-            assignment_id: AssignmentId::new(2).unwrap(),
-            kernel_build_id: KernelBuildId::new(ContentDigest::of_bytes(b"build")),
-            application_revision_id: ApplicationRevisionId::new(3).unwrap(),
-            assignment_role: AssignmentRole::Engineering,
-            target: "runtime identity test".to_owned(),
-            ticket_attempt_id: Some(factory_protocol::TicketAttemptId::new(1).unwrap()),
-            candidate_id: None,
-            system_prompt_artifact_id: ArtifactId::new(4).unwrap(),
-            assignment_prompt_artifact_id: ArtifactId::new(5).unwrap(),
-            required_read_manifest_artifact_id: ArtifactId::new(6).unwrap(),
-            workspace_root: AbsoluteHostPath::parse(workspace.to_string_lossy().to_string())
-                .unwrap(),
-            staging_root: AbsoluteHostPath::parse("/tmp/runtime-identity-staging").unwrap(),
-            model: ModelProfileV1 {
-                provider: "fake".to_owned(),
-                model_id: "fake-model".to_owned(),
-                thinking_level: ThinkingLevelV1::None,
-                context_token_limit: 1,
-                output_token_limit: 1,
-                price_input_micro_usd_per_million_tokens: MicroUsd::new(1),
-                price_output_micro_usd_per_million_tokens: MicroUsd::new(1),
-                price_cache_read_micro_usd_per_million_tokens: MicroUsd::new(1),
-                price_cache_write_micro_usd_per_million_tokens: MicroUsd::new(1),
-                capability_flags: Vec::new(),
-            },
-            limits: SessionLimitsV1 {
-                turn_limit: 1,
-                wall_limit: DurationMillis::new(1),
-                output_byte_limit: 1,
-            },
-            runtime: factory_protocol::RuntimeIdentityV1 {
-                deno_executable: AbsoluteHostPath::parse(
-                    manifest.deno_executable().to_string_lossy().to_string(),
-                )
-                .unwrap(),
-                deno_version: manifest.deno_version().to_owned(),
-                source_graph_digest: manifest.source_graph_digest(),
-                resolved_dependency_graph_digest: manifest.resolved_dependency_graph_digest(),
-                deno_json_digest: manifest.deno_json_digest(),
-                deno_lock_digest: manifest.deno_lock_digest(),
-                pi_version: manifest.pi_version().to_owned(),
-                credential: CredentialDescriptorV1::Environment {
-                    name: "FAKE_PROVIDER_KEY".to_owned(),
-                },
-            },
-            required_reads: vec![ReadExactFileV1 {
-                path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
-                digest: ContentDigest::of_bytes(b"read"),
-                reason: "test".to_owned(),
-            }],
-            assignment_evidence: vec![AssignmentEvidenceV1 {
-                role: AssignmentEvidenceRoleV1::TicketProposal,
-                artifact_id: ArtifactId::new(7).unwrap(),
-                digest: ContentDigest::of_bytes(b"proposal"),
-                byte_length: 0,
-            }],
-            terminal_operations: vec![TerminalOperationV1::WorkComplete],
-            remaining_campaign_allowance: MicroUsd::new(1),
-            revision: AggregateRevision::initial(),
-            packet_digest: ContentDigest::of_bytes(b"packet"),
-        }
-    }
-
-    fn installed_build_receipt(fixture: &Fixture) -> InstalledKernelBuildReceiptV1 {
-        let runtime = fixture.qualify();
-        let source = qualify_kernel_source_v1(
-            &fixture.source_root,
-            &[
-                RuntimeRelativePath::parse("main.ts").unwrap(),
-                RuntimeRelativePath::parse("support.ts").unwrap(),
-            ],
-        )
-        .expect("kernel source qualification");
-        let binary = qualify_kernel_binary_v1(&fixture.deno).expect("kernel binary qualification");
-        let approved_tools =
-            InstalledApprovedToolsQualificationV1::qualify(&fixture.cargo, &fixture.git)
-                .expect("approved tool qualification");
-        InstalledKernelBuildReceiptV1::from_qualifications(
-            "factory-v3-schema:test-receipt".to_owned(),
-            source,
-            binary,
-            approved_tools,
-            runtime,
-            "OPENROUTER_API_KEY".to_owned(),
-        )
-        .expect("qualified build receipt")
-    }
-
-    #[test]
-    fn qualification_captures_exact_deno_graph_and_frozen_cache() {
-        let fixture = Fixture::new("qualifies");
-        let manifest = fixture.qualify();
-
-        assert_eq!(
-            manifest.deno_executable(),
-            fs::canonicalize(&fixture.deno).unwrap().as_path()
-        );
-        assert_eq!(manifest.deno_version(), "2.9.4");
-        assert_eq!(manifest.pi_version(), "0.84.1");
-        assert_eq!(manifest.source_files().len(), 2);
-        assert_ne!(manifest.source_graph_digest(), ContentDigest::of_bytes(b""));
-        assert_ne!(
-            manifest.resolved_dependency_graph_digest(),
-            ContentDigest::of_bytes(b"")
-        );
-        manifest
-            .verify_installed_material()
-            .expect("qualified material remains exact");
-    }
-
-    #[test]
-    fn installed_build_receipt_restores_closed_runtime_and_credential_name_only() {
-        let fixture = Fixture::new("build-receipt");
-        let receipt = installed_build_receipt(&fixture);
-        let bytes = receipt.encode().expect("encode receipt");
-        assert!(
-            !bytes
-                .windows(b"operator-secret-value".len())
-                .any(|bytes| bytes == b"operator-secret-value")
-        );
-
-        let restored = InstalledKernelBuildReceiptV1::decode(&bytes).expect("decode receipt");
-        assert_eq!(restored, receipt);
-        restored
-            .verify_installed_material("factory-v3-schema:test-receipt")
-            .expect("restored receipt requalifies local material");
-        let runtime = restored
-            .runtime_identity_for_provider("openrouter")
-            .expect("configured provider runtime identity");
-        assert_eq!(runtime.deno_version, "2.9.4");
-        assert!(matches!(
-            runtime.credential,
-            CredentialDescriptorV1::Environment { name } if name == "OPENROUTER_API_KEY"
-        ));
-        assert!(restored.runtime_identity_for_provider("other").is_err());
-
-        let spawn = restored
-            .pi_host_spawn_spec_for_provider(
-                "openrouter",
-                fixture.root.clone(),
-                0,
-                (
-                    OsString::from("OPENROUTER_API_KEY"),
-                    OsString::from("operator-secret-value"),
-                ),
-            )
-            .expect("build exact launch specification");
-        let canonical_cache = fs::canonicalize(&fixture.cache).expect("canonical fixture cache");
-        assert_eq!(spawn.deno_dir(), Some(canonical_cache.as_path()));
-        let actor_path = spawn
-            .environment()
-            .iter()
-            .find_map(|(name, value)| (name == OsStr::new("PATH")).then_some(value))
-            .expect("kernel-owned actor PATH");
-        let actor_directories = env::split_paths(actor_path).collect::<Vec<_>>();
-        assert!(
-            actor_directories.contains(
-                &fs::canonicalize(fixture.cargo.parent().expect("Cargo parent"))
-                    .expect("canonical Cargo parent")
-            )
-        );
-        assert!(
-            actor_directories.contains(
-                &fs::canonicalize(fixture.git.parent().expect("Git parent"))
-                    .expect("canonical Git parent")
-            )
-        );
-        assert!(
-            restored
-                .pi_host_spawn_spec_for_provider(
-                    "openrouter",
-                    fixture.root.clone(),
-                    0,
-                    (OsString::from("WRONG_KEY"), OsString::from("value")),
-                )
-                .is_err()
-        );
-
-        fs::write(
-            fixture.source_root.join("support.ts"),
-            "export const value = 2;\n",
-        )
-        .expect("drift source graph");
-        assert!(
-            restored
-                .verify_installed_material("factory-v3-schema:test-receipt")
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn host_source_graph_drift_blocks_runtime_admission() {
-        let fixture = Fixture::new("source-drift");
-        let manifest = fixture.qualify();
-        fs::write(
-            fixture.source_root.join("support.ts"),
-            "export const value = 2;\n",
-        )
-        .expect("mutate source");
-        assert_drift(
-            manifest.verify_installed_material(),
-            "Pi host source graph digest changed",
-        );
-    }
-
-    #[test]
-    fn host_source_graph_rejects_omitted_local_files_and_later_additions() {
-        let fixture = Fixture::new("closed-root-inventory");
-        fs::write(
-            fixture.source_root.join("omitted-local-import.ts"),
-            "export const omitted = true;\n",
-        )
-        .expect("add omitted local source");
-        assert!(matches!(
-            InstalledRuntimeManifest::qualify(fixture.qualification()),
-            Err(InstalledRuntimeError::UndeclaredSourceFile { path })
-                if path == "omitted-local-import.ts"
-        ));
-
-        fs::remove_file(fixture.source_root.join("omitted-local-import.ts"))
-            .expect("remove omitted local source");
-        let manifest = fixture.qualify();
-        fs::write(
-            fixture.source_root.join("new-local-import.ts"),
-            "export const newlyVisible = true;\n",
-        )
-        .expect("add new local source after qualification");
-        assert!(matches!(
-            manifest.verify_installed_material(),
-            Err(InstalledRuntimeError::UndeclaredSourceFile { path })
-                if path == "new-local-import.ts"
-        ));
-    }
-
-    #[test]
-    fn config_lock_and_cache_drift_are_individually_observable() {
-        let fixture = Fixture::new("config-drift");
-        let manifest = fixture.qualify();
-        fs::write(&fixture.config, "{\"nodeModulesDir\":\"auto\"}\n").expect("mutate config");
-        assert_drift(
-            manifest.verify_installed_material(),
-            "Deno config digest changed",
-        );
-
-        let fixture = Fixture::new("lock-drift");
-        let manifest = fixture.qualify();
-        fs::write(&fixture.lock, "{\"version\":\"6\"}\n").expect("mutate lock");
-        assert_drift(
-            manifest.verify_installed_material(),
-            "Deno lock digest changed",
-        );
-    }
-
-    #[test]
-    fn exact_deno_version_and_build_specific_cache_are_rechecked() {
-        let fixture = Fixture::new("version-and-cache-drift");
-        let manifest = fixture.qualify();
-        fs::write(
-            &fixture.deno,
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.5 (stable)\\n'; exit 0; fi\nif [ \"$1\" = \"check\" ]; then exit 0; fi\nexit 17\n",
-        )
-        .expect("mutate deno");
-        fs::set_permissions(&fixture.deno, fs::Permissions::from_mode(0o755))
-            .expect("make changed fake deno executable");
-        assert_drift(
-            manifest.verify_installed_material(),
-            "exact Deno --version output changed",
-        );
-
-        let fixture = Fixture::new("cache-drift");
-        let manifest = fixture.qualify();
-        fs::remove_file(fixture.cache.join("qualified")).expect("remove cache marker");
-        assert!(matches!(
-            manifest.verify_installed_material(),
-            Err(InstalledRuntimeError::FrozenCacheProbeFailed { status: Some(17) })
-        ));
-    }
-
-    #[test]
-    fn installation_rejects_unpinned_deno_and_pi_versions() {
-        let fixture = Fixture::new("unpinned-deno");
-        let script = fs::read_to_string(&fixture.deno)
-            .expect("read fake Deno")
-            .replace("deno 2.9.4", "deno 2.9.5");
-        fs::write(&fixture.deno, script).expect("write changed fake Deno");
-        fs::set_permissions(&fixture.deno, fs::Permissions::from_mode(0o755))
-            .expect("retain executable mode");
-        assert!(matches!(
-            InstalledRuntimeManifest::qualify(fixture.qualification()),
-            Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Deno",
-                expected: "2.9.4",
-                actual,
-            }) if actual == "2.9.5"
-        ));
-
-        let fixture = Fixture::new("unpinned-pi");
-        let mut qualification = fixture.qualification();
-        qualification.pi_version = "0.84.2".to_owned();
-        assert!(matches!(
-            InstalledRuntimeManifest::qualify(qualification),
-            Err(InstalledRuntimeError::RuntimeVersionNotPinned {
-                component: "Pi SDK",
-                expected: "0.84.1",
-                actual,
-            }) if actual == "0.84.2"
-        ));
-    }
-
-    #[test]
-    fn installed_build_receipt_rejects_cargo_and_git_drift() {
-        for (label, changed) in [("cargo-drift", "cargo"), ("git-drift", "git")] {
-            let fixture = Fixture::new(label);
-            let receipt = installed_build_receipt(&fixture);
-            let path = if changed == "cargo" {
-                &fixture.cargo
-            } else {
-                &fixture.git
-            };
-            fs::write(path, "#!/bin/sh\necho drift\n").expect("mutate approved executable");
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-                .expect("retain executable mode after drift");
-            assert!(
-                receipt
-                    .verify_installed_material("factory-v3-schema:test-receipt")
-                    .is_err(),
-                "{changed} drift must reject the installed build before serve"
-            );
-        }
-    }
-
-    #[test]
-    fn pinned_deno_check_probe_uses_supported_no_remote_deno_2_9_contract() {
-        let deno = ["/opt/homebrew/bin/deno", "/usr/local/bin/deno"]
-            .into_iter()
-            .map(PathBuf::from)
-            .find(|path| path.is_file())
-            .expect("the pinned Deno 2.9 runtime is required for installed-runtime qualification");
-        let root = std::env::temp_dir().join(format!(
-            "factory-v3-real-deno-probe-{}-{}",
-            std::process::id(),
-            fastrand::u64(..)
-        ));
-        let source = root.join("host");
-        let cache = root.join("deno-cache");
-        fs::create_dir_all(&source).expect("real Deno source root");
-        fs::create_dir(&cache).expect("real Deno cache root");
-        let entrypoint = source.join("main.ts");
-        let cache_probe = source.join("probe.ts");
-        let config = root.join("deno.json");
-        let lock = root.join("deno.lock");
-        fs::write(&entrypoint, "export const qualified = true;\n").expect("entrypoint");
-        fs::write(&cache_probe, "export {};\n").expect("safe cache probe");
-        fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
-        fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
-        let manifest = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
-            deno_executable: deno,
-            host_source_root: source,
-            host_entrypoint: entrypoint,
-            deno_config: config,
-            deno_lock: lock,
-            deno_dir: cache,
-            host_source_files: vec![
-                RuntimeRelativePath::parse("main.ts").expect("path"),
-                RuntimeRelativePath::parse("probe.ts").expect("path"),
-            ],
-            cache_probe_module: RuntimeRelativePath::parse("probe.ts").expect("path"),
-            pi_version: "0.84.1".to_owned(),
-        })
-        .expect("Deno 2.9 qualifies an explicit inert cache probe");
-        manifest
-            .verify_installed_material()
-            .expect("the same real Deno 2.9 probe remains re-verifiable");
-        fs::remove_dir_all(root).expect("remove real Deno probe fixture");
-    }
-
-    #[test]
-    fn deno_resolved_local_import_cannot_escape_closed_host_root() {
-        let deno = ["/opt/homebrew/bin/deno", "/usr/local/bin/deno"]
-            .into_iter()
-            .map(PathBuf::from)
-            .find(|path| path.is_file())
-            .expect("the pinned Deno 2.9 runtime is required for installed-runtime qualification");
-        let root = std::env::temp_dir().join(format!(
-            "factory-v3-real-deno-outside-import-{}-{}",
-            std::process::id(),
-            fastrand::u64(..)
-        ));
-        let source = root.join("host");
-        let cache = root.join("deno-cache");
-        fs::create_dir_all(&source).expect("real Deno source root");
-        fs::create_dir(&cache).expect("real Deno cache root");
-        fs::write(root.join("outside.ts"), "export const outside = true;\n")
-            .expect("outside module");
-        let entrypoint = source.join("main.ts");
-        let cache_probe = source.join("probe.ts");
-        fs::write(&entrypoint, "import '../outside.ts';\n").expect("entrypoint import");
-        fs::write(&cache_probe, "export {};\n").expect("safe cache probe");
-        let config = root.join("deno.json");
-        let lock = root.join("deno.lock");
-        fs::write(&config, "{\"nodeModulesDir\":\"none\"}\n").expect("config");
-        fs::write(&lock, "{\"version\":\"5\"}\n").expect("lock");
-        assert!(matches!(
-            InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
-                deno_executable: deno,
-                host_source_root: source,
-                host_entrypoint: entrypoint,
-                deno_config: config,
-                deno_lock: lock,
-                deno_dir: cache,
-                host_source_files: vec![
-                    RuntimeRelativePath::parse("main.ts").expect("path"),
-                    RuntimeRelativePath::parse("probe.ts").expect("path"),
-                ],
-                cache_probe_module: RuntimeRelativePath::parse("probe.ts").expect("path"),
-                pi_version: "0.84.1".to_owned(),
-            }),
-            Err(InstalledRuntimeError::DenoLocalModuleOutsideSourceRoot { .. })
-        ));
-        fs::remove_dir_all(root).expect("remove real Deno outside-import fixture");
-    }
-
-    #[test]
-    fn runtime_identity_requires_the_exact_cached_only_fd_zero_spawn() {
-        let fixture = Fixture::new("spawn-identity");
-        let manifest = fixture.qualify();
-        let workspace = fixture.root.join("workspace");
-        fs::create_dir(&workspace).expect("workspace");
-        let packet = packet(&manifest, &workspace);
-        let spawn = PiHostSpawnSpec::new_for_assignment(
-            manifest.deno_executable().to_owned(),
-            manifest.host_entrypoint().to_owned(),
-            manifest.deno_config().to_owned(),
-            manifest.deno_lock().to_owned(),
-            workspace.clone(),
-            0,
-            manifest.deno_dir().to_owned(),
-            vec![(
-                OsString::from("FAKE_PROVIDER_KEY"),
-                OsString::from("secret"),
-            )],
-        )
-        .expect("exact spawn specification");
-        manifest
-            .verify_runtime_identity(&packet, &spawn)
-            .expect("exact assignment runtime identity");
-
-        let mut dependency_drift_packet = packet.clone();
-        dependency_drift_packet
-            .runtime
-            .resolved_dependency_graph_digest =
-            ContentDigest::of_bytes(b"different resolved graph");
-        assert_drift(
-            manifest.verify_runtime_identity(&dependency_drift_packet, &spawn),
-            "assignment packet runtime identity is not the installed manifest",
-        );
-
-        let mut pi_version_drift_packet = packet.clone();
-        pi_version_drift_packet.runtime.pi_version = "0.84.2".to_owned();
-        assert_drift(
-            manifest.verify_runtime_identity(&pi_version_drift_packet, &spawn),
-            "assignment packet runtime identity is not the installed manifest",
-        );
-
-        let ambient_cache_spawn = PiHostSpawnSpec::new(
-            manifest.deno_executable().to_owned(),
-            manifest.host_entrypoint().to_owned(),
-            manifest.deno_config().to_owned(),
-            manifest.deno_lock().to_owned(),
-            workspace,
-            0,
-            Vec::new(),
-        )
-        .expect("regular spawn specification");
-        assert_drift(
-            manifest.verify_runtime_identity(&packet, &ambient_cache_spawn),
-            "Pi host spawn specification differs from the installed assignment runtime",
-        );
-    }
-
-    #[test]
-    fn source_graph_cannot_hide_duplicate_or_outside_paths() {
-        let fixture = Fixture::new("closed-graph");
-        let mut qualification = fixture.qualification();
-        qualification
-            .host_source_files
-            .push(RuntimeRelativePath::parse("main.ts").unwrap());
-        assert!(matches!(
-            InstalledRuntimeManifest::qualify(qualification),
-            Err(InstalledRuntimeError::DuplicateSourceGraphPath { path }) if path == "main.ts"
-        ));
-
-        let outside = fixture.root.join("outside.ts");
-        fs::write(&outside, "export const outside = true;\n").unwrap();
-        std::os::unix::fs::symlink(&outside, fixture.source_root.join("escape.ts"))
-            .expect("source-root escape symlink");
-        let mut qualification = fixture.qualification();
-        qualification
-            .host_source_files
-            .push(RuntimeRelativePath::parse("escape.ts").unwrap());
-        let result = InstalledRuntimeManifest::qualify(qualification);
-        assert!(matches!(
-            result,
-            Err(InstalledRuntimeError::SourceGraphSymlink { ref path })
-                if path == &fs::canonicalize(&fixture.source_root).unwrap().join("escape.ts")
-        ));
-    }
 }

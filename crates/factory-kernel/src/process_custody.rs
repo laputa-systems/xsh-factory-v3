@@ -1,10 +1,12 @@
-//! Exact launch contract for one daemon-supervised actor host.
+//! Exact launch contract for one daemon-supervised Rust actor host.
 //!
 //! Spawning is deliberately split from durable session admission. The child
 //! inherits one already-connected actor descriptor and must wait for the
-//! daemon's `session.admitted` frame before constructing a Pi session. This
+//! daemon's `session.admitted` frame before constructing an agent. This
 //! prevents a spawned child from making a provider request before its exact
-//! PID/PGID and assignment identity have committed in PostgreSQL.
+//! PID/PGID and assignment identity have committed in PostgreSQL. The kernel
+//! launches one already-qualified executable with no interpreter, package
+//! cache, script, or resume arguments.
 
 use std::{
     collections::BTreeSet,
@@ -33,43 +35,32 @@ use thiserror::Error;
 
 /// Environment names supplied by the kernel itself rather than by an
 /// application command or credential descriptor.
-const KERNEL_ENVIRONMENT_NAMES: [&str; 4] =
-    ["DENO_DIR", "DENO_NO_UPDATE_CHECK", "NO_COLOR", "PATH"];
+const KERNEL_ENVIRONMENT_NAMES: [&str; 2] = ["NO_COLOR", "PATH"];
 
-/// Immutable process inputs for one Deno Pi host.
+/// Immutable process inputs for one Rust agent host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PiHostSpawnSpec {
-    deno_executable: PathBuf,
-    host_entrypoint: PathBuf,
-    deno_config: PathBuf,
-    deno_lock: PathBuf,
+    host_executable: PathBuf,
     working_directory: PathBuf,
     actor_source_fd: RawFd,
-    deno_dir: Option<PathBuf>,
     environment: Vec<(OsString, OsString)>,
 }
 
 impl PiHostSpawnSpec {
-    /// Builds the exact provider-capable Deno launch contract.
+    /// Builds the exact provider-capable Rust host launch contract.
     ///
     /// `admitted_environment` is already selected by typed application and
     /// credential policy. This constructor still rejects duplicates and the
     /// kernel-owned names, so an application cannot replace descriptor or
     /// update-check custody accidentally.
     pub fn new(
-        deno_executable: PathBuf,
-        host_entrypoint: PathBuf,
-        deno_config: PathBuf,
-        deno_lock: PathBuf,
+        host_executable: PathBuf,
         working_directory: PathBuf,
         actor_source_fd: RawFd,
         admitted_environment: Vec<(OsString, OsString)>,
     ) -> Result<Self, ProcessCustodyError> {
         for (field, path) in [
-            ("Deno executable", deno_executable.as_path()),
-            ("Pi host entrypoint", host_entrypoint.as_path()),
-            ("Deno config", deno_config.as_path()),
-            ("Deno lock", deno_lock.as_path()),
+            ("Rust agent host executable", host_executable.as_path()),
             ("working directory", working_directory.as_path()),
         ] {
             require_absolute_path(field, path)?;
@@ -94,60 +85,34 @@ impl PiHostSpawnSpec {
             }
         }
 
-        let mut environment = Vec::with_capacity(admitted_environment.len() + 3);
-        environment.push((OsString::from("DENO_NO_UPDATE_CHECK"), OsString::from("1")));
+        let mut environment = Vec::with_capacity(admitted_environment.len() + 2);
         environment.push((OsString::from("NO_COLOR"), OsString::from("1")));
         environment.push((OsString::from("PATH"), OsString::from("/usr/bin:/bin")));
         environment.extend(admitted_environment);
 
         Ok(Self {
-            deno_executable,
-            host_entrypoint,
-            deno_config,
-            deno_lock,
+            host_executable,
             working_directory,
             actor_source_fd,
-            deno_dir: None,
             environment,
         })
     }
 
-    /// Assignment-only constructor which installs the kernel-owned Deno
-    /// cache directory.  `--cached-only` must never consult an ambient
-    /// `HOME`/`DENO_DIR`; the caller-supplied environment cannot replace this
-    /// value or provide a second `DENO_DIR` entry.
+    /// Assignment-only constructor. Runtime identity and capability policy
+    /// are carried in the inherited admission packet; the process receives
+    /// no filesystem cache or script path from the assignment.
     pub fn new_for_assignment(
-        deno_executable: PathBuf,
-        host_entrypoint: PathBuf,
-        deno_config: PathBuf,
-        deno_lock: PathBuf,
+        host_executable: PathBuf,
         working_directory: PathBuf,
         actor_source_fd: RawFd,
-        deno_dir: PathBuf,
         admitted_environment: Vec<(OsString, OsString)>,
     ) -> Result<Self, ProcessCustodyError> {
-        require_absolute_path("DENO_DIR", &deno_dir)?;
-        if admitted_environment
-            .iter()
-            .any(|(name, _)| name == OsStr::new("DENO_DIR"))
-        {
-            return Err(ProcessCustodyError::DuplicateEnvironmentName {
-                name: OsString::from("DENO_DIR"),
-            });
-        }
-        let mut spec = Self::new(
-            deno_executable,
-            host_entrypoint,
-            deno_config,
-            deno_lock,
+        Self::new(
+            host_executable,
             working_directory,
             actor_source_fd,
             admitted_environment,
-        )?;
-        spec.deno_dir = Some(deno_dir.clone());
-        spec.environment
-            .insert(2, (OsString::from("DENO_DIR"), deno_dir.into_os_string()));
-        Ok(spec)
+        )
     }
 
     /// Replaces the conservative system-only path with the exact path derived
@@ -178,52 +143,15 @@ impl PiHostSpawnSpec {
 
     #[must_use]
     pub fn executable(&self) -> &Path {
-        &self.deno_executable
+        &self.host_executable
     }
 
-    /// The sealed generic host entrypoint selected by installed-build
-    /// qualification. It is not actor-controlled launch input.
-    #[must_use]
-    pub fn host_entrypoint(&self) -> &Path {
-        &self.host_entrypoint
-    }
-
-    /// The exact frozen Deno import-map/configuration file.
-    #[must_use]
-    pub fn deno_config(&self) -> &Path {
-        &self.deno_config
-    }
-
-    /// The exact frozen Deno lockfile.
-    #[must_use]
-    pub fn deno_lock(&self) -> &Path {
-        &self.deno_lock
-    }
-
-    /// The installed, build-specific Deno cache selected for this assignment.
-    /// A regular process spec has no cache identity and cannot pass runtime
-    /// admission for a provider-capable actor host.
-    #[must_use]
-    pub fn deno_dir(&self) -> Option<&Path> {
-        self.deno_dir.as_deref()
-    }
-
-    /// Exact Deno arguments. No Pi CLI, package installation, update, or
-    /// session-resume argument can be added by an actor packet.
+    /// Exact Rust host arguments. The host receives all assignment material
+    /// over the inherited framed descriptor; no CLI can select a packet,
+    /// session, package, or resume state.
     #[must_use]
     pub fn arguments(&self) -> Vec<OsString> {
-        vec![
-            OsString::from("run"),
-            OsString::from("-A"),
-            OsString::from("--no-prompt"),
-            OsString::from("--frozen"),
-            OsString::from("--cached-only"),
-            OsString::from("--config"),
-            self.deno_config.as_os_str().to_owned(),
-            OsString::from("--lock"),
-            self.deno_lock.as_os_str().to_owned(),
-            self.host_entrypoint.as_os_str().to_owned(),
-        ]
+        Vec::new()
     }
 
     #[must_use]
@@ -434,9 +362,9 @@ pub struct SupervisedProcessOutcome {
     pub stderr_bytes: u64,
 }
 
-/// Spawns one exact Deno host behind its inherited connected socket. The
-/// socket becomes child descriptor zero; the Deno host reads the admission
-/// frame before constructing Pi and then uses the same full-duplex descriptor
+/// Spawns one exact Rust host behind its inherited connected socket. The
+/// socket becomes child descriptor zero; the host reads the admission frame
+/// before constructing an agent and then uses the same full-duplex descriptor
 /// for narrow tools. The caller retains the socket's server end.
 pub fn spawn_pi_host(
     spec: &PiHostSpawnSpec,
@@ -725,10 +653,7 @@ mod tests {
 
     fn spec(environment: Vec<(OsString, OsString)>) -> PiHostSpawnSpec {
         PiHostSpawnSpec::new(
-            PathBuf::from("/opt/deno"),
-            PathBuf::from("/factory/packages/factory-pi-host/main.ts"),
-            PathBuf::from("/factory/deno.json"),
-            PathBuf::from("/factory/deno.lock"),
+            PathBuf::from("/factory/factory-pi-host"),
             PathBuf::from("/work/repository"),
             0,
             environment,
@@ -737,34 +662,18 @@ mod tests {
     }
 
     #[test]
-    fn exact_deno_launch_has_no_node_install_update_or_resume_path() {
+    fn exact_rust_launch_has_no_interpreter_install_or_resume_path() {
         let spec = spec(vec![(
             OsString::from("ANTHROPIC_API_KEY"),
             OsString::from("secret"),
         )]);
-        assert_eq!(spec.executable(), Path::new("/opt/deno"));
-        assert_eq!(
-            spec.arguments(),
-            [
-                "run",
-                "-A",
-                "--no-prompt",
-                "--frozen",
-                "--cached-only",
-                "--config",
-                "/factory/deno.json",
-                "--lock",
-                "/factory/deno.lock",
-                "/factory/packages/factory-pi-host/main.ts",
-            ]
-            .map(OsString::from)
-        );
+        assert_eq!(spec.executable(), Path::new("/factory/factory-pi-host"));
+        assert!(spec.arguments().is_empty());
         assert_eq!(spec.working_directory(), Path::new("/work/repository"));
         assert_eq!(spec.actor_source_fd(), 0);
         assert_eq!(
             spec.environment(),
             [
-                (OsString::from("DENO_NO_UPDATE_CHECK"), OsString::from("1")),
                 (OsString::from("NO_COLOR"), OsString::from("1")),
                 (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
                 (
@@ -778,10 +687,7 @@ mod tests {
     #[test]
     fn rejects_relative_paths_non_stdin_descriptors_and_environment_ambiguity() {
         let relative = PiHostSpawnSpec::new(
-            PathBuf::from("deno"),
-            PathBuf::from("/host.ts"),
-            PathBuf::from("/deno.json"),
-            PathBuf::from("/deno.lock"),
+            PathBuf::from("factory-pi-host"),
             PathBuf::from("/work"),
             0,
             Vec::new(),
@@ -789,15 +695,12 @@ mod tests {
         assert!(matches!(
             relative,
             Err(ProcessCustodyError::PathNotAbsolute {
-                field: "Deno executable"
+                field: "Rust agent host executable"
             })
         ));
 
         let invalid_fd = PiHostSpawnSpec::new(
-            PathBuf::from("/deno"),
-            PathBuf::from("/host.ts"),
-            PathBuf::from("/deno.json"),
-            PathBuf::from("/deno.lock"),
+            PathBuf::from("/factory-pi-host"),
             PathBuf::from("/work"),
             -1,
             Vec::new(),
@@ -810,10 +713,7 @@ mod tests {
         ));
 
         let non_stdin_fd = PiHostSpawnSpec::new(
-            PathBuf::from("/deno"),
-            PathBuf::from("/host.ts"),
-            PathBuf::from("/deno.json"),
-            PathBuf::from("/deno.lock"),
+            PathBuf::from("/factory-pi-host"),
             PathBuf::from("/work"),
             3,
             Vec::new(),
@@ -824,66 +724,34 @@ mod tests {
         ));
 
         let replaced = PiHostSpawnSpec::new(
-            PathBuf::from("/deno"),
-            PathBuf::from("/host.ts"),
-            PathBuf::from("/deno.json"),
-            PathBuf::from("/deno.lock"),
+            PathBuf::from("/factory-pi-host"),
             PathBuf::from("/work"),
             0,
-            vec![(OsString::from("DENO_NO_UPDATE_CHECK"), OsString::from("0"))],
+            vec![(OsString::from("NO_COLOR"), OsString::from("0"))],
         );
         assert!(matches!(
             replaced,
             Err(ProcessCustodyError::DuplicateEnvironmentName { name })
-                if name == "DENO_NO_UPDATE_CHECK"
-        ));
-
-        let ambient_cache = PiHostSpawnSpec::new(
-            PathBuf::from("/deno"),
-            PathBuf::from("/host.ts"),
-            PathBuf::from("/deno.json"),
-            PathBuf::from("/deno.lock"),
-            PathBuf::from("/work"),
-            0,
-            vec![(OsString::from("DENO_DIR"), OsString::from("/ambient/cache"))],
-        );
-        assert!(matches!(
-            ambient_cache,
-            Err(ProcessCustodyError::DuplicateEnvironmentName { name })
-                if name == "DENO_DIR"
+                if name == "NO_COLOR"
         ));
     }
 
     #[test]
-    fn assignment_spawn_spec_owns_one_explicit_deno_cache() {
+    fn assignment_spawn_spec_has_no_ambient_runtime_state() {
         let spec = PiHostSpawnSpec::new_for_assignment(
-            PathBuf::from("/opt/deno"),
-            PathBuf::from("/factory/packages/factory-pi-host/main.ts"),
-            PathBuf::from("/factory/deno.json"),
-            PathBuf::from("/factory/deno.lock"),
+            PathBuf::from("/factory/factory-pi-host"),
             PathBuf::from("/work/repository"),
             0,
-            PathBuf::from("/factory/runtime/deno-cache"),
             Vec::new(),
         )
         .expect("assignment spawn spec");
 
-        assert_eq!(
-            spec.host_entrypoint(),
-            Path::new("/factory/packages/factory-pi-host/main.ts")
-        );
-        assert_eq!(spec.deno_config(), Path::new("/factory/deno.json"));
-        assert_eq!(spec.deno_lock(), Path::new("/factory/deno.lock"));
-        assert_eq!(
-            spec.deno_dir(),
-            Some(Path::new("/factory/runtime/deno-cache"))
-        );
-        assert_eq!(
-            spec.environment()
-                .iter()
-                .filter(|(name, _)| name == OsStr::new("DENO_DIR"))
-                .count(),
-            1
+        assert_eq!(spec.executable(), Path::new("/factory/factory-pi-host"));
+        assert!(spec.arguments().is_empty());
+        assert!(
+            !spec.environment().iter().any(|(name, _)| {
+                name == OsStr::new("HOME") || name == OsStr::new("PI_SESSION")
+            })
         );
     }
 

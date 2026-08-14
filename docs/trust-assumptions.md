@@ -20,8 +20,8 @@ network mediation, and credential brokers are not implied safeguards.
 
 ## Manual deployment boundary
 
-The factory cannot upgrade its Rust binary, executable Deno source, locks,
-schema, local Pi-headless revision, or boot logic. The operator changes and
+The factory cannot upgrade its Rust binary, sealed Rust application/policy
+source, locks, schema, local `pi-agent-core-rs` revision, or boot logic. The operator changes and
 qualifies those inputs while the daemon is stopped. The kernel records their
 identity but does not claim automatic rollback or self-activation.
 

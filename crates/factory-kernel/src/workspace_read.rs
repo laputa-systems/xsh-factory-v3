@@ -16,7 +16,7 @@ use std::{
 
 use factory_protocol::{
     ContentDigest, OP_WORKSPACE_READ, PROTOCOL_VERSION_V1, RESPONSE_FRAME_MAX_BYTES,
-    ReadExactFileV1, ReadObservationV1, RepositoryRelativePath, WorkspaceReadRequest,
+    ReadExactFileV2, ReadObservationV2, RepositoryRelativePath, WorkspaceReadRequest,
     WorkspaceReadResponse, decode_operation_request,
 };
 use miniserde::{Serialize, json};
@@ -35,7 +35,7 @@ pub struct WorkspaceReadAuthority {
     binding: ActorConnectionBinding,
     workspace_root: PathBuf,
     expected_manifest_artifact_id: factory_protocol::ArtifactId,
-    required: Vec<ReadExactFileV1>,
+    required: Vec<ReadExactFileV2>,
     observed: BTreeMap<RepositoryRelativePath, ContentDigest>,
 }
 
@@ -46,7 +46,7 @@ impl WorkspaceReadAuthority {
         binding: ActorConnectionBinding,
         workspace_root: &Path,
         expected_manifest_artifact_id: factory_protocol::ArtifactId,
-        mut required: Vec<ReadExactFileV1>,
+        mut required: Vec<ReadExactFileV2>,
     ) -> Result<Self, WorkspaceReadError> {
         let workspace_root =
             fs::canonicalize(workspace_root).map_err(|source| WorkspaceReadError::Io {
@@ -90,7 +90,7 @@ impl WorkspaceReadAuthority {
     pub(crate) fn empty_after_daemon_restart(
         binding: ActorConnectionBinding,
         expected_manifest_artifact_id: factory_protocol::ArtifactId,
-        mut required: Vec<ReadExactFileV1>,
+        mut required: Vec<ReadExactFileV2>,
     ) -> Result<Self, WorkspaceReadError> {
         required.sort_by(|left, right| left.path.cmp(&right.path));
         if required.windows(2).any(|pair| pair[0].path == pair[1].path) {
@@ -372,8 +372,8 @@ struct WorkspaceReadResult {
 struct RequiredReadEvidence {
     binding: ActorConnectionBinding,
     expected_manifest_artifact_id: factory_protocol::ArtifactId,
-    expected: Vec<ReadExactFileV1>,
-    observed: Vec<ReadObservationV1>,
+    expected: Vec<ReadExactFileV2>,
+    observed: Vec<ReadObservationV2>,
     satisfied_count: u32,
     canonical_bytes: Vec<u8>,
 }
@@ -383,7 +383,7 @@ impl RequiredReadEvidence {
         let observed = authority
             .observed
             .into_iter()
-            .map(|(path, digest)| ReadObservationV1 { path, digest })
+            .map(|(path, digest)| ReadObservationV2 { path, digest })
             .collect::<Vec<_>>();
         let expected = authority.required;
         let satisfied_count = expected
@@ -427,11 +427,11 @@ impl SealedRequiredReadAssertion {
         self.evidence.expected_manifest_artifact_id
     }
 
-    pub(crate) fn expected(&self) -> &[ReadExactFileV1] {
+    pub(crate) fn expected(&self) -> &[ReadExactFileV2] {
         &self.evidence.expected
     }
 
-    pub(crate) fn observed(&self) -> &[ReadObservationV1] {
+    pub(crate) fn observed(&self) -> &[ReadObservationV2] {
         &self.evidence.observed
     }
 
@@ -475,8 +475,8 @@ struct AssertionObservedWire {
 fn canonical_assertion_bytes(
     binding: ActorConnectionBinding,
     expected_manifest_artifact_id: factory_protocol::ArtifactId,
-    required: &[ReadExactFileV1],
-    observed: &[ReadObservationV1],
+    required: &[ReadExactFileV2],
+    observed: &[ReadObservationV2],
 ) -> Vec<u8> {
     let required = required
         .iter()
@@ -503,7 +503,7 @@ fn canonical_assertion_bytes(
         })
         .collect();
     json::to_string(&AssertionManifestWire {
-        format: "factory-required-read-assertion-v1".to_owned(),
+        format: "factory-required-read-assertion-v2".to_owned(),
         session_id: binding.session_id().get(),
         assignment_id: binding.assignment_id().get(),
         expected_manifest_artifact_id: expected_manifest_artifact_id.get(),
@@ -667,7 +667,7 @@ mod tests {
             actor,
             &root,
             factory_protocol::ArtifactId::new(5).unwrap(),
-            vec![ReadExactFileV1 {
+            vec![ReadExactFileV2 {
                 path: RepositoryRelativePath::parse("docs/contract.md").unwrap(),
                 digest,
                 reason: "contract".to_owned(),
@@ -706,7 +706,7 @@ mod tests {
             actor,
             &root,
             factory_protocol::ArtifactId::new(7).unwrap(),
-            vec![ReadExactFileV1 {
+            vec![ReadExactFileV2 {
                 path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
                 digest: ContentDigest::of_bytes(b"rules"),
                 reason: "rules".to_owned(),
@@ -722,7 +722,7 @@ mod tests {
             .unwrap();
         let bytes = cas.read(sealed.artifact().digest()).unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
-        assert!(text.contains("factory-required-read-assertion-v1"));
+        assert!(text.contains("factory-required-read-assertion-v2"));
         assert!(text.contains("\"session_id\":11"));
         assert!(text.contains("\"missing\":[]"));
         assert_eq!(sealed.satisfied_count(), 1);
@@ -743,7 +743,7 @@ mod tests {
             actor,
             &root,
             factory_protocol::ArtifactId::new(8).unwrap(),
-            vec![ReadExactFileV1 {
+            vec![ReadExactFileV2 {
                 path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
                 digest: ContentDigest::of_bytes(b"rules"),
                 reason: "rules".to_owned(),
@@ -774,7 +774,7 @@ mod tests {
         let sealed = WorkspaceReadAuthority::empty_after_daemon_restart(
             binding(12),
             factory_protocol::ArtifactId::new(8).unwrap(),
-            vec![ReadExactFileV1 {
+            vec![ReadExactFileV2 {
                 path: RepositoryRelativePath::parse("AGENTS.md").unwrap(),
                 digest: ContentDigest::of_bytes(b"rules"),
                 reason: "rules".to_owned(),

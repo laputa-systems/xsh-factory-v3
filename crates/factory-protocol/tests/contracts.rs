@@ -1,14 +1,14 @@
 use std::{collections::BTreeMap, str::FromStr};
 
 use factory_protocol::{
-    APPLICATION_BUNDLE_V1_FORMAT, AbsoluteHostPath, ActorToolV1, AggregateRevision,
-    ApplicationBundleV1, ApplicationKey, ApplicationRelativePath, AssignmentRole,
-    AssignmentRoleProfileV1, CommandProfileV1, CommitMessagePolicyV1, ContentDigest,
-    CredentialDescriptorV1, DeliveryModeV1, DurationMillis, EnvironmentAdditionV1, ExecutableV1,
-    GitPolicyV1, MicroUsd, ModelCapabilityV1, ModelProfileV1, RepositoryBindingV1,
-    RepositoryRelativePath, RequiredReadV1, RuntimeRelativePath, SessionLimitsV1,
-    TemplateArtifactV1, TemplatePlaceholderV1, ThinkingLevelV1, TicketBoundsV1, TicketPolicyV1,
-    ValidationProfilesV1,
+    APPLICATION_BUNDLE_V2_FORMAT, AbsoluteHostPath, ActorPolicyArtifactV2, ActorToolV2,
+    AggregateRevision, ApplicationBundleV2, ApplicationKey, ApplicationRelativePath,
+    AssignmentRole, AssignmentRoleProfileV2, CommandProfileV2, CommitMessagePolicyV2,
+    ContentDigest, CredentialDescriptorV2, DeliveryModeV2, DurationMillis, EnvironmentAdditionV2,
+    ExecutableV2, GitPolicyV2, MicroUsd, ModelCapabilityV2, ModelProfileV2, PolicyEntrypointV2,
+    RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2, SessionLimitsV2,
+    TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketBoundsV2, TicketPolicyV2,
+    ValidationProfilesV2,
 };
 
 fn path(value: &str) -> RepositoryRelativePath {
@@ -23,22 +23,22 @@ fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
 }
 
-fn template(path_value: &str, byte: u8) -> TemplateArtifactV1 {
-    TemplateArtifactV1 {
+fn template(path_value: &str, byte: u8) -> TemplateArtifactV2 {
+    TemplateArtifactV2 {
         source_path: application_path(path_value),
         digest: digest(byte),
-        placeholders: vec![TemplatePlaceholderV1::parse("ASSIGNMENT_ID").expect("placeholder")],
+        placeholders: vec![TemplatePlaceholderV2::parse("ASSIGNMENT_ID").expect("placeholder")],
         rendered_byte_limit: 4096,
     }
 }
 
-fn command(name: &str) -> CommandProfileV1 {
-    CommandProfileV1 {
+fn command(name: &str) -> CommandProfileV2 {
+    CommandProfileV2 {
         name: name.to_owned(),
-        executable: ExecutableV1::ApprovedTool(factory_protocol::ApprovedToolV1::Cargo),
+        executable: ExecutableV2::ApprovedTool(factory_protocol::ApprovedToolV2::Cargo),
         argv: vec!["test".to_owned()],
         working_directory: path("."),
-        environment: vec![EnvironmentAdditionV1 {
+        environment: vec![EnvironmentAdditionV2 {
             name: "TERM".to_owned(),
             value: "dumb".to_owned(),
         }],
@@ -51,22 +51,32 @@ fn command(name: &str) -> CommandProfileV1 {
 
 fn assignment_role_profile(
     assignment_role: AssignmentRole,
-    terminal_tool: ActorToolV1,
+    terminal_tool: ActorToolV2,
     byte: u8,
-) -> AssignmentRoleProfileV1 {
-    AssignmentRoleProfileV1 {
+) -> AssignmentRoleProfileV2 {
+    AssignmentRoleProfileV2 {
         assignment_role,
         system_template: template("templates/system.md", byte),
         assignment_template: template("templates/assignment.md", byte + 1),
+        policy: ActorPolicyArtifactV2 {
+            source_path: application_path(match assignment_role {
+                AssignmentRole::ProductResearch => "policies/product.luau",
+                AssignmentRole::Engineering => "policies/engineering.luau",
+                AssignmentRole::Quality => "policies/quality.luau",
+            }),
+            digest: digest(byte + 2),
+            byte_limit: 4096,
+            entrypoint: PolicyEntrypointV2::FactoryPolicy,
+        },
         tools: vec![
-            ActorToolV1::WorkspaceRead,
+            ActorToolV2::WorkspaceRead,
             terminal_tool,
-            ActorToolV1::WorkComplete,
+            ActorToolV2::WorkComplete,
         ],
-        model: ModelProfileV1 {
+        model: ModelProfileV2 {
             provider: "provider".to_owned(),
             model_id: "model".to_owned(),
-            thinking_level: ThinkingLevelV1::High,
+            thinking_level: ThinkingLevelV2::High,
             context_token_limit: 1,
             output_token_limit: 1,
             price_input_micro_usd_per_million_tokens: MicroUsd::new(1),
@@ -75,7 +85,7 @@ fn assignment_role_profile(
             price_cache_write_micro_usd_per_million_tokens: MicroUsd::new(1),
             capability_flags: vec![],
         },
-        limits: SessionLimitsV1 {
+        limits: SessionLimitsV2 {
             turn_limit: 1,
             wall_limit: DurationMillis::new(1),
             output_byte_limit: 1,
@@ -83,57 +93,57 @@ fn assignment_role_profile(
     }
 }
 
-fn bundle() -> ApplicationBundleV1 {
-    ApplicationBundleV1 {
-        format_version: APPLICATION_BUNDLE_V1_FORMAT,
+fn bundle() -> ApplicationBundleV2 {
+    ApplicationBundleV2 {
+        format_version: APPLICATION_BUNDLE_V2_FORMAT,
         application_key: ApplicationKey::parse("example").expect("application key"),
         predecessor_bundle: None,
-        repository: RepositoryBindingV1 {
+        repository: RepositoryBindingV2 {
             repository_key: "product".to_owned(),
             canonical_local_path: AbsoluteHostPath::parse("/workspace/product").expect("path"),
             default_branch: "main".to_owned(),
-            delivery_mode: DeliveryModeV1::LocalFastForwardOnly,
+            delivery_mode: DeliveryModeV2::LocalFastForwardOnly,
         },
         mission_template: template("templates/mission.md", 1),
         assignment_role_profiles: vec![
             assignment_role_profile(
                 AssignmentRole::ProductResearch,
-                ActorToolV1::ProductSubmitTicket,
+                ActorToolV2::ProductSubmitTicket,
                 2,
             ),
             assignment_role_profile(
                 AssignmentRole::Engineering,
-                ActorToolV1::CandidateCheckpointRegression,
+                ActorToolV2::CandidateCheckpointRegression,
                 4,
             ),
-            assignment_role_profile(AssignmentRole::Quality, ActorToolV1::QualitySubmitReview, 6),
+            assignment_role_profile(AssignmentRole::Quality, ActorToolV2::QualitySubmitReview, 6),
         ],
-        ticket_policy: TicketPolicyV1 {
+        ticket_policy: TicketPolicyV2 {
             low_water: 1,
             target: 2,
             maximum: 3,
             proposal_maximum: 1,
-            ticket_bounds: TicketBoundsV1 {
+            ticket_bounds: TicketBoundsV2 {
                 narrative_byte_limit: 1,
                 acceptance_criteria_limit: 1,
                 contract_read_limit: 1,
             },
         },
-        required_reads: vec![RequiredReadV1 {
+        required_reads: vec![RequiredReadV2 {
             path: path("AGENTS.md"),
             reason: "product contract".to_owned(),
         }],
         reproducer_profiles: vec![command("reproduce")],
-        validation_profiles: ValidationProfilesV1 {
+        validation_profiles: ValidationProfilesV2 {
             focused: vec![command("focused")],
             full: vec![command("full")],
         },
-        git_policy: GitPolicyV1 {
+        git_policy: GitPolicyV2 {
             forbidden_paths: vec![path(".git")],
-            delivery_mode: DeliveryModeV1::LocalFastForwardOnly,
+            delivery_mode: DeliveryModeV2::LocalFastForwardOnly,
             provenance_trailers_required: true,
         },
-        commit_message_policy: CommitMessagePolicyV1 {
+        commit_message_policy: CommitMessagePolicyV2 {
             subject_byte_limit: 72,
             body_byte_limit: 2048,
         },
@@ -145,29 +155,22 @@ fn model_capabilities_and_credentials_are_closed() {
     let mut application = bundle();
     application.assignment_role_profiles[0]
         .model
-        .capability_flags = vec![ModelCapabilityV1::Reasoning, ModelCapabilityV1::Reasoning];
+        .capability_flags = vec![ModelCapabilityV2::Reasoning, ModelCapabilityV2::Reasoning];
     assert!(application.validate().is_err());
 
     assert!(
-        CredentialDescriptorV1::Environment {
+        CredentialDescriptorV2::Environment {
             name: "FACTORY_PROVIDER_KEY".to_owned(),
         }
         .validate()
         .is_ok()
     );
     assert!(
-        CredentialDescriptorV1::Environment {
+        CredentialDescriptorV2::Environment {
             name: "factory_provider_key".to_owned(),
         }
         .validate()
         .is_err()
-    );
-    assert!(
-        CredentialDescriptorV1::PiAuthStore {
-            path: RuntimeRelativePath::parse("credentials/pi.json").unwrap(),
-        }
-        .validate()
-        .is_ok()
     );
 }
 
@@ -175,14 +178,14 @@ fn model_capabilities_and_credentials_are_closed() {
 fn template_renderer_is_strict_and_one_pass() {
     let mut template = template("templates/system.md", 9);
     template.placeholders = vec![
-        TemplatePlaceholderV1::parse("ASSIGNMENT_ID").unwrap(),
-        TemplatePlaceholderV1::parse("MISSION").unwrap(),
+        TemplatePlaceholderV2::parse("ASSIGNMENT_ID").unwrap(),
+        TemplatePlaceholderV2::parse("MISSION").unwrap(),
     ];
     let mut values = BTreeMap::new();
     values.insert("ASSIGNMENT_ID".to_owned(), "a-1".to_owned());
     values.insert("MISSION".to_owned(), "${ASSIGNMENT_ID}".to_owned());
     assert_eq!(
-        factory_protocol::render_template_v1(&template, "id=${ASSIGNMENT_ID}; ${MISSION}", &values)
+        factory_protocol::render_template_v2(&template, "id=${ASSIGNMENT_ID}; ${MISSION}", &values)
             .unwrap(),
         b"id=a-1; ${ASSIGNMENT_ID}"
     );
@@ -190,20 +193,20 @@ fn template_renderer_is_strict_and_one_pass() {
     let mut missing = values.clone();
     missing.remove("MISSION");
     assert!(
-        factory_protocol::render_template_v1(&template, "${ASSIGNMENT_ID}; ${MISSION}", &missing)
+        factory_protocol::render_template_v2(&template, "${ASSIGNMENT_ID}; ${MISSION}", &missing)
             .is_err()
     );
-    assert!(factory_protocol::render_template_v1(&template, "${UNKNOWN}", &values).is_err());
-    assert!(factory_protocol::render_template_v1(&template, "${ASSIGNMENT_ID", &values).is_err());
+    assert!(factory_protocol::render_template_v2(&template, "${UNKNOWN}", &values).is_err());
+    assert!(factory_protocol::render_template_v2(&template, "${ASSIGNMENT_ID", &values).is_err());
     let mut nul = values.clone();
     nul.insert("MISSION".to_owned(), "bad\0value".to_owned());
     assert!(
-        factory_protocol::render_template_v1(&template, "${ASSIGNMENT_ID}; ${MISSION}", &nul)
+        factory_protocol::render_template_v2(&template, "${ASSIGNMENT_ID}; ${MISSION}", &nul)
             .is_err()
     );
     template.rendered_byte_limit = 2;
     assert!(
-        factory_protocol::render_template_v1(&template, "${ASSIGNMENT_ID}; ${MISSION}", &values)
+        factory_protocol::render_template_v2(&template, "${ASSIGNMENT_ID}; ${MISSION}", &values)
             .is_err()
     );
 }
@@ -216,7 +219,7 @@ fn bundle_requires_the_fixed_assignment_roles_and_closed_tools() {
     let mut wrong_tool = bundle();
     wrong_tool.assignment_role_profiles[0]
         .tools
-        .push(ActorToolV1::CandidateSubmit);
+        .push(ActorToolV2::CandidateSubmit);
     assert!(wrong_tool.validate().is_err());
 
     let mut missing_role_profile = bundle();

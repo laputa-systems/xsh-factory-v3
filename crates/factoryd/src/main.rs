@@ -6,12 +6,15 @@
 //! HTTP listener.
 
 use std::{
-    env, fs, io,
+    env, io,
     path::{Path, PathBuf},
     process::ExitCode,
     sync::Arc,
     time::{Duration, SystemTime},
 };
+
+#[cfg(test)]
+use std::fs;
 
 use factory_kernel::{
     campaign_driver::{CampaignDriver, CampaignDriverOutcome},
@@ -59,7 +62,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
     store.verify_schema_identity().await?;
     let cas_runtime_root = args.runtime_root.clone();
     // A resident daemon is admitted only after the current database build can
-    // restore its exact sealed receipt and requalify every local kernel/Deno
+    // restore its exact sealed receipt and requalify every local kernel/host
     // input. This happens before `LocalDaemon::bind` exposes an operator
     // socket, so runtime drift fails closed rather than failing a paid launch.
     let build_status = store.kernel_build_status().await?;
@@ -82,7 +85,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .path()
         .to_owned();
     verify_serve_preflight(&installed, current_build, &running_binary)?;
-    // The receipt is the only source of Cargo/Git/Deno paths. Reconstructing
+    // The receipt is the only source of Cargo/Git/host paths. Reconstructing
     // these services here makes an executable or toolchain drift fail before
     // the daemon exposes operator authority or can launch a paid actor.
     let execution = installed.execution_tools(&args.runtime_root.join("git"))?;
@@ -186,7 +189,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// The pure, provider-free startup gate. Keeping it separate from socket bind
-/// means a test can prove source/cache/binary drift is rejected before a
+/// means a test can prove source/host-binary drift is rejected before a
 /// resident daemon acquires a listener.
 fn verify_serve_preflight(
     installed: &InstalledKernelBuildReceiptV1,
@@ -218,21 +221,10 @@ async fn run_init(args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     let result: Result<(), Box<dyn std::error::Error>> = async {
         store.migrate_and_verify().await?;
 
-        // `factoryctl` selects a build-specific cache beneath the runtime
-        // root. Installation is the one phase allowed to populate it; later
-        // daemon and assignment preflights are strictly cached-only.
-        fs::create_dir_all(&args.deno_dir)?;
-
         let runtime = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
-            deno_executable: args.deno_executable.clone(),
-            host_source_root: args.pi_host_source_root.clone(),
-            host_entrypoint: args.pi_host_entrypoint.clone(),
-            deno_config: args.deno_config.clone(),
-            deno_lock: args.deno_lock.clone(),
-            deno_dir: args.deno_dir.clone(),
-            host_source_files: args.pi_host_source_files.clone(),
-            cache_probe_module: args.pi_host_cache_probe.clone(),
-            pi_version: args.pi_version.clone(),
+            host_executable: args.host_executable.clone(),
+            host_source_root: args.host_source_root.clone(),
+            host_source_files: args.host_source_files.clone(),
         })?;
         let source = qualify_kernel_source_v1(&args.kernel_source_root, &args.kernel_source_files)?;
         let binary = qualify_kernel_binary_v1(&args.kernel_binary)?;
@@ -334,7 +326,7 @@ struct DaemonArgs {
 }
 
 /// All build identity inputs are explicit. The daemon does not infer a source
-/// graph from a checkout or fill in a Deno path/cache from an ambient shell.
+/// graph from a checkout or fill in a host executable from an ambient shell.
 #[derive(Debug, PartialEq, Eq)]
 struct InitArgs {
     database_url: String,
@@ -344,15 +336,9 @@ struct InitArgs {
     kernel_binary: PathBuf,
     cargo_executable: PathBuf,
     git_executable: PathBuf,
-    deno_executable: PathBuf,
-    pi_host_source_root: PathBuf,
-    pi_host_source_files: Vec<RuntimeRelativePath>,
-    pi_host_entrypoint: PathBuf,
-    deno_config: PathBuf,
-    deno_lock: PathBuf,
-    deno_dir: PathBuf,
-    pi_host_cache_probe: RuntimeRelativePath,
-    pi_version: String,
+    host_executable: PathBuf,
+    host_source_root: PathBuf,
+    host_source_files: Vec<RuntimeRelativePath>,
     openrouter_credential_environment: String,
 }
 
@@ -440,15 +426,9 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
     let mut kernel_binary = None;
     let mut cargo_executable = None;
     let mut git_executable = None;
-    let mut deno_executable = None;
-    let mut pi_host_source_root = None;
-    let mut pi_host_source_files = Vec::new();
-    let mut pi_host_entrypoint = None;
-    let mut deno_config = None;
-    let mut deno_lock = None;
-    let mut deno_dir = None;
-    let mut pi_host_cache_probe = None;
-    let mut pi_version = None;
+    let mut host_executable = None;
+    let mut host_source_root = None;
+    let mut host_source_files = Vec::new();
     let mut openrouter_credential_environment = None;
     while let Some(flag) = values.next() {
         let value = values
@@ -470,27 +450,15 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
             "--git-executable" => {
                 set_absolute_path(&mut git_executable, value, "--git-executable")?;
             }
-            "--deno-executable" => {
-                set_absolute_path(&mut deno_executable, value, "--deno-executable")?;
+            "--host-executable" => {
+                set_absolute_path(&mut host_executable, value, "--host-executable")?;
             }
-            "--pi-host-source-root" => {
-                set_absolute_path(&mut pi_host_source_root, value, "--pi-host-source-root")?;
+            "--host-source-root" => {
+                set_absolute_path(&mut host_source_root, value, "--host-source-root")?;
             }
-            "--pi-host-source-file" => {
-                pi_host_source_files.push(parse_relative_path(value, "--pi-host-source-file")?);
+            "--host-source-file" => {
+                host_source_files.push(parse_relative_path(value, "--host-source-file")?);
             }
-            "--pi-host-entrypoint" => {
-                set_absolute_path(&mut pi_host_entrypoint, value, "--pi-host-entrypoint")?;
-            }
-            "--deno-config" => set_absolute_path(&mut deno_config, value, "--deno-config")?,
-            "--deno-lock" => set_absolute_path(&mut deno_lock, value, "--deno-lock")?,
-            "--deno-dir" => set_absolute_path(&mut deno_dir, value, "--deno-dir")?,
-            "--pi-host-cache-probe" => set_once(
-                &mut pi_host_cache_probe,
-                parse_relative_path(value, "--pi-host-cache-probe")?,
-                "--pi-host-cache-probe",
-            )?,
-            "--pi-version" => set_once(&mut pi_version, value, "--pi-version")?,
             "--provider-credential-environment" => set_once(
                 &mut openrouter_credential_environment,
                 parse_openrouter_credential_environment(value)?,
@@ -502,8 +470,8 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
     if kernel_source_files.is_empty() {
         return Err("at least one --kernel-source-file is required".to_owned());
     }
-    if pi_host_source_files.is_empty() {
-        return Err("at least one --pi-host-source-file is required".to_owned());
+    if host_source_files.is_empty() {
+        return Err("at least one --host-source-file is required".to_owned());
     }
     Ok(InitArgs {
         database_url: required(database_url, "--database-url")?,
@@ -513,15 +481,9 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
         kernel_binary: required(kernel_binary, "--kernel-binary")?,
         cargo_executable: required(cargo_executable, "--cargo-executable")?,
         git_executable: required(git_executable, "--git-executable")?,
-        deno_executable: required(deno_executable, "--deno-executable")?,
-        pi_host_source_root: required(pi_host_source_root, "--pi-host-source-root")?,
-        pi_host_source_files,
-        pi_host_entrypoint: required(pi_host_entrypoint, "--pi-host-entrypoint")?,
-        deno_config: required(deno_config, "--deno-config")?,
-        deno_lock: required(deno_lock, "--deno-lock")?,
-        deno_dir: required(deno_dir, "--deno-dir")?,
-        pi_host_cache_probe: required(pi_host_cache_probe, "--pi-host-cache-probe")?,
-        pi_version: required(pi_version, "--pi-version")?,
+        host_executable: required(host_executable, "--host-executable")?,
+        host_source_root: required(host_source_root, "--host-source-root")?,
+        host_source_files,
         openrouter_credential_environment: required(
             openrouter_credential_environment,
             "--provider-credential-environment openrouter=<ENVIRONMENT_NAME>",
@@ -551,7 +513,7 @@ fn parse_openrouter_credential_environment(value: String) -> Result<String, Stri
                 .to_owned()
         })?
         .to_owned();
-    factory_protocol::CredentialDescriptorV1::Environment {
+    factory_protocol::CredentialDescriptorV2::Environment {
         name: environment.clone(),
     }
     .validate()
@@ -559,6 +521,12 @@ fn parse_openrouter_credential_environment(value: String) -> Result<String, Stri
         "--provider-credential-environment must name a non-empty uppercase environment variable"
             .to_owned()
     })?;
+    if matches!(environment.as_str(), "NO_COLOR" | "PATH") {
+        return Err(
+            "--provider-credential-environment cannot use the kernel-owned NO_COLOR or PATH name"
+                .to_owned(),
+        );
+    }
     Ok(environment)
 }
 
@@ -575,7 +543,7 @@ fn boxed_init_error(message: &str) -> Box<dyn std::error::Error> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryd serve --database-url <url> --runtime-root <absolute-path> [--read-deadline-ms <positive>] [--operation-deadline-ms <positive>] [--write-deadline-ms <positive>]\n  factoryd init --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --kernel-binary <absolute-path> --cargo-executable <absolute-path> --git-executable <absolute-path> --deno-executable <absolute-path> --pi-host-source-root <absolute-path> --pi-host-source-file <safe-relative-path>... --pi-host-entrypoint <absolute-path> --pi-host-cache-probe <safe-relative-path> --deno-config <absolute-path> --deno-lock <absolute-path> --deno-dir <absolute-path> --pi-version <version> --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>"
+    "usage:\n  factoryd serve --database-url <url> --runtime-root <absolute-path> [--read-deadline-ms <positive>] [--operation-deadline-ms <positive>] [--write-deadline-ms <positive>]\n  factoryd init --database-url <url> --runtime-root <absolute-path> --kernel-source-root <absolute-path> --kernel-source-file <safe-relative-path>... --kernel-binary <absolute-path> --cargo-executable <absolute-path> --git-executable <absolute-path> --host-executable <absolute-path> --host-source-root <absolute-path> --host-source-file <safe-relative-path>... --provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>"
 }
 
 #[cfg(test)]
@@ -583,121 +551,6 @@ mod tests {
     use factory_protocol::ContentDigest;
 
     use super::*;
-    use std::{fs, os::unix::fs::PermissionsExt};
-
-    struct PreflightFixture {
-        root: PathBuf,
-        binary: PathBuf,
-        cargo: PathBuf,
-        git: PathBuf,
-        source_root: PathBuf,
-        host_root: PathBuf,
-        cache: PathBuf,
-    }
-
-    impl PreflightFixture {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "factoryd-serve-preflight-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("clock after epoch")
-                    .as_nanos(),
-            ));
-            let source_root = root.join("source");
-            let host_root = root.join("host");
-            let cache = root.join("deno-cache");
-            fs::create_dir_all(source_root.join("crates/factoryd/src")).expect("kernel source");
-            fs::create_dir_all(&host_root).expect("host source");
-            fs::create_dir_all(&cache).expect("DENO_DIR");
-            fs::write(cache.join("qualified"), b"cache material").expect("cache marker");
-            fs::write(
-                source_root.join("crates/factoryd/src/main.rs"),
-                b"kernel source",
-            )
-            .expect("kernel source file");
-            let binary = root.join("factoryd");
-            fs::write(
-                &binary,
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'deno 2.9.4\\n'; exit 0; fi\nif [ \"$1\" = \"info\" ] && [ -f \"$DENO_DIR/qualified\" ]; then for value in \"$@\"; do entrypoint=\"$value\"; done; printf '{\"modules\":[{\"specifier\":\"file://%s\",\"local\":\"%s\"}]}' \"$entrypoint\" \"$entrypoint\"; exit 0; fi\nif [ \"$1\" = \"cache\" ]; then exit 0; fi\nif { [ \"$1\" = \"check\" ] || [ \"$1\" = \"run\" ]; } && [ -f \"$DENO_DIR/qualified\" ]; then exit 0; fi\nexit 17\n",
-            )
-            .expect("fake Deno/kernel binary");
-            let mut permissions = fs::metadata(&binary)
-                .expect("binary metadata")
-                .permissions();
-            permissions.set_mode(0o700);
-            fs::set_permissions(&binary, permissions).expect("make binary executable");
-            let cargo = root.join("cargo");
-            let git = root.join("git");
-            for tool in [&cargo, &git, &root.join("rustc"), &root.join("rustdoc")] {
-                fs::write(tool, "#!/bin/sh\nexit 0\n").expect("fake approved executable");
-                let mut permissions = fs::metadata(tool)
-                    .expect("approved executable metadata")
-                    .permissions();
-                permissions.set_mode(0o700);
-                fs::set_permissions(tool, permissions)
-                    .expect("make approved executable executable");
-            }
-            fs::write(host_root.join("main.ts"), "export const value = 1;\n")
-                .expect("host entrypoint");
-            fs::write(host_root.join("probe.ts"), "export {};\n").expect("safe cache probe");
-            fs::write(root.join("deno.json"), "{}\n").expect("Deno config");
-            fs::write(root.join("deno.lock"), "{}\n").expect("Deno lock");
-            Self {
-                root,
-                binary,
-                cargo,
-                git,
-                source_root,
-                host_root,
-                cache,
-            }
-        }
-
-        fn receipt(&self) -> InstalledKernelBuildReceiptV1 {
-            let runtime = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
-                deno_executable: self.binary.clone(),
-                host_source_root: self.host_root.clone(),
-                host_entrypoint: self.host_root.join("main.ts"),
-                deno_config: self.root.join("deno.json"),
-                deno_lock: self.root.join("deno.lock"),
-                deno_dir: self.cache.clone(),
-                host_source_files: vec![
-                    RuntimeRelativePath::parse("main.ts").unwrap(),
-                    RuntimeRelativePath::parse("probe.ts").unwrap(),
-                ],
-                cache_probe_module: RuntimeRelativePath::parse("probe.ts").unwrap(),
-                pi_version: "0.84.1".to_owned(),
-            })
-            .expect("qualify runtime");
-            let source = qualify_kernel_source_v1(
-                &self.source_root,
-                &[RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap()],
-            )
-            .expect("qualify kernel source");
-            let binary = qualify_kernel_binary_v1(&self.binary).expect("qualify kernel binary");
-            let approved_tools =
-                InstalledApprovedToolsQualificationV1::qualify(&self.cargo, &self.git)
-                    .expect("qualify approved tools");
-            InstalledKernelBuildReceiptV1::from_qualifications(
-                SCHEMA_IDENTITY.to_owned(),
-                source,
-                binary,
-                approved_tools,
-                runtime,
-                "OPENROUTER_API_KEY".to_owned(),
-            )
-            .expect("build receipt")
-        }
-    }
-
-    impl Drop for PreflightFixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
     fn init_arguments() -> Vec<String> {
         vec![
             "init".to_owned(),
@@ -715,24 +568,14 @@ mod tests {
             "/opt/rust/bin/cargo".to_owned(),
             "--git-executable".to_owned(),
             "/opt/git/bin/git".to_owned(),
-            "--deno-executable".to_owned(),
-            "/opt/deno/bin/deno".to_owned(),
-            "--pi-host-source-root".to_owned(),
-            "/opt/factory-source/packages".to_owned(),
-            "--pi-host-source-file".to_owned(),
-            "factory-pi-host/main.ts".to_owned(),
-            "--pi-host-entrypoint".to_owned(),
-            "/opt/factory-source/packages/factory-pi-host/main.ts".to_owned(),
-            "--pi-host-cache-probe".to_owned(),
-            "factory-pi-host/mod.ts".to_owned(),
-            "--deno-config".to_owned(),
-            "/opt/factory-source/deno.json".to_owned(),
-            "--deno-lock".to_owned(),
-            "/opt/factory-source/deno.lock".to_owned(),
-            "--deno-dir".to_owned(),
-            "/opt/factory-runtime/deno-cache".to_owned(),
-            "--pi-version".to_owned(),
-            "0.84.1".to_owned(),
+            "--host-executable".to_owned(),
+            "/opt/factory/bin/factory-pi-host".to_owned(),
+            "--host-source-root".to_owned(),
+            "/opt/factory-source/crates/factory-pi-host".to_owned(),
+            "--host-source-file".to_owned(),
+            "Cargo.toml".to_owned(),
+            "--host-source-file".to_owned(),
+            "src/main.rs".to_owned(),
             "--provider-credential-environment".to_owned(),
             "openrouter=OPENROUTER_API_KEY".to_owned(),
         ]
@@ -810,24 +653,28 @@ mod tests {
             parsed,
             DaemonCommand::Init(InitArgs {
                 kernel_source_files,
-                pi_host_source_files,
+                host_source_files,
                 kernel_binary,
                 cargo_executable,
                 git_executable,
                 ..
             }) if kernel_source_files == vec![RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap()]
-                && pi_host_source_files == vec![RuntimeRelativePath::parse("factory-pi-host/main.ts").unwrap()]
+                && host_source_files == vec![
+                    RuntimeRelativePath::parse("Cargo.toml").unwrap(),
+                    RuntimeRelativePath::parse("src/main.rs").unwrap(),
+                ]
                 && kernel_binary == *"/opt/factory/bin/factoryd"
                 && cargo_executable == *"/opt/rust/bin/cargo"
                 && git_executable == *"/opt/git/bin/git"
         ));
 
         let mut missing_host_graph = init_arguments();
-        let flag = missing_host_graph
+        while let Some(flag) = missing_host_graph
             .iter()
-            .position(|value| value == "--pi-host-source-file")
-            .expect("host graph flag");
-        missing_host_graph.drain(flag..=flag + 1);
+            .position(|value| value == "--host-source-file")
+        {
+            missing_host_graph.drain(flag..=flag + 1);
+        }
         assert!(parse_args(missing_host_graph).is_err());
 
         let mut relative_runtime_root = init_arguments();
@@ -897,64 +744,5 @@ mod tests {
             );
         }
         fs::remove_dir_all(root).expect("remove temporary root");
-    }
-
-    #[test]
-    fn serve_preflight_rejects_binary_source_and_cache_drift_before_socket_bind() {
-        let fixture = PreflightFixture::new();
-        let receipt = fixture.receipt();
-        let binary = qualify_kernel_binary_v1(&fixture.binary)
-            .expect("qualify kernel binary")
-            .path()
-            .to_owned();
-        verify_serve_preflight(&receipt, receipt.kernel_build_id(), &binary)
-            .expect("qualified build preflight");
-
-        assert!(
-            verify_serve_preflight(
-                &receipt,
-                receipt.kernel_build_id(),
-                &fixture.root.join("other-binary"),
-            )
-            .is_err()
-        );
-
-        fs::write(
-            fixture.source_root.join("crates/factoryd/src/main.rs"),
-            b"changed",
-        )
-        .expect("change kernel source");
-        assert!(verify_serve_preflight(&receipt, receipt.kernel_build_id(), &binary).is_err());
-
-        let binary_fixture = PreflightFixture::new();
-        let binary_receipt = binary_fixture.receipt();
-        fs::write(&binary_fixture.binary, "#!/bin/sh\nexit 88\n").expect("change kernel binary");
-        let mut permissions = fs::metadata(&binary_fixture.binary)
-            .expect("changed binary metadata")
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&binary_fixture.binary, permissions).expect("preserve executable bit");
-        assert!(
-            verify_serve_preflight(
-                &binary_receipt,
-                binary_receipt.kernel_build_id(),
-                binary_receipt.kernel_binary(),
-            )
-            .is_err()
-        );
-
-        let cache_fixture = PreflightFixture::new();
-        let cache_receipt = cache_fixture.receipt();
-        fs::remove_file(cache_fixture.cache.join("qualified")).expect("remove frozen cache marker");
-        assert!(
-            verify_serve_preflight(
-                &cache_receipt,
-                cache_receipt.kernel_build_id(),
-                qualify_kernel_binary_v1(&cache_fixture.binary)
-                    .expect("qualify cache binary")
-                    .path(),
-            )
-            .is_err()
-        );
     }
 }

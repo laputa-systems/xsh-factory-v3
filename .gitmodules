@@ -1,3 +1,0 @@
-[submodule "vendor/pi-headless"]
-	path = vendor/pi-headless
-	url = https://github.com/laputa-systems/pi-headless.git

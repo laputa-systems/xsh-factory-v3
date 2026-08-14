@@ -9,7 +9,7 @@
 use factory_protocol::{
     AggregateRevision, ApplicationRevisionId, ArchitectDecisionId, ArtifactId, CampaignId,
     CandidateId, ContentDigest, ExpectedRevision, ReviewId, TicketAttemptId, TicketAttemptStage,
-    TicketBoundsV1, TicketId, TicketRevisionId, TicketState, ValidationId,
+    TicketBoundsV2, TicketId, TicketRevisionId, TicketState, ValidationId,
 };
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -586,7 +586,7 @@ pub struct ProposalAdmissionContext {
     pub bundle_artifact_id: ArtifactId,
     pub repository_id: factory_protocol::RepositoryId,
     pub proposal_maximum: u32,
-    pub ticket_bounds: TicketBoundsV1,
+    pub ticket_bounds: TicketBoundsV2,
 }
 
 /// A bounded live proposal artifact identity for application-side duplicate
@@ -622,7 +622,7 @@ impl TicketStore {
             bundle_artifact_id: ArtifactId::new(row.bundle_artifact_id)?,
             repository_id: factory_protocol::RepositoryId::new(row.repository_id)?,
             proposal_maximum: u32_from_sql(i64::from(row.proposal_maximum), "proposal maximum")?,
-            ticket_bounds: TicketBoundsV1 {
+            ticket_bounds: TicketBoundsV2 {
                 narrative_byte_limit: u32_from_sql(
                     i64::from(row.ticket_narrative_byte_limit),
                     "ticket narrative byte limit",

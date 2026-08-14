@@ -17,9 +17,9 @@ documented missing capability, not permission to delete runtime data broadly.
 
 ## Session transcript projection
 
-The vendored Pi headless implementation emits a compact audit projection before
-the host writes `session.ndjson`. The host streams it and seals one gzip archive
-at terminal state. This retains the information useful for diagnosis:
+The Rust Pi agent implementation emits a compact audit projection before the
+host writes `session.ndjson`. The host streams it and seals one gzip archive at
+terminal state. This retains the information useful for diagnosis:
 
 - bounded assistant text;
 - tool names, boundaries, inputs, results, retries, and terminal reason;

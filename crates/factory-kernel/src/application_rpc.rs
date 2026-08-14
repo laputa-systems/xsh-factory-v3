@@ -5,7 +5,7 @@
 //! after binding the mode-`0600` socket, then supplies only the narrow kernel
 //! store and CAS custody objects.  Application source is read only by
 //! `KernelStore::admit_compiled_application`; neither factoryctl nor this
-//! router evaluates TypeScript or product-specific code.
+//! router evaluates product-specific code.
 
 use std::{path::PathBuf, sync::Arc};
 

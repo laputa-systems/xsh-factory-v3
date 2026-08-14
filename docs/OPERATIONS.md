@@ -2,20 +2,20 @@
 
 ## Build and qualification
 
-Use the checked-out `vendor/pi-headless` submodule. It supplies reviewed local
-headless ESM artifacts and a checked-in provider catalog; factory never calls a
-system Pi binary or resolves Pi through Deno/NPM at runtime.
+Use the local `pi-agent-core-rs` checkout at
+`/Users/josh/d/pi-agent-core-rs`. It supplies the reviewed Rust agent crates;
+factory never calls a system Pi binary or resolves runtime code through a
+package registry.
 
 ```sh
 make cache
 make lint
 ```
 
-`make cache` runs the submodule's locked dependency installation with lifecycle
-scripts disabled, builds local headless artifacts, and populates Deno's frozen
-cache. `make lint` is the Grand Architect's pre-commit gate: it rebuilds the
-local artifacts, formats and fixes Rust/Deno source, runs Rust and Deno checks,
-and runs their tests. Neither starts a provider-backed actor or uses remote Git.
+`make cache` fetches the two locked Cargo workspaces. `make lint` is the Grand
+Architect's pre-commit gate: it runs the local `pi-agent-core-rs` tests,
+formats and checks Rust source, and runs the Factory workspace tests. Neither
+starts a provider-backed actor or uses remote Git.
 
 ## Initialize and serve
 
@@ -37,15 +37,15 @@ The serve target runs `vault OPENROUTER_API_KEY -- target/release/factoryd
 serve ...`; the credential is neither copied into source, the database, CAS,
 prompts, nor shell command arguments. It binds a mode-`0600` Unix operator
 socket under the runtime root. Stop the daemon before replacing a kernel,
-schema, Deno graph, or Pi submodule build input, then run `factoryctl init`
+schema, Rust dependency source, or agent-core build input, then run `factoryctl init`
 again before serving the new build.
 
 ## Application revisions and campaigns
 
-Compile `applications/xsh/bundle.v1.json`, then use `factoryctl daemon status`
-to obtain the installed build ID/revision. XSH's bundle template paths are
-relative to `applications/xsh`, so admission uses that directory as
-`--source-root` and `bundle.v1.json` as `--bundle-relative-path`; the repository
+Use the checked-in `applications/xsh/bundle.v2.json`, then use `factoryctl
+daemon status` to obtain the installed build ID/revision. XSH's bundle template
+paths are relative to `applications/xsh`, so admission uses that directory as
+`--source-root` and `bundle.v2.json` as `--bundle-relative-path`; the repository
 root is not a valid substitute. Register with those exact guards, seal a short
 operator rationale, and activate only while no campaign is running. Start
 campaigns through `factoryctl campaign start` with an explicit active

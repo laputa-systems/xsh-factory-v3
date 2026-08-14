@@ -8,12 +8,12 @@ use std::str::FromStr;
 
 use factory_protocol::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId,
-    AssignmentEvidenceRoleV1, AssignmentEvidenceV1, AssignmentId, AssignmentPacketV1,
-    AssignmentRole, CampaignId, CandidateId, ContentDigest, CredentialDescriptorV1, DurationMillis,
-    ExpectedRevision, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1, ProcessCustodyV1,
-    ReadExactFileV1, RepositoryId, RepositoryRelativePath, RuntimeIdentityV1, RuntimeRelativePath,
-    SessionId, SessionLimitsV1, SessionState, StopReasonV1, TerminalCostV1, TerminalOperationV1,
-    TerminalReportV1, ThinkingLevelV1, TicketAttemptId, UsageTotalsV1,
+    AssignmentEvidenceRoleV2, AssignmentEvidenceV2, AssignmentId, AssignmentPacketV2,
+    AssignmentRole, CampaignId, CandidateId, ContentDigest, DurationMillis, ExpectedRevision,
+    KernelBuildId, MicroUsd, ModelCapabilityV2, ModelProfileV2, PolicyEntrypointV2,
+    ProcessCustodyV1, ReadExactFileV2, RepositoryId, RepositoryRelativePath, RuntimeIdentityV2,
+    SessionId, SessionLimitsV2, SessionState, StopReasonV1, TerminalCostV1, TerminalOperationV1,
+    TerminalReportV1, ThinkingLevelV2, TicketAttemptId, UsageTotalsV1,
 };
 use sqlx::{PgPool, Postgres};
 
@@ -121,7 +121,7 @@ pub struct CreateAssignment {
     pub command_id: String,
     pub expected_campaign_revision: ExpectedRevision,
     pub identity: AssignmentIdentityCapability,
-    pub packet: AssignmentPacketV1,
+    pub packet: AssignmentPacketV2,
     pub packet_bytes: Vec<u8>,
     pub packet_artifact: CasArtifact,
     pub required_read_manifest_artifact_id: ArtifactId,
@@ -203,7 +203,7 @@ pub struct RestartRecoverySession {
     pub session_id: SessionId,
     pub expected_session_revision: AggregateRevision,
     pub custody: ProcessCustodyV1,
-    pub packet: AssignmentPacketV1,
+    pub packet: AssignmentPacketV2,
     pub packet_artifact: CasArtifact,
     pub canonical_packet_bytes: Vec<u8>,
 }
@@ -490,12 +490,12 @@ impl ProcessStore {
     pub fn verify_packet_bytes(
         &self,
         cas: &CasStore,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
         packet_artifact: CasArtifact,
         canonical_packet_bytes: &[u8],
         expected_digest: ContentDigest,
     ) -> Result<(), StoreError> {
-        let wire = factory_protocol::verify_assignment_packet_v1(
+        let wire = factory_protocol::verify_assignment_packet_v2(
             canonical_packet_bytes,
             &expected_digest.to_hex(),
         )
@@ -532,7 +532,7 @@ impl ProcessStore {
     pub(crate) async fn actor_connection_identity(
         &self,
         session_id: SessionId,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
     ) -> Result<crate::local_transport::ActorConnectionIdentity, StoreError> {
         let row = sqlx::query!(
             "SELECT assignment_id, application_revision_id, campaign_id, assignment_role, lifecycle
@@ -646,7 +646,7 @@ impl ProcessStore {
                     .try_into()
                     .map_err(|_| StoreError::CorruptDigestColumn)?,
             );
-            let wire = factory_protocol::verify_assignment_packet_v1(
+            let wire = factory_protocol::verify_assignment_packet_v2(
                 &canonical_packet_bytes,
                 &packet_digest.to_hex(),
             )
@@ -1109,7 +1109,7 @@ impl ProcessStore {
     ) -> Result<AssignmentReceipt, StoreError> {
         validate_command(&command.principal, &command.command_id)?;
         command.packet.validate()?;
-        let wire = factory_protocol::verify_assignment_packet_v1(
+        let wire = factory_protocol::verify_assignment_packet_v2(
             &command.packet_bytes,
             &command.packet.packet_digest.to_hex(),
         )
@@ -1447,7 +1447,7 @@ impl ProcessStore {
         &self,
         cas: &CasStore,
         session_id: SessionId,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
         packet_artifact: CasArtifact,
         canonical_packet_bytes: &[u8],
         artifacts: TerminalArtifactSeals,
@@ -1478,7 +1478,7 @@ impl ProcessStore {
         &self,
         cas: &CasStore,
         session_id: SessionId,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
         packet_artifact: CasArtifact,
         artifacts: TerminalArtifactSeals,
         assertion: SealedRequiredReadAssertion,
@@ -1487,7 +1487,7 @@ impl ProcessStore {
     ) -> Result<VerifiedTerminalEvidence, StoreError> {
         packet.validate()?;
         if let Some(bytes) = canonical_packet_bytes {
-            factory_protocol::verify_assignment_packet_v1(bytes, &packet.packet_digest.to_hex())
+            factory_protocol::verify_assignment_packet_v2(bytes, &packet.packet_digest.to_hex())
                 .map_err(|_| StoreError::InvalidPacketDigest)?;
         } else {
             return Err(StoreError::InvalidPacketDigest);
@@ -2224,7 +2224,7 @@ async fn current_assignment_revision(
 /// different row.
 async fn validate_assignment_target_in_transaction(
     tx: &mut sqlx::Transaction<'_, Postgres>,
-    packet: &AssignmentPacketV1,
+    packet: &AssignmentPacketV2,
 ) -> Result<(), StoreError> {
     let target_exists = match (
         packet.assignment_role,
@@ -2326,7 +2326,7 @@ async fn require_artifact_seal(
 
 async fn verify_prompt_artifacts(
     tx: &mut sqlx::Transaction<'_, Postgres>,
-    wire: &factory_protocol::AssignmentPacketWireV1,
+    wire: &factory_protocol::AssignmentPacketWireV2,
 ) -> Result<(), StoreError> {
     let system =
         decode_base64(&wire.system_prompt_bytes_b64).ok_or(StoreError::InvalidPacketDigest)?;
@@ -2366,8 +2366,8 @@ async fn verify_prompt_artifacts(
 }
 
 fn verify_wire_domain_mapping(
-    wire: &factory_protocol::AssignmentPacketWireV1,
-    packet: &AssignmentPacketV1,
+    wire: &factory_protocol::AssignmentPacketWireV2,
+    packet: &AssignmentPacketV2,
 ) -> Result<(), StoreError> {
     let wire_build = ContentDigest::from_str(&wire.kernel_build_id)
         .map_err(|_| StoreError::InvalidPacketDigest)?;
@@ -2421,7 +2421,7 @@ fn verify_wire_domain_mapping(
             .any(|(wire, domain)| {
                 !matches!(
                     (wire.as_str(), domain),
-                    ("reasoning", ModelCapabilityV1::Reasoning)
+                    ("reasoning", ModelCapabilityV2::Reasoning)
                 )
             })
     {
@@ -2430,27 +2430,28 @@ fn verify_wire_domain_mapping(
     if wire.limits.turn_limit != packet.limits.turn_limit
         || wire.limits.wall_limit_millis != packet.limits.wall_limit.get()
         || wire.limits.output_byte_limit != packet.limits.output_byte_limit
-        || wire.runtime.deno_executable != packet.runtime.deno_executable.as_str()
-        || wire.runtime.deno_version != packet.runtime.deno_version
-        || wire.runtime.source_graph_digest != packet.runtime.source_graph_digest.to_hex()
-        || wire.runtime.resolved_dependency_graph_digest
-            != packet.runtime.resolved_dependency_graph_digest.to_hex()
-        || wire.runtime.deno_json_digest != packet.runtime.deno_json_digest.to_hex()
-        || wire.runtime.deno_lock_digest != packet.runtime.deno_lock_digest.to_hex()
-        || wire.runtime.pi_version != packet.runtime.pi_version
+        || wire.runtime.host_executable != packet.runtime.host_executable.as_str()
+        || wire.runtime.core_head != packet.runtime.core_head
+        || wire.runtime.core_source_digest != packet.runtime.core_source_digest.to_hex()
+        || wire.runtime.rust_toolchain != packet.runtime.rust_toolchain
     {
         return Err(StoreError::PacketIdentityMismatch);
     }
-    match &packet.runtime.credential {
-        CredentialDescriptorV1::Environment { name }
-            if wire.runtime.credential_source.kind == "environment"
-                && wire.runtime.credential_source.name.as_deref() == Some(name)
-                && wire.runtime.credential_source.path.is_none() => {}
-        CredentialDescriptorV1::PiAuthStore { path }
-            if wire.runtime.credential_source.kind == "pi_auth_store"
-                && wire.runtime.credential_source.name.is_none()
-                && wire.runtime.credential_source.path.as_deref() == Some(path.as_str()) => {}
-        _ => return Err(StoreError::PacketIdentityMismatch),
+    if wire.runtime.credential_env != packet.runtime.credential_env {
+        return Err(StoreError::PacketIdentityMismatch);
+    }
+    let policy_bytes =
+        decode_base64(&wire.policy_bytes_b64).ok_or(StoreError::InvalidPacketDigest)?;
+    let policy_digest = ContentDigest::from_str(&wire.policy_digest)
+        .map_err(|_| StoreError::InvalidPacketDigest)?;
+    let policy_entrypoint = PolicyEntrypointV2::parse(&wire.policy_entrypoint)
+        .map_err(|_| StoreError::PacketIdentityMismatch)?;
+    if policy_digest != packet.policy_digest
+        || wire.policy_byte_limit != packet.policy_byte_limit
+        || policy_bytes != packet.policy_bytes
+        || policy_entrypoint != packet.policy_entrypoint
+    {
+        return Err(StoreError::PacketIdentityMismatch);
     }
     // Repository/factory bases remain signed wire-only transport identity.
     // Ticket/candidate authority is deliberately duplicated as typed packet
@@ -2498,8 +2499,8 @@ fn verify_wire_domain_mapping(
 /// performed the same validation: restart must not turn a newer/unknown wire
 /// value into a permissive local default.
 fn assignment_packet_from_wire(
-    wire: &factory_protocol::AssignmentPacketWireV1,
-) -> Result<AssignmentPacketV1, StoreError> {
+    wire: &factory_protocol::AssignmentPacketWireV2,
+) -> Result<AssignmentPacketV2, StoreError> {
     let assignment_role = match wire.assignment_role.as_str() {
         "product_research" => AssignmentRole::ProductResearch,
         "engineering" => AssignmentRole::Engineering,
@@ -2507,11 +2508,11 @@ fn assignment_packet_from_wire(
         _ => return Err(StoreError::PacketIdentityMismatch),
     };
     let thinking_level = match wire.model.thinking_level.as_str() {
-        "none" => ThinkingLevelV1::None,
-        "low" => ThinkingLevelV1::Low,
-        "medium" => ThinkingLevelV1::Medium,
-        "high" => ThinkingLevelV1::High,
-        "xhigh" => ThinkingLevelV1::XHigh,
+        "none" => ThinkingLevelV2::None,
+        "low" => ThinkingLevelV2::Low,
+        "medium" => ThinkingLevelV2::Medium,
+        "high" => ThinkingLevelV2::High,
+        "xhigh" => ThinkingLevelV2::XHigh,
         _ => return Err(StoreError::PacketIdentityMismatch),
     };
     let capability_flags = wire
@@ -2519,34 +2520,27 @@ fn assignment_packet_from_wire(
         .capability_flags
         .iter()
         .map(|flag| match flag.as_str() {
-            "reasoning" => Ok(ModelCapabilityV1::Reasoning),
+            "reasoning" => Ok(ModelCapabilityV2::Reasoning),
             _ => Err(StoreError::PacketIdentityMismatch),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let credential = match (
-        wire.runtime.credential_source.kind.as_str(),
-        wire.runtime.credential_source.name.as_deref(),
-        wire.runtime.credential_source.path.as_deref(),
-    ) {
-        ("environment", Some(name), None) => CredentialDescriptorV1::Environment {
-            name: name.to_owned(),
-        },
-        ("pi_auth_store", None, Some(path)) => CredentialDescriptorV1::PiAuthStore {
-            path: RuntimeRelativePath::parse(path.to_owned())?,
-        },
-        _ => return Err(StoreError::PacketIdentityMismatch),
-    };
     let required_reads = wire
         .required_reads
         .iter()
         .map(|read| {
-            Ok(ReadExactFileV1 {
+            Ok(ReadExactFileV2 {
                 path: RepositoryRelativePath::parse(read.path.clone())?,
                 digest: ContentDigest::from_str(&read.digest)?,
                 reason: read.reason.clone(),
             })
         })
         .collect::<Result<Vec<_>, factory_protocol::ContractError>>()?;
+    let policy_bytes =
+        decode_base64(&wire.policy_bytes_b64).ok_or(StoreError::InvalidPacketDigest)?;
+    let policy_digest = ContentDigest::from_str(&wire.policy_digest)
+        .map_err(|_| StoreError::InvalidPacketDigest)?;
+    let policy_entrypoint = PolicyEntrypointV2::parse(&wire.policy_entrypoint)
+        .map_err(|_| StoreError::PacketIdentityMismatch)?;
     let terminal_operations = wire
         .terminal_operations
         .iter()
@@ -2587,7 +2581,7 @@ fn assignment_packet_from_wire(
             return Err(StoreError::PacketIdentityMismatch);
         }
     }
-    let packet = AssignmentPacketV1 {
+    let packet = AssignmentPacketV2 {
         format_version: wire.format_version,
         campaign_id: CampaignId::new(wire.campaign_id)?,
         assignment_id: AssignmentId::new(wire.assignment_id)?,
@@ -2605,9 +2599,13 @@ fn assignment_packet_from_wire(
         required_read_manifest_artifact_id: ArtifactId::new(
             wire.required_read_manifest_artifact_id,
         )?,
+        policy_digest,
+        policy_byte_limit: wire.policy_byte_limit,
+        policy_bytes,
+        policy_entrypoint,
         workspace_root: AbsoluteHostPath::parse(wire.workspace_root.clone())?,
         staging_root: AbsoluteHostPath::parse(wire.staging_root.clone())?,
-        model: ModelProfileV1 {
+        model: ModelProfileV2 {
             provider: wire.model.provider.clone(),
             model_id: wire.model.model_id.clone(),
             thinking_level,
@@ -2627,30 +2625,25 @@ fn assignment_packet_from_wire(
             ),
             capability_flags,
         },
-        limits: SessionLimitsV1 {
+        limits: SessionLimitsV2 {
             turn_limit: wire.limits.turn_limit,
             wall_limit: DurationMillis::new(wire.limits.wall_limit_millis),
             output_byte_limit: wire.limits.output_byte_limit,
         },
-        runtime: RuntimeIdentityV1 {
-            deno_executable: AbsoluteHostPath::parse(wire.runtime.deno_executable.clone())?,
-            deno_version: wire.runtime.deno_version.clone(),
-            source_graph_digest: ContentDigest::from_str(&wire.runtime.source_graph_digest)?,
-            resolved_dependency_graph_digest: ContentDigest::from_str(
-                &wire.runtime.resolved_dependency_graph_digest,
-            )?,
-            deno_json_digest: ContentDigest::from_str(&wire.runtime.deno_json_digest)?,
-            deno_lock_digest: ContentDigest::from_str(&wire.runtime.deno_lock_digest)?,
-            pi_version: wire.runtime.pi_version.clone(),
-            credential,
+        runtime: RuntimeIdentityV2 {
+            host_executable: AbsoluteHostPath::parse(wire.runtime.host_executable.clone())?,
+            core_head: wire.runtime.core_head.clone(),
+            core_source_digest: ContentDigest::from_str(&wire.runtime.core_source_digest)?,
+            rust_toolchain: wire.runtime.rust_toolchain.clone(),
+            credential_env: wire.runtime.credential_env.clone(),
         },
         required_reads,
         assignment_evidence: wire
             .assignment_evidence
             .iter()
             .map(|evidence| {
-                Ok(AssignmentEvidenceV1 {
-                    role: AssignmentEvidenceRoleV1::parse_wire_name(&evidence.role)?,
+                Ok(AssignmentEvidenceV2 {
+                    role: AssignmentEvidenceRoleV2::parse_wire_name(&evidence.role)?,
                     artifact_id: ArtifactId::new(evidence.artifact_id)?,
                     digest: ContentDigest::from_str(&evidence.digest)?,
                     byte_length: evidence.byte_length,
@@ -2725,7 +2718,7 @@ async fn artifact_id_for_seal(pool: &PgPool, seal: CasArtifact) -> Result<Artifa
 /// seals precisely this spelling before it writes the packet; terminal
 /// verification reuses it rather than accepting a second manifest format.
 pub(crate) fn canonical_required_manifest(
-    required: &[factory_protocol::ReadExactFileV1],
+    required: &[factory_protocol::ReadExactFileV2],
 ) -> Vec<u8> {
     let mut bytes = b"factory-read-manifest-v1\0".to_vec();
     bytes.extend_from_slice(&(required.len() as u32).to_be_bytes());
@@ -3045,13 +3038,13 @@ fn assignment_role_name(assignment_role: factory_protocol::AssignmentRole) -> &'
     }
 }
 
-fn thinking_name(value: factory_protocol::ThinkingLevelV1) -> &'static str {
+fn thinking_name(value: factory_protocol::ThinkingLevelV2) -> &'static str {
     match value {
-        factory_protocol::ThinkingLevelV1::None => "none",
-        factory_protocol::ThinkingLevelV1::Low => "low",
-        factory_protocol::ThinkingLevelV1::Medium => "medium",
-        factory_protocol::ThinkingLevelV1::High => "high",
-        factory_protocol::ThinkingLevelV1::XHigh => "xhigh",
+        factory_protocol::ThinkingLevelV2::None => "none",
+        factory_protocol::ThinkingLevelV2::Low => "low",
+        factory_protocol::ThinkingLevelV2::Medium => "medium",
+        factory_protocol::ThinkingLevelV2::High => "high",
+        factory_protocol::ThinkingLevelV2::XHigh => "xhigh",
     }
 }
 
@@ -3062,13 +3055,13 @@ fn terminal_operation_name(value: TerminalOperationV1) -> &'static str {
         TerminalOperationV1::QualitySubmitReview => "quality_submit_review",
     }
 }
-fn thinking_code(value: factory_protocol::ThinkingLevelV1) -> i16 {
+fn thinking_code(value: factory_protocol::ThinkingLevelV2) -> i16 {
     match value {
-        factory_protocol::ThinkingLevelV1::None => 0,
-        factory_protocol::ThinkingLevelV1::Low => 1,
-        factory_protocol::ThinkingLevelV1::Medium => 2,
-        factory_protocol::ThinkingLevelV1::High => 3,
-        factory_protocol::ThinkingLevelV1::XHigh => 4,
+        factory_protocol::ThinkingLevelV2::None => 0,
+        factory_protocol::ThinkingLevelV2::Low => 1,
+        factory_protocol::ThinkingLevelV2::Medium => 2,
+        factory_protocol::ThinkingLevelV2::High => 3,
+        factory_protocol::ThinkingLevelV2::XHigh => 4,
     }
 }
 fn operation_mask(ops: &[TerminalOperationV1]) -> i64 {

@@ -292,8 +292,8 @@ impl BoundActorFrame {
 }
 
 /// The actor end of a daemon-created connected descriptor. A later process
-/// custody tranche passes this already-connected file descriptor to Deno; it
-/// never gives an actor a listener path or database URL.
+/// custody tranche passes this already-connected file descriptor to the Rust
+/// host; it never gives an actor a listener path or database URL.
 #[derive(Debug)]
 pub struct ActorClientDescriptor {
     stream: StdUnixStream,
@@ -344,8 +344,8 @@ impl UnboundActorServerConnection {
 impl ActorServerConnection {
     /// Replaces the short operator/frame idle bound with the admitted
     /// assignment's wall limit. Actor connections are intentionally idle
-    /// while Deno starts and while a model reasons; process custody, not the
-    /// operator socket timeout, owns that full-session wall bound.
+    /// while the Rust host starts and while a model reasons; process custody,
+    /// not the operator socket timeout, owns that full-session wall bound.
     pub(crate) fn with_assignment_read_deadline(
         mut self,
         read_deadline: Duration,
@@ -408,7 +408,7 @@ impl ActorServerConnection {
         &self,
         workspace_root: &Path,
         expected_manifest_artifact_id: factory_protocol::ArtifactId,
-        required: Vec<factory_protocol::ReadExactFileV1>,
+        required: Vec<factory_protocol::ReadExactFileV2>,
     ) -> Result<
         crate::workspace_read::WorkspaceReadAuthority,
         crate::workspace_read::WorkspaceReadError,
@@ -1232,7 +1232,7 @@ impl LocalDaemon {
     }
 
     /// Creates one daemon-bound actor socketpair. T5 passes the returned client
-    /// descriptor to its one owned Deno process and serves the returned server
+    /// descriptor to its one owned Rust host process and serves the returned server
     /// connection under process custody.
     pub fn create_actor_socketpair(
         &self,
@@ -1241,7 +1241,7 @@ impl LocalDaemon {
         let (client, server) = StdUnixStream::pair()?;
         // `UnixStream::pair` is commonly created close-on-exec. The exact
         // client descriptor must survive the daemon's owned child exec so the
-        // Deno host receives the already-connected liveness channel, never a
+        // Rust host receives the already-connected liveness channel, never a
         // path it can reconnect to with another identity.
         let client_flags = fcntl_getfd(&client).map_err(io::Error::other)?;
         fcntl_setfd(&client, client_flags & !FdFlags::CLOEXEC).map_err(io::Error::other)?;
@@ -1282,7 +1282,7 @@ impl LocalDaemon {
         &self,
         process: &crate::process::ProcessStore,
         session_id: SessionId,
-        packet: &factory_protocol::AssignmentPacketV1,
+        packet: &factory_protocol::AssignmentPacketV2,
     ) -> Result<(ActorClientDescriptor, ActorServerConnection), LocalTransportError> {
         let identity = process
             .actor_connection_identity(session_id, packet)

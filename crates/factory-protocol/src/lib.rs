@@ -3,7 +3,7 @@
 //! This crate deliberately contains no storage, process, Git, or application
 //! implementation. Its values make the kernel/application boundary explicit;
 //! application-specific source is compiled outside this crate into
-//! [`ApplicationBundleV1`].
+//! [`ApplicationBundleV2`].
 
 mod application;
 mod candidate;

@@ -1,5 +1,5 @@
 use factory_protocol::{
-    ActorToolV1, ApplicationRevisionId, ArtifactId, AssignmentRole, ContextInclusionClassV1,
+    ActorToolV2, ApplicationRevisionId, ArtifactId, AssignmentRole, ContextInclusionClassV1,
     ContextItemV1, ContextReferenceV1, HARNESS_COMPILER_VERSION_V1, HarnessSpecV1, MicroUsd,
     OfficeId,
 };
@@ -16,7 +16,7 @@ fn spec() -> HarnessSpecV1 {
             inclusion: ContextInclusionClassV1::DirectEvidence,
             reason: "direct ticket evidence".to_owned(),
         }],
-        capabilities: vec![ActorToolV1::WorkspaceRead, ActorToolV1::ArtifactRead],
+        capabilities: vec![ActorToolV2::WorkspaceRead, ActorToolV2::ArtifactRead],
         remaining_campaign_allowance: MicroUsd::new(7),
     }
 }
@@ -32,7 +32,7 @@ fn harness_specs_are_closed_bounded_and_reference_identity_once() {
     assert!(duplicate.validate().is_err());
 
     let mut duplicate_tool = spec();
-    duplicate_tool.capabilities.push(ActorToolV1::ArtifactRead);
+    duplicate_tool.capabilities.push(ActorToolV2::ArtifactRead);
     assert!(duplicate_tool.validate().is_err());
 }
 

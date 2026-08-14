@@ -1,6 +1,7 @@
 //! Closed values for one paid assignment and its supervised process.
 //!
-//! These values are deliberately independent of PostgreSQL and of the Pi SDK.
+//! These values are deliberately independent of PostgreSQL and provider
+//! implementation details.
 //! The packet is the immutable authority input for a host process; a terminal
 //! report is only a claim which the kernel rechecks against the packet and
 //! sealed artifacts before it advances durable state.
@@ -9,21 +10,19 @@ use std::collections::BTreeSet;
 
 use crate::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentRole,
-    CandidateId, ContentDigest, ContractError, ExpectedRevision, KernelBuildId, MicroUsd,
-    PROTOCOL_VERSION_V1, RepositoryRelativePath, RuntimeRelativePath, SessionLimitsV1,
-    TicketAttemptId,
+    CandidateId, ContentDigest, ContractError, ExpectedRevision, KernelBuildId,
+    MAX_POLICY_ARTIFACT_BYTES, MicroUsd, PROTOCOL_VERSION_V1, PolicyEntrypointV2,
+    RepositoryRelativePath, SessionLimitsV2, TicketAttemptId,
 };
 
-const JAVASCRIPT_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
-
-pub const ASSIGNMENT_PACKET_V1_FORMAT: u16 = 1;
+pub const ASSIGNMENT_PACKET_V2_FORMAT: u16 = 2;
 
 /// One-time daemon-to-host admission gate sent over inherited FD 0 before Pi
 /// construction. The packet bytes and digest are both present so the host
 /// can verify the exact immutable input; `session_revision` is the only
 /// revision accepted by subsequent session-scoped RPCs.
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct SessionAdmissionFrameV1 {
+pub struct SessionAdmissionFrameV2 {
     pub r#type: String,
     pub protocol_version: u16,
     pub assignment_id: String,
@@ -33,7 +32,7 @@ pub struct SessionAdmissionFrameV1 {
     pub packet_b64: String,
 }
 
-impl SessionAdmissionFrameV1 {
+impl SessionAdmissionFrameV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         if self.r#type != "session.admitted" || self.protocol_version != PROTOCOL_VERSION_V1 {
             return Err(ContractError::InvalidValue {
@@ -43,8 +42,6 @@ impl SessionAdmissionFrameV1 {
         }
         if self.assignment_id.is_empty()
             || self.session_id < 1
-            || self.session_id as u64 > JAVASCRIPT_SAFE_INTEGER_MAX
-            || self.session_revision > JAVASCRIPT_SAFE_INTEGER_MAX
             || self.packet_digest.len() != 64
             || !self
                 .packet_digest
@@ -61,13 +58,13 @@ impl SessionAdmissionFrameV1 {
     }
 }
 
-/// Closed JSON identity carried to the generic Deno host.  This is separate
-/// from the kernel's persistence-facing `AssignmentPacketV1`: the host needs
-/// sealed prompt bytes and generic repository/factory base identities, while
-/// the kernel domain object intentionally remains free of transport details.
+/// Closed JSON identity carried to the Rust host. This is separate from the
+/// kernel's persistence-facing `AssignmentPacketV2`: the host needs sealed
+/// prompt bytes and generic repository/factory base identities, while the
+/// kernel domain object intentionally remains free of transport details.
 /// Every field is explicit; there is no metadata or application-specific map.
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentPacketWireV1 {
+pub struct AssignmentPacketWireV2 {
     pub format_version: u16,
     pub campaign_id: i64,
     pub assignment_id: i64,
@@ -88,15 +85,21 @@ pub struct AssignmentPacketWireV1 {
     pub assignment_prompt_digest: String,
     pub system_prompt_bytes_b64: String,
     pub assignment_prompt_bytes_b64: String,
+    /// Sealed Luau policy source. It is carried inline so the host never
+    /// reads application files from disk after admission.
+    pub policy_digest: String,
+    pub policy_byte_limit: u32,
+    pub policy_bytes_b64: String,
+    pub policy_entrypoint: String,
     pub workspace_root: String,
     pub staging_root: String,
-    pub model: AssignmentModelWireV1,
-    pub limits: AssignmentLimitsWireV1,
-    pub runtime: AssignmentRuntimeWireV1,
-    pub required_reads: Vec<AssignmentReadWireV1>,
+    pub model: AssignmentModelWireV2,
+    pub limits: AssignmentLimitsWireV2,
+    pub runtime: AssignmentRuntimeWireV2,
+    pub required_reads: Vec<AssignmentReadWireV2>,
     /// Closed, named upstream evidence available through `artifact.read`.
     /// This is packet authority, not explanatory target prose.
-    pub assignment_evidence: Vec<AssignmentEvidenceWireV1>,
+    pub assignment_evidence: Vec<AssignmentEvidenceWireV2>,
     pub tools: Vec<String>,
     pub terminal_operations: Vec<String>,
     pub remaining_campaign_allowance_micro_usd: u64,
@@ -105,7 +108,7 @@ pub struct AssignmentPacketWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentModelWireV1 {
+pub struct AssignmentModelWireV2 {
     pub provider: String,
     pub model_id: String,
     pub thinking_level: String,
@@ -119,33 +122,30 @@ pub struct AssignmentModelWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentLimitsWireV1 {
+pub struct AssignmentLimitsWireV2 {
     pub turn_limit: u32,
     pub wall_limit_millis: u64,
     pub output_byte_limit: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentRuntimeWireV1 {
-    pub deno_executable: String,
-    pub deno_version: String,
-    pub source_graph_digest: String,
-    pub resolved_dependency_graph_digest: String,
-    pub deno_json_digest: String,
-    pub deno_lock_digest: String,
-    pub pi_version: String,
-    pub credential_source: AssignmentCredentialWireV1,
+pub struct AssignmentRuntimeWireV2 {
+    /// Absolute path of the exact Rust host executable qualified by the
+    /// installed runtime receipt.
+    pub host_executable: String,
+    /// Full Git commit of the local `pi-agent-core-rs` checkout.
+    pub core_head: String,
+    /// BLAKE3 identity of the closed core source inventory.
+    pub core_source_digest: String,
+    /// Exact Rust toolchain used to build the host and core.
+    pub rust_toolchain: String,
+    /// Name of the inherited environment variable containing the provider
+    /// credential. The value itself never crosses this packet boundary.
+    pub credential_env: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentCredentialWireV1 {
-    pub kind: String,
-    pub name: Option<String>,
-    pub path: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentReadWireV1 {
+pub struct AssignmentReadWireV2 {
     pub path: String,
     pub digest: String,
     pub reason: String,
@@ -155,19 +155,19 @@ pub struct AssignmentReadWireV1 {
 /// `role` selects a single durable semantic position; it is not an
 /// application-controlled label or a generic artifact metadata key.
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
-pub struct AssignmentEvidenceWireV1 {
+pub struct AssignmentEvidenceWireV2 {
     pub role: String,
     pub artifact_id: i64,
     pub digest: String,
     pub byte_length: u64,
 }
 
-/// The complete named evidence closure the generic SDK host may discover from
+/// The complete named evidence closure the generic Rust host may discover from
 /// an assignment. The names intentionally distinguish stdout/stderr and each
 /// reproduced observation: collapsing them would make the source evidence
 /// ambiguous at the actor boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum AssignmentEvidenceRoleV1 {
+pub enum AssignmentEvidenceRoleV2 {
     TicketProposal,
     TicketNarrative,
     TicketEvidence,
@@ -194,7 +194,7 @@ pub enum AssignmentEvidenceRoleV1 {
     ExternalDecisionRationale,
 }
 
-impl AssignmentEvidenceRoleV1 {
+impl AssignmentEvidenceRoleV2 {
     #[must_use]
     pub const fn wire_name(self) -> &'static str {
         match self {
@@ -262,14 +262,14 @@ impl AssignmentEvidenceRoleV1 {
 /// Kernel-domain form of one packet evidence reference. It retains the
 /// artifact's sealed identity instead of accepting an opaque display label.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AssignmentEvidenceV1 {
-    pub role: AssignmentEvidenceRoleV1,
+pub struct AssignmentEvidenceV2 {
+    pub role: AssignmentEvidenceRoleV2,
     pub artifact_id: ArtifactId,
     pub digest: ContentDigest,
     pub byte_length: u64,
 }
 
-impl AssignmentEvidenceV1 {
+impl AssignmentEvidenceV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         Ok(())
     }
@@ -279,7 +279,7 @@ impl AssignmentEvidenceV1 {
 /// state. Only the path, digest, and human reason cross the process boundary;
 /// file bytes never become protocol metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReadExactFileV1 {
+pub struct ReadExactFileV2 {
     pub path: RepositoryRelativePath,
     pub digest: ContentDigest,
     pub reason: String,
@@ -288,12 +288,12 @@ pub struct ReadExactFileV1 {
 /// The daemon's wrapped read result. It contains no file bytes and cannot be
 /// satisfied by shell output or prompt text.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReadObservationV1 {
+pub struct ReadObservationV2 {
     pub path: RepositoryRelativePath,
     pub digest: ContentDigest,
 }
 
-impl ReadObservationV1 {
+impl ReadObservationV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         if self.path.as_str().contains('\0') {
             return Err(ContractError::InvalidValue {
@@ -305,7 +305,7 @@ impl ReadObservationV1 {
     }
 }
 
-impl ReadExactFileV1 {
+impl ReadExactFileV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         if self.reason.is_empty() || self.reason.len() > 240 || self.reason.contains('\0') {
             return Err(ContractError::InvalidValue {
@@ -320,12 +320,11 @@ impl ReadExactFileV1 {
 /// Names exactly one credential source without carrying a secret or an
 /// environment value. The variant is part of the closed packet identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CredentialDescriptorV1 {
+pub enum CredentialDescriptorV2 {
     Environment { name: String },
-    PiAuthStore { path: RuntimeRelativePath },
 }
 
-impl CredentialDescriptorV1 {
+impl CredentialDescriptorV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
         match self {
             Self::Environment { name } => {
@@ -346,11 +345,6 @@ impl CredentialDescriptorV1 {
                 }
                 Ok(())
             }
-            Self::PiAuthStore { path } if !path.as_str().is_empty() => Ok(()),
-            Self::PiAuthStore { .. } => Err(ContractError::InvalidValue {
-                field: "credential auth-store path",
-                reason: "must be a non-empty runtime-relative path",
-            }),
         }
     }
 }
@@ -358,25 +352,28 @@ impl CredentialDescriptorV1 {
 /// Runtime identity checked by the host immediately before spawn. The
 /// credential field is a descriptor only; no secret bytes are represented.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeIdentityV1 {
-    pub deno_executable: AbsoluteHostPath,
-    pub deno_version: String,
-    pub source_graph_digest: ContentDigest,
-    /// Digest of the exact resolved dependency graph used by the installed
-    /// host. Cache layout is execution material and is intentionally absent.
-    pub resolved_dependency_graph_digest: ContentDigest,
-    pub deno_json_digest: ContentDigest,
-    pub deno_lock_digest: ContentDigest,
-    pub pi_version: String,
-    pub credential: CredentialDescriptorV1,
+pub struct RuntimeIdentityV2 {
+    pub host_executable: AbsoluteHostPath,
+    pub core_head: String,
+    pub core_source_digest: ContentDigest,
+    pub rust_toolchain: String,
+    pub credential_env: String,
 }
 
-impl RuntimeIdentityV1 {
+impl RuntimeIdentityV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
-        for (field, value) in [
-            ("Deno version", self.deno_version.as_str()),
-            ("Pi version", self.pi_version.as_str()),
-        ] {
+        if self.core_head.len() != 40
+            || !self
+                .core_head
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(ContractError::InvalidValue {
+                field: "pi-agent-core HEAD",
+                reason: "must be exactly 40 lower-case hexadecimal characters",
+            });
+        }
+        for (field, value) in [("Rust toolchain", self.rust_toolchain.as_str())] {
             if value.is_empty() || value.len() > 240 || value.contains('\0') {
                 return Err(ContractError::InvalidValue {
                     field,
@@ -384,7 +381,10 @@ impl RuntimeIdentityV1 {
                 });
             }
         }
-        self.credential.validate()
+        CredentialDescriptorV2::Environment {
+            name: self.credential_env.clone(),
+        }
+        .validate()
     }
 }
 
@@ -474,7 +474,7 @@ pub enum TerminalCostV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AssignmentPacketV1 {
+pub struct AssignmentPacketV2 {
     pub format_version: u16,
     pub campaign_id: crate::CampaignId,
     pub assignment_id: crate::AssignmentId,
@@ -490,22 +490,29 @@ pub struct AssignmentPacketV1 {
     pub system_prompt_artifact_id: ArtifactId,
     pub assignment_prompt_artifact_id: ArtifactId,
     pub required_read_manifest_artifact_id: ArtifactId,
+    /// The sealed Luau artifact identity and source delivered inline to the
+    /// host. The digest is the artifact identity; no CAS lookup is required
+    /// at actor runtime.
+    pub policy_digest: ContentDigest,
+    pub policy_byte_limit: u32,
+    pub policy_bytes: Vec<u8>,
+    pub policy_entrypoint: PolicyEntrypointV2,
     pub workspace_root: AbsoluteHostPath,
     pub staging_root: AbsoluteHostPath,
-    pub model: crate::ModelProfileV1,
-    pub limits: SessionLimitsV1,
-    pub runtime: RuntimeIdentityV1,
-    pub required_reads: Vec<ReadExactFileV1>,
-    pub assignment_evidence: Vec<AssignmentEvidenceV1>,
+    pub model: crate::ModelProfileV2,
+    pub limits: SessionLimitsV2,
+    pub runtime: RuntimeIdentityV2,
+    pub required_reads: Vec<ReadExactFileV2>,
+    pub assignment_evidence: Vec<AssignmentEvidenceV2>,
     pub terminal_operations: Vec<TerminalOperationV1>,
     pub remaining_campaign_allowance: MicroUsd,
     pub revision: AggregateRevision,
     pub packet_digest: ContentDigest,
 }
 
-impl AssignmentPacketV1 {
+impl AssignmentPacketV2 {
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.format_version != ASSIGNMENT_PACKET_V1_FORMAT {
+        if self.format_version != ASSIGNMENT_PACKET_V2_FORMAT {
             return Err(ContractError::InvalidValue {
                 field: "assignment packet format",
                 reason: "unsupported assignment packet version",
@@ -515,6 +522,33 @@ impl AssignmentPacketV1 {
             return Err(ContractError::InvalidValue {
                 field: "assignment target",
                 reason: "must be 1 through 4096 bytes without NUL",
+            });
+        }
+        if self.policy_byte_limit == 0
+            || self.policy_byte_limit as usize > MAX_POLICY_ARTIFACT_BYTES
+        {
+            return Err(ContractError::InvalidValue {
+                field: "assignment policy byte limit",
+                reason: "must be positive and within the policy ceiling",
+            });
+        }
+        if self.policy_bytes.is_empty() || self.policy_bytes.len() > self.policy_byte_limit as usize
+        {
+            return Err(ContractError::ByteLimitExceeded {
+                field: "assignment policy bytes",
+                maximum: self.policy_byte_limit as usize,
+            });
+        }
+        if self.policy_bytes.contains(&0) || std::str::from_utf8(&self.policy_bytes).is_err() {
+            return Err(ContractError::InvalidValue {
+                field: "assignment policy bytes",
+                reason: "must be nonempty UTF-8 without NUL",
+            });
+        }
+        if ContentDigest::of_bytes(&self.policy_bytes) != self.policy_digest {
+            return Err(ContractError::InvalidValue {
+                field: "assignment policy digest",
+                reason: "does not match sealed policy bytes",
             });
         }
         match (

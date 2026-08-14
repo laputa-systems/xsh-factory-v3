@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV1, AssignmentPacketV1, AssignmentRole,
+    AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole,
     CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV1, CandidateSubmissionV1,
     CandidateSubmitRequest, ContentDigest, ExpectedRevision, QualityRunFullSuiteRequest,
     QualitySubmitReviewRequest, QualityValidationReceiptV1, RepositoryObjectIdV1,
@@ -60,7 +60,7 @@ pub struct ActorRequestBinding<'a> {
     pub principal: &'a str,
     pub session_id: SessionId,
     pub session_revision: ExpectedRevision,
-    pub packet: &'a AssignmentPacketV1,
+    pub packet: &'a AssignmentPacketV2,
 }
 
 /// Ticket facts that were already claimed and snapshot-bound by the scheduler.
@@ -96,7 +96,7 @@ pub struct CandidateCommitPolicy {
 /// supply or mutate any of these fields.
 #[derive(Clone, Debug)]
 pub struct ResolvedEngineeringCandidateAuthority {
-    pub application: ApplicationBundleV1,
+    pub application: ApplicationBundleV2,
     pub repository: QualifiedRepository,
     pub actor_worktree: OwnedWorktree,
     pub ticket: CandidateTicketBinding,
@@ -141,7 +141,7 @@ impl ResolvedEngineeringCandidateAuthority {
 /// full-suite request is admitted.
 #[derive(Clone, Debug)]
 pub struct ResolvedQualityCandidateAuthority {
-    pub application: ApplicationBundleV1,
+    pub application: ApplicationBundleV2,
     pub repository: QualifiedRepository,
     pub candidate: CandidatePacketV1,
     pub expected_attempt_revision: ExpectedRevision,
@@ -223,7 +223,7 @@ pub struct QualityValidationProgram<'a> {
 #[derive(Clone, Debug)]
 pub struct EngineeringCandidateAuthority<'a> {
     pub actor: ActorRequestBinding<'a>,
-    pub application: &'a ApplicationBundleV1,
+    pub application: &'a ApplicationBundleV2,
     pub repository: &'a QualifiedRepository,
     pub actor_worktree: &'a OwnedWorktree,
     pub ticket: CandidateTicketBinding,
@@ -237,7 +237,7 @@ pub struct EngineeringCandidateAuthority<'a> {
 #[derive(Clone, Debug)]
 pub struct QualityCandidateAuthority<'a> {
     pub actor: ActorRequestBinding<'a>,
-    pub application: &'a ApplicationBundleV1,
+    pub application: &'a ApplicationBundleV2,
     pub repository: &'a QualifiedRepository,
     pub candidate: &'a CandidatePacketV1,
     pub expected_attempt_revision: ExpectedRevision,
@@ -327,7 +327,7 @@ pub struct QualityFullSuiteOutcome {
 pub struct ResumedHardValidationAuthority {
     pub principal: String,
     pub command_id: String,
-    pub application: ApplicationBundleV1,
+    pub application: ApplicationBundleV2,
     pub repository: QualifiedRepository,
     pub ticket: CandidateTicketBinding,
     pub candidate_id: CandidateId,
@@ -363,7 +363,7 @@ pub struct ResumedHardValidationOutcome {
 pub struct ResumeCandidateCommitAttachAuthority {
     pub principal: String,
     pub command_id: String,
-    pub application: ApplicationBundleV1,
+    pub application: ApplicationBundleV2,
     pub repository: QualifiedRepository,
     pub ticket: CandidateTicketBinding,
     pub candidate_id: CandidateId,
@@ -1105,7 +1105,7 @@ fn validate_review_authority(
 
 fn validate_common_authority(
     actor: ActorRequestBinding<'_>,
-    application: &ApplicationBundleV1,
+    application: &ApplicationBundleV2,
     repository: &QualifiedRepository,
     assignment_role: AssignmentRole,
     terminal: Option<TerminalOperationV1>,
@@ -1194,7 +1194,7 @@ fn validate_checkpoint(
 }
 
 fn assert_declared_reproducer(
-    application: &ApplicationBundleV1,
+    application: &ApplicationBundleV2,
     command: &DeterministicCommand,
 ) -> Result<(), CandidateRuntimeError> {
     if application
@@ -1209,7 +1209,7 @@ fn assert_declared_reproducer(
 }
 
 fn assert_full_suite(
-    application: &ApplicationBundleV1,
+    application: &ApplicationBundleV2,
     identity: &str,
     commands: &[DeterministicCommand],
 ) -> Result<(), CandidateRuntimeError> {
@@ -1223,7 +1223,7 @@ fn assert_full_suite(
 }
 
 fn exact_command_profiles(
-    declared: &[factory_protocol::CommandProfileV1],
+    declared: &[factory_protocol::CommandProfileV2],
     commands: &[DeterministicCommand],
 ) -> bool {
     declared.len() == commands.len()
@@ -1234,7 +1234,7 @@ fn exact_command_profiles(
 }
 
 fn reject_forbidden_paths(
-    application: &ApplicationBundleV1,
+    application: &ApplicationBundleV2,
     capture: &TreeCapture,
 ) -> Result<(), CandidateRuntimeError> {
     if let Some(path) = forbidden_changed_path(
@@ -1261,7 +1261,7 @@ fn forbidden_changed_path<'a>(
 }
 
 fn validate_commit_message_policy(
-    application: &ApplicationBundleV1,
+    application: &ApplicationBundleV2,
     submission: &CandidateSubmissionV1,
 ) -> Result<(), CandidateRuntimeError> {
     if submission.commit_subject.len()
@@ -1893,12 +1893,11 @@ struct EnvironmentEvidence {
 fn command_set_entry(command: &DeterministicCommand) -> CommandSetEntry {
     let profile = command.profile();
     let executable = match &profile.executable {
-        factory_protocol::ExecutableV1::ApprovedTool(tool) => match tool {
-            factory_protocol::ApprovedToolV1::Cargo => "approved:cargo".to_owned(),
-            factory_protocol::ApprovedToolV1::Git => "approved:git".to_owned(),
-            factory_protocol::ApprovedToolV1::Deno => "approved:deno".to_owned(),
+        factory_protocol::ExecutableV2::ApprovedTool(tool) => match tool {
+            factory_protocol::ApprovedToolV2::Cargo => "approved:cargo".to_owned(),
+            factory_protocol::ApprovedToolV2::Git => "approved:git".to_owned(),
         },
-        factory_protocol::ExecutableV1::RepositoryPath(path) => {
+        factory_protocol::ExecutableV2::RepositoryPath(path) => {
             format!("repository:{}", path.as_str())
         }
     };

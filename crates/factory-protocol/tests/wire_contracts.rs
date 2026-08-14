@@ -236,15 +236,15 @@ fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
 
 #[test]
 fn canonical_bundle_parser_admits_closed_domain_values() {
-    let template = |placeholder: Vec<String>| wire::TemplateWireV1 {
+    let template = |placeholder: Vec<String>| wire::TemplateWireV2 {
         source_path: "templates/system.md".to_owned(),
         digest: "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
         placeholders: placeholder,
         rendered_byte_limit: 4096,
     };
-    let command = |name: &str| wire::CommandWireV1 {
+    let command = |name: &str| wire::CommandWireV2 {
         name: name.to_owned(),
-        executable: wire::ExecutableWireV1 {
+        executable: wire::ExecutableWireV2 {
             approved_tool: Some("cargo".to_owned()),
             repository_path: None,
         },
@@ -256,7 +256,7 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         stderr_byte_limit: 4096,
         expected_exit_status: 0,
     };
-    let model = || wire::ModelWireV1 {
+    let model = || wire::ModelWireV2 {
         provider: "provider".to_owned(),
         model_id: "model".to_owned(),
         thinking_level: "high".to_owned(),
@@ -268,30 +268,36 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         price_cache_write_micro_usd_per_million_tokens: 0,
         capability_flags: vec![],
     };
-    let limits = || wire::LimitsWireV1 {
+    let limits = || wire::LimitsWireV2 {
         turn_limit: 1,
         wall_limit_millis: 1,
         output_byte_limit: 4096,
     };
-    let assignment_role_profile = |assignment_role: &str, tool: &str| wire::AssignmentRoleWireV1 {
+    let assignment_role_profile = |assignment_role: &str, tool: &str| wire::AssignmentRoleWireV2 {
         assignment_role: assignment_role.to_owned(),
         system_template: template(vec!["ASSIGNMENT_ID".to_owned()]),
         assignment_template: template(vec!["ASSIGNMENT_ID".to_owned()]),
+        policy: wire::PolicyWireV2 {
+            source_path: format!("policies/{assignment_role}.luau"),
+            digest: "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            byte_limit: 4096,
+            entrypoint: "factory_policy".to_owned(),
+        },
         tools: vec!["workspace_read".to_owned(), tool.to_owned()],
         model: model(),
         limits: limits(),
     };
-    let bundle = wire::ApplicationBundleWireV1 {
-        format_version: 1,
+    let bundle = wire::ApplicationBundleWireV2 {
+        format_version: 2,
         application_key: "example".to_owned(),
         predecessor_bundle: None,
-        repository: wire::RepositoryWireV1 {
+        repository: wire::RepositoryWireV2 {
             repository_key: "product".to_owned(),
             canonical_local_path: "/workspace/product".to_owned(),
             default_branch: "main".to_owned(),
             delivery_mode: "local_fast_forward_only".to_owned(),
         },
-        mission_template: wire::TemplateWireV1 {
+        mission_template: wire::TemplateWireV2 {
             source_path: "templates/mission.md".to_owned(),
             digest: "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
             placeholders: Vec::new(),
@@ -302,32 +308,32 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
             assignment_role_profile("engineering", "candidate_submit"),
             assignment_role_profile("quality", "quality_submit_review"),
         ],
-        ticket_policy: wire::TicketPolicyWireV1 {
+        ticket_policy: wire::TicketPolicyWireV2 {
             low_water: 1,
             target: 2,
             maximum: 3,
             proposal_maximum: 1,
-            ticket_bounds: wire::TicketBoundsWireV1 {
+            ticket_bounds: wire::TicketBoundsWireV2 {
                 narrative_byte_limit: 4096,
                 acceptance_criteria_limit: 4,
                 contract_read_limit: 4,
             },
         },
-        required_reads: vec![wire::RequiredReadWireV1 {
+        required_reads: vec![wire::RequiredReadWireV2 {
             path: "AGENTS.md".to_owned(),
             reason: "contract".to_owned(),
         }],
         reproducer_profiles: vec![command("reproducer")],
-        validation_profiles: wire::ValidationWireV1 {
+        validation_profiles: wire::ValidationWireV2 {
             focused: vec![command("focused")],
             full: vec![command("full")],
         },
-        git_policy: wire::GitWireV1 {
+        git_policy: wire::GitWireV2 {
             forbidden_paths: vec![".git".to_owned()],
             delivery_mode: "local_fast_forward_only".to_owned(),
             provenance_trailers_required: true,
         },
-        commit_message_policy: wire::CommitMessageWireV1 {
+        commit_message_policy: wire::CommitMessageWireV2 {
             subject_byte_limit: 72,
             body_byte_limit: 4096,
         },
@@ -335,11 +341,11 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
     let mut invalid = bundle.clone();
     invalid.reproducer_profiles[0].executable.repository_path = Some("tool".to_owned());
     assert!(matches!(
-        wire::canonical_application_bundle_json_v1(&invalid),
+        wire::canonical_application_bundle_json_v2(&invalid),
         Err(wire::FrameError::InvalidJson { .. })
     ));
-    let payload = wire::canonical_application_bundle_json_v1(&bundle).expect("canonical bundle");
-    let admitted = wire::parse_application_bundle_v1(payload.as_bytes()).expect("closed bundle");
+    let payload = wire::canonical_application_bundle_json_v2(&bundle).expect("canonical bundle");
+    let admitted = wire::parse_application_bundle_v2(payload.as_bytes()).expect("closed bundle");
     assert_eq!(admitted.application_key.as_str(), "example");
 
     let mut xhigh_bundle = bundle.clone();
@@ -347,23 +353,23 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         .model
         .thinking_level = "xhigh".to_owned();
     let xhigh_payload =
-        wire::canonical_application_bundle_json_v1(&xhigh_bundle).expect("xhigh canonical bundle");
+        wire::canonical_application_bundle_json_v2(&xhigh_bundle).expect("xhigh canonical bundle");
     let xhigh =
-        wire::parse_application_bundle_v1(xhigh_payload.as_bytes()).expect("xhigh closed bundle");
+        wire::parse_application_bundle_v2(xhigh_payload.as_bytes()).expect("xhigh closed bundle");
     assert_eq!(
         xhigh.assignment_role_profiles[1].model.thinking_level,
-        ThinkingLevelV1::XHigh
+        ThinkingLevelV2::XHigh
     );
 
     let mut reordered = payload.as_bytes().to_vec();
     reordered.insert(0, b' ');
     assert!(matches!(
-        wire::parse_application_bundle_v1(&reordered),
+        wire::parse_application_bundle_v2(&reordered),
         Err(wire::FrameError::InvalidJson { .. })
     ));
     let with_unknown = payload.trim_end_matches('}').to_owned() + ",\"unknown\":true}";
     assert!(matches!(
-        wire::parse_application_bundle_v1(with_unknown.as_bytes()),
+        wire::parse_application_bundle_v2(with_unknown.as_bytes()),
         Err(wire::FrameError::InvalidJson { .. })
     ));
 }
@@ -549,7 +555,7 @@ fn product_ticket_golden_converts_to_the_closed_reproducer_contract() {
         OP_PRODUCT_SUBMIT_TICKET,
     )))
     .expect("Product request");
-    let bounds = TicketBoundsV1 {
+    let bounds = TicketBoundsV2 {
         narrative_byte_limit: 100,
         acceptance_criteria_limit: 1,
         contract_read_limit: 1,

@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV1, ApplicationRevisionId, ArtifactId, AssignmentPacketV1,
+    AggregateRevision, ApplicationBundleV2, ApplicationRevisionId, ArtifactId, AssignmentPacketV2,
     AssignmentRole, CandidateId, CandidatePacketV1, ContentDigest, ExpectedRevision, KernelBuildId,
-    RepositoryObjectIdV1, RequiredReadV1, ReviewId, SealedArtifactReferenceV1, SessionId,
-    TicketAttemptId, TicketContractReadV1, TicketId, TicketRevisionId, parse_application_bundle_v1,
-    parse_command_profile_v1, parse_product_ticket_proposal_v1,
+    RepositoryObjectIdV1, RequiredReadV2, ReviewId, SealedArtifactReferenceV1, SessionId,
+    TicketAttemptId, TicketContractReadV1, TicketId, TicketRevisionId, parse_application_bundle_v2,
+    parse_command_profile_v2, parse_product_ticket_proposal_v1,
 };
 use miniserde::{Serialize, json};
 
@@ -87,7 +87,7 @@ pub enum DurableAssignmentTarget {
 }
 
 impl DurableAssignmentTarget {
-    fn from_packet(packet: &AssignmentPacketV1) -> Result<Self, String> {
+    fn from_packet(packet: &AssignmentPacketV2) -> Result<Self, String> {
         match (
             packet.assignment_role,
             packet.ticket_attempt_id,
@@ -319,7 +319,7 @@ impl DurableAuthorityResolver {
         )
         .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
         self.verify_proposal_artifacts(&proposal).await?;
-        let stored_profile = parse_command_profile_v1(
+        let stored_profile = parse_command_profile_v2(
             &self
                 .artifact_bytes(
                     ArtifactId::new(row.reproducer_artifact_id)
@@ -328,7 +328,7 @@ impl DurableAuthorityResolver {
                 .await?,
         )
         .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
-        let proposal_profile = parse_command_profile_v1(
+        let proposal_profile = parse_command_profile_v2(
             &self
                 .artifact_bytes(proposal.reproducer.command.artifact_id)
                 .await?,
@@ -562,7 +562,7 @@ impl DurableAuthorityResolver {
     /// review worktree; actors never receive a chance to select these IDs.
     pub async fn resolve_assignment_launch(
         &self,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
     ) -> Result<DurableAssignmentLaunchContext, String> {
         let assignment = self.load_assignment_context(packet).await?;
         let target = DurableAssignmentTarget::from_packet(packet)?;
@@ -791,7 +791,7 @@ impl DurableAuthorityResolver {
     async fn resolve_engineering_inner(
         &self,
         session_id: SessionId,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
     ) -> Result<ResolvedEngineeringCandidateAuthority, String> {
         if packet.assignment_role != AssignmentRole::Engineering {
             return Err("Engineering resolver received a non-Engineering packet".to_owned());
@@ -817,12 +817,12 @@ impl DurableAuthorityResolver {
         .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
         self.verify_proposal_artifacts(&proposal).await?;
         let profile_bytes = self.artifact_bytes(ticket.reproducer_artifact_id).await?;
-        let stored_profile = parse_command_profile_v1(&profile_bytes)
+        let stored_profile = parse_command_profile_v2(&profile_bytes)
             .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
         let source_profile_bytes = self
             .artifact_bytes(proposal.reproducer.command.artifact_id)
             .await?;
-        let source_profile = parse_command_profile_v1(&source_profile_bytes)
+        let source_profile = parse_command_profile_v2(&source_profile_bytes)
             .map_err(|error| format!("ticket proposal reproducer command is invalid: {error}"))?;
         if stored_profile != source_profile
             || application
@@ -881,7 +881,7 @@ impl DurableAuthorityResolver {
     async fn resolve_quality_inner(
         &self,
         session_id: SessionId,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
     ) -> Result<ResolvedQualityCandidateAuthority, String> {
         if packet.assignment_role != AssignmentRole::Quality {
             return Err("Quality resolver received a non-Quality packet".to_owned());
@@ -935,7 +935,7 @@ impl DurableAuthorityResolver {
         let bundle_artifact_id =
             ArtifactId::new(row.bundle_artifact_id).map_err(|error| error.to_string())?;
         let bundle_bytes = self.artifact_bytes(bundle_artifact_id).await?;
-        let bundle = parse_application_bundle_v1(&bundle_bytes)
+        let bundle = parse_application_bundle_v2(&bundle_bytes)
             .map_err(|error| format!("admitted application bundle is invalid: {error}"))?;
         let repository_path = row.canonical_local_path;
         let default_branch = row.default_branch;
@@ -961,7 +961,7 @@ impl DurableAuthorityResolver {
     /// campaign, application, attempt, or candidate relationship.
     async fn load_assignment_context(
         &self,
-        packet: &AssignmentPacketV1,
+        packet: &AssignmentPacketV2,
     ) -> Result<AssignmentContext, String> {
         let row = sqlx::query!(
             "SELECT campaign_id, application_revision_id, assignment_role, ticket_attempt_id, candidate_id
@@ -1117,7 +1117,7 @@ impl DurableAuthorityResolver {
 
     async fn ticket_contract_reads(
         &self,
-        bundle: &ApplicationBundleV1,
+        bundle: &ApplicationBundleV2,
         proposal_artifact_id: ArtifactId,
     ) -> Result<Vec<TicketContractReadV1>, String> {
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
@@ -1130,7 +1130,7 @@ impl DurableAuthorityResolver {
 
     async fn command_from_reproducer(
         &self,
-        stored_profile: &factory_protocol::CommandProfileV1,
+        stored_profile: &factory_protocol::CommandProfileV2,
         proposal: &factory_protocol::ProductTicketProposalV1,
     ) -> Result<DeterministicCommand, String> {
         let mut profile = stored_profile.clone();
@@ -1326,7 +1326,7 @@ impl DurableAuthorityResolver {
         )
         .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
         self.verify_proposal_artifacts(&proposal).await?;
-        let stored_profile = parse_command_profile_v1(
+        let stored_profile = parse_command_profile_v2(
             &self
                 .artifact_bytes(
                     ArtifactId::new(row.reproducer_artifact_id)
@@ -1335,7 +1335,7 @@ impl DurableAuthorityResolver {
                 .await?,
         )
         .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
-        let source_profile = parse_command_profile_v1(
+        let source_profile = parse_command_profile_v2(
             &self
                 .artifact_bytes(proposal.reproducer.command.artifact_id)
                 .await?,
@@ -1614,7 +1614,7 @@ impl DurableAuthorityResolver {
     /// actor to inspect the reproducer observations that define its contract.
     async fn proposal_evidence(
         &self,
-        application: &ApplicationBundleV1,
+        application: &ApplicationBundleV2,
         proposal_artifact_id: ArtifactId,
     ) -> Result<DurableProposalEvidence, String> {
         let proposal_bytes = self.artifact_bytes(proposal_artifact_id).await?;
@@ -1651,7 +1651,7 @@ impl DurableAuthorityResolver {
     /// opaque string from a command line or an artifact layout.
     async fn engineering_checkpoint_contract(
         &self,
-        application: &ApplicationBundleV1,
+        application: &ApplicationBundleV2,
         ticket_attempt_id: TicketAttemptId,
         proposal_artifact_id: ArtifactId,
         reproducer_artifact_id: ArtifactId,
@@ -1664,9 +1664,9 @@ impl DurableAuthorityResolver {
         .map_err(|error| format!("stored ticket proposal is invalid: {error}"))?;
         self.verify_proposal_artifacts(&proposal).await?;
         let stored_profile =
-            parse_command_profile_v1(&self.artifact_bytes(reproducer_artifact_id).await?)
+            parse_command_profile_v2(&self.artifact_bytes(reproducer_artifact_id).await?)
                 .map_err(|error| format!("stored ticket reproducer profile is invalid: {error}"))?;
-        let proposal_profile = parse_command_profile_v1(
+        let proposal_profile = parse_command_profile_v2(
             &self
                 .artifact_bytes(proposal.reproducer.command.artifact_id)
                 .await?,
@@ -1855,7 +1855,7 @@ impl CandidateQualityAuthorityResolver for DurableAuthorityResolver {
     fn resolve_engineering<'a>(
         &'a self,
         session_id: SessionId,
-        packet: &'a AssignmentPacketV1,
+        packet: &'a AssignmentPacketV2,
     ) -> CandidateQualityAuthorityFuture<'a, ResolvedEngineeringCandidateAuthority> {
         Box::pin(async move {
             self.resolve_engineering_inner(session_id, packet)
@@ -1869,7 +1869,7 @@ impl CandidateQualityAuthorityResolver for DurableAuthorityResolver {
     fn resolve_quality<'a>(
         &'a self,
         session_id: SessionId,
-        packet: &'a AssignmentPacketV1,
+        packet: &'a AssignmentPacketV2,
     ) -> CandidateQualityAuthorityFuture<'a, ResolvedQualityCandidateAuthority> {
         Box::pin(async move {
             self.resolve_quality_inner(session_id, packet)
@@ -1945,7 +1945,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 )
                 .await
                 .map_err(precondition)?;
-            let stored_profile = parse_command_profile_v1(&profile_bytes).map_err(|error| {
+            let stored_profile = parse_command_profile_v2(&profile_bytes).map_err(|error| {
                 precondition(format!(
                     "stored ticket reproducer profile is invalid: {error}"
                 ))
@@ -1955,7 +1955,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
                 .await
                 .map_err(precondition)?;
             let source_profile =
-                parse_command_profile_v1(&source_profile_bytes).map_err(|error| {
+                parse_command_profile_v2(&source_profile_bytes).map_err(|error| {
                     precondition(format!(
                         "ticket proposal reproducer command is invalid: {error}"
                     ))
@@ -2087,7 +2087,7 @@ impl ArchitectTransitionResolver for DurableAuthorityResolver {
 
 #[derive(Clone)]
 struct ApplicationContext {
-    bundle: ApplicationBundleV1,
+    bundle: ApplicationBundleV2,
     repository: QualifiedRepository,
 }
 
@@ -2121,7 +2121,7 @@ pub struct DurableAssignmentLaunchContext {
     /// `artifact.read` without granting arbitrary CAS navigation.
     pub evidence: DurableAssignmentEvidence,
     /// Application-required paths, exactly as admitted with the application.
-    pub application_required_reads: Vec<RequiredReadV1>,
+    pub application_required_reads: Vec<RequiredReadV2>,
     /// Ticket-specific contract reads, parsed from the sealed admitted
     /// proposal. Product has none because it has no upstream ticket target.
     pub ticket_contract_reads: Vec<TicketContractReadV1>,
@@ -2241,7 +2241,7 @@ struct QualityCandidate {
 /// operations. It is assembled only after every persisted artifact is
 /// re-verified from CAS and all scheduler revisions still match.
 struct CandidateRecovery {
-    application: ApplicationBundleV1,
+    application: ApplicationBundleV2,
     repository: QualifiedRepository,
     ticket: CandidateTicketBinding,
     engineering_session_id: SessionId,
@@ -2343,7 +2343,7 @@ fn requalification_manifest_pair(
     }
 }
 
-fn full_suite_commands(bundle: &ApplicationBundleV1) -> Result<Vec<DeterministicCommand>, String> {
+fn full_suite_commands(bundle: &ApplicationBundleV2) -> Result<Vec<DeterministicCommand>, String> {
     bundle
         .validation_profiles
         .full

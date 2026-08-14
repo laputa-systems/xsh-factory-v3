@@ -1,7 +1,8 @@
 # Pure-Rust `pi-agent-core-rs` cutover plan
 
-**Status:** draft for refinement.  This is an execution contract, not an
-implementation authorization for a paid campaign.  It preserves Factory's
+**Status:** implemented; the provider-free qualification inputs remain
+operator-supplied. This is an execution contract, not an implementation
+authorization for a paid campaign. It preserves Factory's
 kernel custody, evidence, cost, validation, and delivery authority while
 removing the upstream Pi SDK and every Deno/TypeScript runtime path.
 
@@ -82,12 +83,11 @@ client must not be copied into Factory.
    adds sealed per-role Luau policy artifacts; it does not smuggle executable
    callbacks or free-form metadata into the generic application model.
 5. **New dependencies.** The direct `pi-agent-*` crates (and transitive Luau
-   runtime) are the intended dependency change.  Rust has no gzip writer in
-   the standard library, so preserving the current gzip transcript artifact
-   will additionally need one reviewed compression dependency such as
-   `flate2`, unless `pi-agent-trace` gains an appropriate bounded gzip sink.
-   Do not add an HTTP, JSON, async-runtime, ORM, or scripting dependency beyond
-   this without a separate decision.
+   runtime) are the intended dependency change. Factory emits its bounded
+   transcript as a standards-compliant stored-block gzip stream using the
+   standard library, so no compression dependency was introduced. Do not add
+   an HTTP, JSON, async-runtime, ORM, or scripting dependency without a
+   separate decision.
 
 ## Target boundaries
 

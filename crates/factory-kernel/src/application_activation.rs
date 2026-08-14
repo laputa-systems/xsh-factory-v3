@@ -84,7 +84,8 @@ pub struct ApplicationActivationReceipt {
 impl KernelStore {
     /// Activates one already-admitted application revision only when no
     /// campaign is running.  The command owns one audit receipt and its
-    /// idempotency identity; it never admits source bytes or invokes Deno.
+    /// idempotency identity; it never admits source bytes or invokes the
+    /// actor host.
     pub async fn activate_application_revision(
         &self,
         command: &ActivateApplicationRevision,

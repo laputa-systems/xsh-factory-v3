@@ -7,7 +7,7 @@
 
 use std::{collections::BTreeSet, str::FromStr};
 
-use crate::{ArtifactId, ContentDigest, ContractError, RepositoryRelativePath, TicketBoundsV1};
+use crate::{ArtifactId, ContentDigest, ContractError, RepositoryRelativePath, TicketBoundsV2};
 
 /// The only comparison rule currently understood for a ticket reproducer.
 /// A future comparison needs a named protocol revision; it cannot be hidden
@@ -229,7 +229,7 @@ pub struct ProductTicketProposalV1 {
 impl ProductTicketProposalV1 {
     /// Validates the generic proposal shape plus the exact bounds pinned in
     /// the selected application revision.
-    pub fn validate(&self, bounds: &TicketBoundsV1) -> Result<(), ContractError> {
+    pub fn validate(&self, bounds: &TicketBoundsV2) -> Result<(), ContractError> {
         validate_text("ticket title", &self.title, PRODUCT_TICKET_TITLE_BYTE_LIMIT)?;
         validate_text(
             "ticket mission value",
@@ -370,8 +370,8 @@ mod tests {
         }
     }
 
-    fn bounds() -> TicketBoundsV1 {
-        TicketBoundsV1 {
+    fn bounds() -> TicketBoundsV2 {
+        TicketBoundsV2 {
             narrative_byte_limit: 32,
             acceptance_criteria_limit: 1,
             contract_read_limit: 1,

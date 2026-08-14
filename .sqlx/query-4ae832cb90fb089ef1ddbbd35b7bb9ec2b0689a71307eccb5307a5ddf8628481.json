@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO factory.kernel_builds (\n                id, build_digest, source_digest, binary_digest, schema_identity,\n                host_executable_path, core_head, core_source_digest, rust_toolchain,\n                qualification_receipt_artifact_id, is_current, revision\n             ) OVERRIDING SYSTEM VALUE\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bytea",
+        "Bytea",
+        "Bytea",
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4ae832cb90fb089ef1ddbbd35b7bb9ec2b0689a71307eccb5307a5ddf8628481"
+}

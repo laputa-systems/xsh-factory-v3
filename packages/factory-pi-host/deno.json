@@ -1,4 +1,0 @@
-{
-  "name": "@factory/pi-host",
-  "exports": "./mod.ts"
-}

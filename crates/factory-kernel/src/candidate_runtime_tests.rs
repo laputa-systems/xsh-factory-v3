@@ -6,7 +6,7 @@ use std::{
 };
 
 use factory_protocol::{
-    ApprovedToolV1, CommandProfileV1, DurationMillis, ExecutableV1, RepositoryRelativePath,
+    ApprovedToolV2, CommandProfileV2, DurationMillis, ExecutableV2, RepositoryRelativePath,
 };
 
 use super::*;
@@ -17,9 +17,9 @@ static NEXT_GIT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
 fn command(name: &str, argv: &[&str]) -> DeterministicCommand {
     DeterministicCommand::new(
-        CommandProfileV1 {
+        CommandProfileV2 {
             name: name.to_owned(),
-            executable: ExecutableV1::ApprovedTool(ApprovedToolV1::Cargo),
+            executable: ExecutableV2::ApprovedTool(ApprovedToolV2::Cargo),
             argv: argv.iter().map(|argument| (*argument).to_owned()).collect(),
             working_directory: RepositoryRelativePath::parse(".").unwrap(),
             environment: Vec::new(),

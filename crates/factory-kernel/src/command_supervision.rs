@@ -7,7 +7,7 @@
 //! clear environment, direct child/process-group ownership, bounded stream
 //! capture, TERM/KILL escalation, and a direct wait.
 //!
-//! The runner accepts a closed [`CommandProfileV1`] plus typed supplemental
+//! The runner accepts a closed [`CommandProfileV2`] plus typed supplemental
 //! evidence. It never receives a command line string, invokes a shell, or
 //! expands arguments. Artifact adoption and durable validation rows remain
 //! outside this module; [`ExactBytes`] is the narrow verified-bytes seam for
@@ -34,7 +34,7 @@ use std::{
 };
 
 use factory_protocol::{
-    ApprovedToolV1, CommandProfileV1, ContentDigest, ExecutableV1, RepositoryRelativePath,
+    ApprovedToolV2, CommandProfileV2, ContentDigest, ExecutableV2, RepositoryRelativePath,
 };
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
@@ -121,20 +121,18 @@ impl ExactExecutable {
 pub struct ApprovedToolExecutables {
     cargo: ExactExecutable,
     git: ExactExecutable,
-    deno: ExactExecutable,
 }
 
 impl ApprovedToolExecutables {
     #[must_use]
-    pub const fn new(cargo: ExactExecutable, git: ExactExecutable, deno: ExactExecutable) -> Self {
-        Self { cargo, git, deno }
+    pub const fn new(cargo: ExactExecutable, git: ExactExecutable) -> Self {
+        Self { cargo, git }
     }
 
-    fn resolve(&self, tool: ApprovedToolV1) -> &ExactExecutable {
+    fn resolve(&self, tool: ApprovedToolV2) -> &ExactExecutable {
         match tool {
-            ApprovedToolV1::Cargo => &self.cargo,
-            ApprovedToolV1::Git => &self.git,
-            ApprovedToolV1::Deno => &self.deno,
+            ApprovedToolV2::Cargo => &self.cargo,
+            ApprovedToolV2::Git => &self.git,
         }
     }
 
@@ -359,7 +357,7 @@ impl CommandExpectation {
 /// A bounded command profile plus exact input and comparison evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeterministicCommand {
-    profile: CommandProfileV1,
+    profile: CommandProfileV2,
     stdin: CommandStdin,
     expectation: CommandExpectation,
 }
@@ -369,7 +367,7 @@ impl DeterministicCommand {
     /// admission normally performed these checks earlier; repetition here
     /// prevents a malformed in-memory caller from widening host authority.
     pub fn new(
-        profile: CommandProfileV1,
+        profile: CommandProfileV2,
         stdin: CommandStdin,
         expectation: CommandExpectation,
     ) -> Result<Self, CommandSupervisionError> {
@@ -396,7 +394,7 @@ impl DeterministicCommand {
     }
 
     #[must_use]
-    pub fn profile(&self) -> &CommandProfileV1 {
+    pub fn profile(&self) -> &CommandProfileV2 {
         &self.profile
     }
 
@@ -435,15 +433,15 @@ impl CommandRunner {
         command: &DeterministicCommand,
     ) -> Result<CommandReceipt, CommandSupervisionError> {
         let (executable, cargo_toolchain_environment) = match &command.profile.executable {
-            ExecutableV1::ApprovedTool(tool) => (
+            ExecutableV2::ApprovedTool(tool) => (
                 self.tools.resolve(*tool).path().to_owned(),
-                if *tool == ApprovedToolV1::Cargo {
+                if *tool == ApprovedToolV2::Cargo {
                     Some(self.tools.cargo_toolchain_environment()?)
                 } else {
                     None
                 },
             ),
-            ExecutableV1::RepositoryPath(path) => (workspace.resolve_executable(path)?, None),
+            ExecutableV2::RepositoryPath(path) => (workspace.resolve_executable(path)?, None),
         };
         let cwd = workspace.resolve_directory(&command.profile.working_directory)?;
         let mut child_command = Command::new(&executable);
@@ -925,9 +923,9 @@ impl GitTrackedTreeProbe {
         runner: &CommandRunner,
         workspace: &CommandWorkspace,
     ) -> Result<SourceTreeObservation, CommandSupervisionError> {
-        let profile = CommandProfileV1 {
+        let profile = CommandProfileV2 {
             name: "tracked-source-tree-exactness".to_owned(),
-            executable: ExecutableV1::ApprovedTool(ApprovedToolV1::Git),
+            executable: ExecutableV2::ApprovedTool(ApprovedToolV2::Git),
             argv: vec![
                 "diff".to_owned(),
                 "--quiet".to_owned(),
@@ -1067,7 +1065,7 @@ impl ValidationReceipt {
     }
 }
 
-fn validate_profile(profile: &CommandProfileV1) -> Result<(), CommandSupervisionError> {
+fn validate_profile(profile: &CommandProfileV2) -> Result<(), CommandSupervisionError> {
     if profile.name.is_empty() || profile.name.len() > 160 || profile.name.contains('\0') {
         return Err(CommandSupervisionError::InvalidProfileName);
     }
@@ -1488,7 +1486,7 @@ mod tests {
     };
 
     use factory_protocol::{
-        ApprovedToolV1, CommandProfileV1, DurationMillis, EnvironmentAdditionV1, ExecutableV1,
+        ApprovedToolV2, CommandProfileV2, DurationMillis, EnvironmentAdditionV2, ExecutableV2,
         RepositoryRelativePath,
     };
 
@@ -1553,8 +1551,8 @@ mod tests {
         fs::set_permissions(path, permissions).expect("make synthetic script executable");
     }
 
-    fn profile(name: &str, executable: ExecutableV1, argv: &[&str]) -> CommandProfileV1 {
-        CommandProfileV1 {
+    fn profile(name: &str, executable: ExecutableV2, argv: &[&str]) -> CommandProfileV2 {
+        CommandProfileV2 {
             name: name.to_owned(),
             executable,
             argv: argv.iter().map(|value| (*value).to_owned()).collect(),
@@ -1567,10 +1565,10 @@ mod tests {
         }
     }
 
-    fn repository_command(name: &str, argv: &[&str]) -> CommandProfileV1 {
+    fn repository_command(name: &str, argv: &[&str]) -> CommandProfileV2 {
         profile(
             name,
-            ExecutableV1::RepositoryPath(
+            ExecutableV2::RepositoryPath(
                 RepositoryRelativePath::parse(format!("tools/{name}")).expect("script path"),
             ),
             argv,
@@ -1586,7 +1584,7 @@ mod tests {
     }
 
     fn command(
-        profile: CommandProfileV1,
+        profile: CommandProfileV2,
         stdin: CommandStdin,
         stdout: Option<&[u8]>,
         stderr: Option<&[u8]>,
@@ -1598,7 +1596,7 @@ mod tests {
     fn runner() -> CommandRunner {
         let executable = ExactExecutable::discover("/bin/echo").expect("installed echo");
         CommandRunner::new(
-            ApprovedToolExecutables::new(executable.clone(), executable.clone(), executable),
+            ApprovedToolExecutables::new(executable.clone(), executable.clone()),
             Duration::from_millis(40),
         )
         .expect("runner")
@@ -1608,7 +1606,7 @@ mod tests {
         let echo = ExactExecutable::discover("/bin/echo").expect("installed echo");
         let git = ExactExecutable::discover("/usr/bin/git").expect("installed Git");
         CommandRunner::new(
-            ApprovedToolExecutables::new(echo.clone(), git, echo),
+            ApprovedToolExecutables::new(echo, git),
             Duration::from_millis(40),
         )
         .expect("runner with exact Git")
@@ -1636,7 +1634,7 @@ printf '%s' "$1"
         );
         let marker = root.join("interpolated-marker");
         let mut profile = repository_command("exact-argv", &["$(touch interpolated-marker)"]);
-        profile.environment.push(EnvironmentAdditionV1 {
+        profile.environment.push(EnvironmentAdditionV2 {
             name: "DECLARED".to_owned(),
             value: "allowed".to_owned(),
         });
@@ -1662,15 +1660,11 @@ printf '%s' "$1"
     fn approved_tool_identity_resolves_to_the_exact_installed_executable() {
         let root = temporary_repository("approved-tool");
         let executable = ExactExecutable::discover("/bin/echo").expect("installed echo");
-        let tools = ApprovedToolExecutables::new(
-            executable.clone(),
-            executable.clone(),
-            executable.clone(),
-        );
+        let tools = ApprovedToolExecutables::new(executable.clone(), executable.clone());
         let command = command(
             profile(
                 "approved",
-                ExecutableV1::ApprovedTool(ApprovedToolV1::Deno),
+                ExecutableV2::ApprovedTool(ApprovedToolV2::Git),
                 &["approved-tool"],
             ),
             CommandStdin::Empty,
@@ -1711,14 +1705,14 @@ printf '%s' "$1"
         let echo = ExactExecutable::discover("/bin/echo").expect("installed echo");
         let mut cargo_profile = profile(
             "cargo-check",
-            ExecutableV1::ApprovedTool(ApprovedToolV1::Cargo),
+            ExecutableV2::ApprovedTool(ApprovedToolV2::Cargo),
             &["check", "--offline", "--quiet"],
         );
         cargo_profile.timeout = DurationMillis::new(5_000);
         let exact = command(cargo_profile, CommandStdin::Empty, None, None);
 
         let receipt = CommandRunner::new(
-            ApprovedToolExecutables::new(cargo, echo.clone(), echo),
+            ApprovedToolExecutables::new(cargo, echo),
             Duration::from_secs(1),
         )
         .expect("runner")
@@ -2071,7 +2065,7 @@ printf broken; exit 23
         let root = temporary_repository("rejections");
         write_script(&root, "rejections", "exit 0");
         let mut replacement = repository_command("rejections", &[]);
-        replacement.environment.push(EnvironmentAdditionV1 {
+        replacement.environment.push(EnvironmentAdditionV2 {
             name: "PATH".to_owned(),
             value: "/unsafe".to_owned(),
         });
@@ -2084,7 +2078,7 @@ printf broken; exit 23
             .expect("create synthetic repository symlink");
         let profile = profile(
             "symlink",
-            ExecutableV1::RepositoryPath(
+            ExecutableV2::RepositoryPath(
                 RepositoryRelativePath::parse("tools/symlink").expect("symlink path"),
             ),
             &[],

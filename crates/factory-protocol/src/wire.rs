@@ -12,33 +12,28 @@ use miniserde::{Deserialize, Serialize, json};
 use thiserror::Error;
 
 use crate::{
-    AbsoluteHostPath, ActorToolV1, ApplicationBundleV1, ApplicationKey, ApplicationRelativePath,
-    ApprovedToolV1, ArchitectPrincipalV1, AssignmentPacketWireV1, AssignmentRole,
-    AssignmentRoleProfileV1, CandidateDecisionRequestV1, CandidateDecisionV1,
-    CandidateSubmissionV1, CommandObservationV1, CommandProfileV1, CommitMessagePolicyV1,
-    ContentDigest, ContractError, DeliveryModeV1, DuplicateSearchInputV1, DurationMillis,
-    EnvironmentAdditionV1, ExecutableV1, GitPolicyV1, InstitutionalObjectKind,
-    InstitutionalReference, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1,
-    OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1,
-    OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1, OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1,
-    ProductTicketProposalV1, PublicationId, QualityFullSuiteRequestV1, QualityReviewSubmissionV1,
-    ReleaseDecisionV1, RepositoryBindingV1, RepositoryRelativePath, RequiredReadV1, ReviewId,
-    ReviewVerdict, RuntimeRelativePath, SealedArtifactReferenceV1, SessionLimitsV1,
-    SponsorshipDecisionV1, TemplateArtifactV1, TemplatePlaceholderV1, ThinkingLevelV1,
-    TicketAttemptId, TicketBoundsV1, TicketContractReadV1, TicketPolicyV1, TicketRevisionId,
-    TwoRunReproducerV1, ValidationId, ValidationProfilesV1,
+    ASSIGNMENT_PACKET_V2_FORMAT, AbsoluteHostPath, ActorPolicyArtifactV2, ActorToolV2,
+    ApplicationBundleV2, ApplicationKey, ApplicationRelativePath, ApprovedToolV2,
+    ArchitectPrincipalV1, AssignmentPacketWireV2, AssignmentRole, AssignmentRoleProfileV2,
+    CandidateDecisionRequestV1, CandidateDecisionV1, CandidateSubmissionV1, CommandObservationV1,
+    CommandProfileV2, CommitMessagePolicyV2, ContentDigest, ContractError, DeliveryModeV2,
+    DuplicateSearchInputV1, DurationMillis, EnvironmentAdditionV2, ExecutableV2, GitPolicyV2,
+    InstitutionalObjectKind, InstitutionalReference, KernelBuildId, MAX_POLICY_ARTIFACT_BYTES,
+    MicroUsd, ModelCapabilityV2, ModelProfileV2, OP_FORUM_CREATE_THREAD_V1,
+    OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1, OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1,
+    OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1, PolicyEntrypointV2, ProductTicketProposalV1,
+    PublicationId, QualityFullSuiteRequestV1, QualityReviewSubmissionV1, ReleaseDecisionV1,
+    RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2, ReviewId, ReviewVerdict,
+    RuntimeRelativePath, SealedArtifactReferenceV1, SessionLimitsV2, SponsorshipDecisionV1,
+    TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketAttemptId, TicketBoundsV2,
+    TicketContractReadV1, TicketPolicyV2, TicketRevisionId, TwoRunReproducerV1, ValidationId,
+    ValidationProfilesV2,
 };
 
 pub const PROTOCOL_VERSION_V1: u16 = 1;
 pub const REQUEST_FRAME_MAX_BYTES: usize = 1 << 20;
 pub const RESPONSE_FRAME_MAX_BYTES: usize = 4 << 20;
 pub const FRAME_PREFIX_BYTES: usize = 4;
-
-/// Assignment packets are decoded by the Deno host as JavaScript `Number`
-/// values for their numeric fields.  Keep Rust admission at the exact
-/// integer range JavaScript can represent, rather than allowing a packet
-/// which the host would round before it reaches the SDK.
-pub const JAVASCRIPT_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
 
 pub const OP_WORKSPACE_READ: &str = "workspace.read";
 pub const OP_ARTIFACT_SEAL_WORKSPACE_FILE: &str = "artifact.seal_workspace_file";
@@ -435,7 +430,7 @@ impl ProductSubmitTicketRequest {
     /// custody before committing a proposal.
     pub fn proposal(
         &self,
-        bounds: &TicketBoundsV1,
+        bounds: &TicketBoundsV2,
     ) -> Result<ProductTicketProposalV1, ContractError> {
         self.proposal_wire().into_domain(bounds)
     }
@@ -490,7 +485,7 @@ pub fn canonical_product_ticket_proposal_wire_json_v1(
 /// validates them against the selected immutable application bounds.
 pub fn parse_product_ticket_proposal_v1(
     payload: &[u8],
-    bounds: &TicketBoundsV1,
+    bounds: &TicketBoundsV2,
 ) -> Result<ProductTicketProposalV1, FrameError> {
     let proposal: ProductTicketProposalWireV1 = decode_closed_json(payload, "ticket proposal")?;
     let canonical = canonical_product_ticket_proposal_wire_json_v1(&proposal);
@@ -517,7 +512,7 @@ impl SealedArtifactReferenceWireV1 {
 impl ProductTicketProposalWireV1 {
     fn into_domain(
         self,
-        bounds: &TicketBoundsV1,
+        bounds: &TicketBoundsV2,
     ) -> Result<ProductTicketProposalV1, ContractError> {
         let proposal = ProductTicketProposalV1 {
             title: self.title,
@@ -1700,14 +1695,14 @@ pub struct ErrorResponse {
 // Canonical assignment admission
 // -------------------------------------------------------------------------
 
-/// Returns the recursively key-sorted JSON spelling shared with the Deno
-/// `canonicalJson` helper. `miniserde::json::Value` uses `BTreeMap` objects, so
+/// Returns the recursively key-sorted JSON spelling used by the Rust host.
+/// `miniserde::json::Value` uses `BTreeMap` objects, so
 /// this remains a closed, dependency-free canonicalizer rather than an
 /// untyped value crossing into the kernel domain.
-pub fn canonical_assignment_packet_json_v1(
-    packet: &AssignmentPacketWireV1,
+pub fn canonical_assignment_packet_json_v2(
+    packet: &AssignmentPacketWireV2,
 ) -> Result<String, FrameError> {
-    validate_assignment_packet_wire_v1(packet, true)?;
+    validate_assignment_packet_wire_v2(packet, true)?;
     let encoded = json::to_string(packet);
     canonical_json_value(encoded.as_bytes(), "assignment packet")
 }
@@ -1715,39 +1710,39 @@ pub fn canonical_assignment_packet_json_v1(
 /// Computes the packet seal over canonical unsigned JSON. The signed packet
 /// carries this digest in `packet_digest`; hashing the signed bytes would be
 /// self-referential and is therefore deliberately not the contract.
-pub fn unsigned_assignment_packet_digest_v1(
-    packet: &AssignmentPacketWireV1,
+pub fn unsigned_assignment_packet_digest_v2(
+    packet: &AssignmentPacketWireV2,
 ) -> Result<ContentDigest, FrameError> {
     let mut unsigned = packet.clone();
     unsigned.packet_digest.clear();
-    let canonical = canonical_assignment_packet_json_v1(&unsigned)?;
+    let canonical = canonical_assignment_packet_json_v2(&unsigned)?;
     Ok(ContentDigest::of_bytes(canonical.as_bytes()))
 }
 
 /// Parses only canonical closed packet bytes. Re-serialization is compared
 /// byte-for-byte, which rejects whitespace, reordered keys, numeric aliases,
 /// and unknown fields that miniserde would otherwise ignore on a DTO.
-pub fn parse_assignment_packet_v1(payload: &[u8]) -> Result<AssignmentPacketWireV1, FrameError> {
-    let packet: AssignmentPacketWireV1 = decode_closed_json(payload, "assignment packet")?;
-    let canonical = canonical_assignment_packet_json_v1(&packet)?;
+pub fn parse_assignment_packet_v2(payload: &[u8]) -> Result<AssignmentPacketWireV2, FrameError> {
+    let packet: AssignmentPacketWireV2 = decode_closed_json(payload, "assignment packet")?;
+    let canonical = canonical_assignment_packet_json_v2(&packet)?;
     if canonical.as_bytes() != payload {
         return Err(FrameError::InvalidJson {
             operation: "assignment packet",
-            detail: "packet bytes are not canonical V1 JSON or contain unknown fields".into(),
+            detail: "packet bytes are not canonical V2 JSON or contain unknown fields".into(),
         });
     }
-    validate_assignment_packet_wire_v1(&packet, false)?;
+    validate_assignment_packet_wire_v2(&packet, false)?;
     Ok(packet)
 }
 
 /// Verifies both the packet's internal seal and the daemon's out-of-band
 /// attestation digest before a host may construct Pi.
-pub fn verify_assignment_packet_v1(
+pub fn verify_assignment_packet_v2(
     payload: &[u8],
     expected_digest: &str,
-) -> Result<AssignmentPacketWireV1, FrameError> {
-    let packet = parse_assignment_packet_v1(payload)?;
-    let computed = unsigned_assignment_packet_digest_v1(&packet)?;
+) -> Result<AssignmentPacketWireV2, FrameError> {
+    let packet = parse_assignment_packet_v2(payload)?;
+    let computed = unsigned_assignment_packet_digest_v2(&packet)?;
     let packet_digest = ContentDigest::from_str(&packet.packet_digest).map_err(|error| {
         FrameError::InvalidJson {
             operation: "assignment packet",
@@ -1768,11 +1763,11 @@ pub fn verify_assignment_packet_v1(
     Ok(packet)
 }
 
-pub fn decode_assignment_packet_v1(
+pub fn decode_assignment_packet_v2(
     frame: &[u8],
     maximum: usize,
-) -> Result<AssignmentPacketWireV1, FrameError> {
-    parse_assignment_packet_v1(decode_frame(frame, maximum)?)
+) -> Result<AssignmentPacketWireV2, FrameError> {
+    parse_assignment_packet_v2(decode_frame(frame, maximum)?)
 }
 
 fn decode_closed_json<T: Deserialize>(
@@ -1795,11 +1790,11 @@ fn canonical_json_value(payload: &[u8], operation: &'static str) -> Result<Strin
     Ok(json::to_string(&value))
 }
 
-fn validate_assignment_packet_wire_v1(
-    packet: &AssignmentPacketWireV1,
+fn validate_assignment_packet_wire_v2(
+    packet: &AssignmentPacketWireV2,
     allow_empty_digest: bool,
 ) -> Result<(), FrameError> {
-    if packet.format_version != PROTOCOL_VERSION_V1 {
+    if packet.format_version != ASSIGNMENT_PACKET_V2_FORMAT {
         return packet_error("format_version", "unsupported packet version");
     }
     for (field, value) in [
@@ -1822,21 +1817,15 @@ fn validate_assignment_packet_wire_v1(
         if value <= 0 {
             return packet_error(field, "must be greater than zero");
         }
-        if (value as u64) > JAVASCRIPT_SAFE_INTEGER_MAX {
-            return packet_error(field, "exceeds JavaScript safe integer range");
-        }
     }
     for (field, value) in [
         ("ticket_attempt_id", packet.ticket_attempt_id),
         ("candidate_id", packet.candidate_id),
     ] {
-        if let Some(value) = value {
-            if value <= 0 {
-                return packet_error(field, "must be greater than zero when present");
-            }
-            if (value as u64) > JAVASCRIPT_SAFE_INTEGER_MAX {
-                return packet_error(field, "exceeds JavaScript safe integer range");
-            }
+        if let Some(value) = value
+            && value <= 0
+        {
+            return packet_error(field, "must be greater than zero when present");
         }
     }
     for (field, value) in [
@@ -1854,9 +1843,10 @@ fn validate_assignment_packet_wire_v1(
             "assignment_prompt_digest",
             packet.assignment_prompt_digest.as_str(),
         ),
+        ("policy_digest", packet.policy_digest.as_str()),
         (
-            "runtime.resolved_dependency_graph_digest",
-            packet.runtime.resolved_dependency_graph_digest.as_str(),
+            "runtime.core_source_digest",
+            packet.runtime.core_source_digest.as_str(),
         ),
     ] {
         validate_digest(field, value)?;
@@ -1891,6 +1881,30 @@ fn validate_assignment_packet_wire_v1(
         "assignment_prompt_bytes_b64",
         &packet.assignment_prompt_bytes_b64,
     )?;
+    let policy_bytes = decode_base64("policy_bytes_b64", &packet.policy_bytes_b64)?;
+    if packet.policy_byte_limit == 0
+        || packet.policy_byte_limit as usize > MAX_POLICY_ARTIFACT_BYTES
+    {
+        return packet_error(
+            "policy_byte_limit",
+            "must be positive and within the policy ceiling",
+        );
+    }
+    if policy_bytes.is_empty() || policy_bytes.len() > packet.policy_byte_limit as usize {
+        return packet_error("policy_bytes_b64", "source exceeds its declared byte limit");
+    }
+    if std::str::from_utf8(&policy_bytes).is_err() || policy_bytes.contains(&0) {
+        return packet_error("policy_bytes_b64", "source must be UTF-8 without NUL");
+    }
+    if ContentDigest::of_bytes(&policy_bytes).to_hex() != packet.policy_digest {
+        return packet_error("policy_digest", "does not match policy source bytes");
+    }
+    PolicyEntrypointV2::parse(&packet.policy_entrypoint).map_err(|error| {
+        FrameError::InvalidJson {
+            operation: "assignment packet",
+            detail: format!("policy_entrypoint: {error}"),
+        }
+    })?;
     if packet.model.provider.is_empty() || packet.model.model_id.is_empty() {
         return packet_error("model", "provider and model_id are required");
     }
@@ -1902,32 +1916,6 @@ fn validate_assignment_packet_wire_v1(
     }
     if packet.model.context_token_limit == 0 || packet.model.output_token_limit == 0 {
         return packet_error("model limits", "must be positive");
-    }
-    for (field, value) in [
-        (
-            "model.price_input_micro_usd_per_million_tokens",
-            packet.model.price_input_micro_usd_per_million_tokens,
-        ),
-        (
-            "model.price_output_micro_usd_per_million_tokens",
-            packet.model.price_output_micro_usd_per_million_tokens,
-        ),
-        (
-            "model.price_cache_read_micro_usd_per_million_tokens",
-            packet.model.price_cache_read_micro_usd_per_million_tokens,
-        ),
-        (
-            "model.price_cache_write_micro_usd_per_million_tokens",
-            packet.model.price_cache_write_micro_usd_per_million_tokens,
-        ),
-        ("limits.wall_limit_millis", packet.limits.wall_limit_millis),
-        (
-            "remaining_campaign_allowance_micro_usd",
-            packet.remaining_campaign_allowance_micro_usd,
-        ),
-        ("aggregate_revision", packet.aggregate_revision),
-    ] {
-        validate_javascript_safe_integer(field, value)?;
     }
     if packet.limits.turn_limit == 0
         || packet.limits.wall_limit_millis == 0
@@ -2003,30 +1991,40 @@ fn validate_assignment_packet_wire_v1(
         if !evidence_roles.insert(evidence.role.as_str()) {
             return packet_error("assignment_evidence", "roles must be unique");
         }
-        if evidence.artifact_id <= 0 || (evidence.artifact_id as u64) > JAVASCRIPT_SAFE_INTEGER_MAX
-        {
+        if evidence.artifact_id <= 0 {
             return packet_error(
                 "assignment_evidence.artifact_id",
-                "is not a safe positive identity",
+                "is not a positive identity",
             );
         }
-        validate_javascript_safe_integer("assignment_evidence.byte_length", evidence.byte_length)?;
         validate_digest("assignment_evidence.digest", &evidence.digest)?;
     }
-    match packet.runtime.credential_source.kind.as_str() {
-        "environment"
-            if packet.runtime.credential_source.name.is_some()
-                && packet.runtime.credential_source.path.is_none() => {}
-        "pi_auth_store"
-            if packet.runtime.credential_source.path.is_some()
-                && packet.runtime.credential_source.name.is_none() => {}
-        _ => {
-            return packet_error(
-                "runtime.credential_source",
-                "closed credential descriptor is invalid",
-            );
-        }
+    bounded_packet_text(
+        "runtime.host_executable",
+        &packet.runtime.host_executable,
+        4096,
+    )?;
+    if !packet.runtime.host_executable.starts_with('/') {
+        return packet_error("runtime.host_executable", "must be an absolute host path");
     }
+    if packet.runtime.core_head.len() != 40
+        || !packet
+            .runtime
+            .core_head
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return packet_error(
+            "runtime.core_head",
+            "must be exactly 40 lower-case hexadecimal characters",
+        );
+    }
+    bounded_packet_text(
+        "runtime.rust_toolchain",
+        &packet.runtime.rust_toolchain,
+        240,
+    )?;
+    validate_credential_environment("runtime.credential_env", &packet.runtime.credential_env)?;
     Ok(())
 }
 
@@ -2105,6 +2103,68 @@ fn validate_base64(field: &'static str, value: &str) -> Result<(), FrameError> {
     Ok(())
 }
 
+fn decode_base64(field: &'static str, value: &str) -> Result<Vec<u8>, FrameError> {
+    validate_base64(field, value)?;
+    let bytes = value.as_bytes();
+    let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
+    let body = &bytes[..bytes.len() - padding];
+    let mut output = Vec::with_capacity(value.len() / 4 * 3);
+    let (chunks, remainder) = bytes.as_chunks::<4>();
+    debug_assert!(
+        remainder.is_empty(),
+        "validated base64 has complete quartets"
+    );
+    for chunk in chunks {
+        let first = base64_value(chunk[0]).ok_or_else(|| invalid_base64(field))?;
+        let second = base64_value(chunk[1]).ok_or_else(|| invalid_base64(field))?;
+        output.push((first << 2) | (second >> 4));
+        if chunk[2] != b'=' {
+            let third = base64_value(chunk[2]).ok_or_else(|| invalid_base64(field))?;
+            output.push((second << 4) | (third >> 2));
+            if chunk[3] != b'=' {
+                let fourth = base64_value(chunk[3]).ok_or_else(|| invalid_base64(field))?;
+                output.push((third << 6) | fourth);
+            }
+        }
+    }
+    // Canonical base64 requires unused trailing bits to be zero. This also
+    // prevents multiple encodings of one policy source from crossing the
+    // packet identity boundary.
+    if !body.is_empty() {
+        let remainder = body.len() % 4;
+        if remainder == 2 {
+            let value = base64_value(body[body.len() - 1]).ok_or_else(|| invalid_base64(field))?;
+            if value & 0x0f != 0 {
+                return Err(invalid_base64(field));
+            }
+        } else if remainder == 3 {
+            let value = base64_value(body[body.len() - 1]).ok_or_else(|| invalid_base64(field))?;
+            if value & 0x03 != 0 {
+                return Err(invalid_base64(field));
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+fn invalid_base64(field: &'static str) -> FrameError {
+    FrameError::InvalidJson {
+        operation: "assignment packet",
+        detail: format!("{field}: invalid canonical base64"),
+    }
+}
+
 fn validate_unique_strings(field: &'static str, values: &[String]) -> Result<(), FrameError> {
     let mut seen = std::collections::BTreeSet::new();
     if values
@@ -2116,12 +2176,18 @@ fn validate_unique_strings(field: &'static str, values: &[String]) -> Result<(),
     Ok(())
 }
 
-fn validate_javascript_safe_integer(field: &'static str, value: u64) -> Result<(), FrameError> {
-    if value > JAVASCRIPT_SAFE_INTEGER_MAX {
-        packet_error(field, "exceeds JavaScript safe integer range")
-    } else {
-        Ok(())
+fn validate_credential_environment(field: &'static str, value: &str) -> Result<(), FrameError> {
+    if value.is_empty()
+        || value.len() > 160
+        || !value.bytes().enumerate().all(|(index, byte)| {
+            (index == 0 && (byte.is_ascii_uppercase() || byte == b'_'))
+                || (index > 0
+                    && (byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'))
+        })
+    {
+        return packet_error(field, "must be a valid upper-case environment name");
     }
+    Ok(())
 }
 
 fn is_known_assignment_tool(value: &str) -> bool {
@@ -2162,26 +2228,26 @@ fn is_known_terminal_operation(value: &str) -> bool {
 
 /// The wire-only representation of the closed application bundle. Keeping
 /// this DTO beside the frame parser makes the admission seam explicit while
-/// leaving application TypeScript outside the kernel. It has no metadata map
+/// leaving application source outside the kernel. It has no metadata map
 /// and no executable callback field.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ApplicationBundleWireV1 {
+pub struct ApplicationBundleWireV2 {
     pub format_version: u16,
     pub application_key: String,
     pub predecessor_bundle: Option<String>,
-    pub repository: RepositoryWireV1,
-    pub mission_template: TemplateWireV1,
-    pub assignment_role_profiles: Vec<AssignmentRoleWireV1>,
-    pub ticket_policy: TicketPolicyWireV1,
-    pub required_reads: Vec<RequiredReadWireV1>,
-    pub reproducer_profiles: Vec<CommandWireV1>,
-    pub validation_profiles: ValidationWireV1,
-    pub git_policy: GitWireV1,
-    pub commit_message_policy: CommitMessageWireV1,
+    pub repository: RepositoryWireV2,
+    pub mission_template: TemplateWireV2,
+    pub assignment_role_profiles: Vec<AssignmentRoleWireV2>,
+    pub ticket_policy: TicketPolicyWireV2,
+    pub required_reads: Vec<RequiredReadWireV2>,
+    pub reproducer_profiles: Vec<CommandWireV2>,
+    pub validation_profiles: ValidationWireV2,
+    pub git_policy: GitWireV2,
+    pub commit_message_policy: CommitMessageWireV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RepositoryWireV1 {
+pub struct RepositoryWireV2 {
     pub repository_key: String,
     pub canonical_local_path: String,
     pub default_branch: String,
@@ -2189,7 +2255,7 @@ pub struct RepositoryWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TemplateWireV1 {
+pub struct TemplateWireV2 {
     pub source_path: String,
     pub digest: String,
     pub placeholders: Vec<String>,
@@ -2197,17 +2263,26 @@ pub struct TemplateWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AssignmentRoleWireV1 {
+pub struct AssignmentRoleWireV2 {
     pub assignment_role: String,
-    pub system_template: TemplateWireV1,
-    pub assignment_template: TemplateWireV1,
+    pub system_template: TemplateWireV2,
+    pub assignment_template: TemplateWireV2,
+    pub policy: PolicyWireV2,
     pub tools: Vec<String>,
-    pub model: ModelWireV1,
-    pub limits: LimitsWireV1,
+    pub model: ModelWireV2,
+    pub limits: LimitsWireV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelWireV1 {
+pub struct PolicyWireV2 {
+    pub source_path: String,
+    pub digest: String,
+    pub byte_limit: u32,
+    pub entrypoint: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelWireV2 {
     pub provider: String,
     pub model_id: String,
     pub thinking_level: String,
@@ -2221,41 +2296,41 @@ pub struct ModelWireV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LimitsWireV1 {
+pub struct LimitsWireV2 {
     pub turn_limit: u32,
     pub wall_limit_millis: u64,
     pub output_byte_limit: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TicketPolicyWireV1 {
+pub struct TicketPolicyWireV2 {
     pub low_water: u16,
     pub target: u16,
     pub maximum: u16,
     pub proposal_maximum: u16,
-    pub ticket_bounds: TicketBoundsWireV1,
+    pub ticket_bounds: TicketBoundsWireV2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TicketBoundsWireV1 {
+pub struct TicketBoundsWireV2 {
     pub narrative_byte_limit: u32,
     pub acceptance_criteria_limit: u16,
     pub contract_read_limit: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RequiredReadWireV1 {
+pub struct RequiredReadWireV2 {
     pub path: String,
     pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommandWireV1 {
+pub struct CommandWireV2 {
     pub name: String,
-    pub executable: ExecutableWireV1,
+    pub executable: ExecutableWireV2,
     pub argv: Vec<String>,
     pub working_directory: String,
-    pub environment: Vec<EnvironmentWireV1>,
+    pub environment: Vec<EnvironmentWireV2>,
     pub timeout_millis: u64,
     pub stdout_byte_limit: u32,
     pub stderr_byte_limit: u32,
@@ -2263,23 +2338,23 @@ pub struct CommandWireV1 {
 }
 
 /// Canonical bytes for one sealed deterministic command profile.
-pub fn canonical_command_profile_json_v1(command: &CommandWireV1) -> Result<String, FrameError> {
+pub fn canonical_command_profile_json_v2(command: &CommandWireV2) -> Result<String, FrameError> {
     canonical_command(command)
 }
 
 /// Parses exactly the canonical V1 command profile bytes used by Product
 /// reproducer custody. Unknown fields, alternate key order, or whitespace are
 /// rejected rather than normalized.
-pub fn parse_command_profile_v1(payload: &[u8]) -> Result<CommandProfileV1, FrameError> {
+pub fn parse_command_profile_v2(payload: &[u8]) -> Result<CommandProfileV2, FrameError> {
     let payload = std::str::from_utf8(payload).map_err(|_| FrameError::InvalidUtf8)?;
-    let wire: CommandWireV1 = json::from_str(payload).map_err(|error| FrameError::InvalidJson {
+    let wire: CommandWireV2 = json::from_str(payload).map_err(|error| FrameError::InvalidJson {
         operation: "command profile",
         detail: format!("{error:?}"),
     })?;
-    if canonical_command_profile_json_v1(&wire)? != payload {
+    if canonical_command_profile_json_v2(&wire)? != payload {
         return Err(FrameError::InvalidJson {
             operation: "command profile",
-            detail: "command bytes are not canonical V1 JSON or contain unknown fields".into(),
+            detail: "command bytes are not canonical V2 JSON or contain unknown fields".into(),
         });
     }
     wire.into_domain()
@@ -2290,42 +2365,42 @@ pub fn parse_command_profile_v1(payload: &[u8]) -> Result<CommandProfileV1, Fram
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutableWireV1 {
+pub struct ExecutableWireV2 {
     pub approved_tool: Option<String>,
     pub repository_path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EnvironmentWireV1 {
+pub struct EnvironmentWireV2 {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ValidationWireV1 {
-    pub focused: Vec<CommandWireV1>,
-    pub full: Vec<CommandWireV1>,
+pub struct ValidationWireV2 {
+    pub focused: Vec<CommandWireV2>,
+    pub full: Vec<CommandWireV2>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GitWireV1 {
+pub struct GitWireV2 {
     pub forbidden_paths: Vec<String>,
     pub delivery_mode: String,
     pub provenance_trailers_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommitMessageWireV1 {
+pub struct CommitMessageWireV2 {
     pub subject_byte_limit: u16,
     pub body_byte_limit: u16,
 }
 
-/// Serializes the closed DTO in the exact key order emitted by the Deno
-/// `canonicalJson` helper.  This is deliberately handwritten rather than
+/// Serializes the closed DTO in the exact canonical key order. This is
+/// deliberately handwritten rather than
 /// accepting a dynamic JSON value: admission must reject unknown fields and
 /// alternate byte representations at the protocol boundary.
-pub fn canonical_application_bundle_json_v1(
-    bundle: &ApplicationBundleWireV1,
+pub fn canonical_application_bundle_json_v2(
+    bundle: &ApplicationBundleWireV2,
 ) -> Result<String, FrameError> {
     for profile in &bundle.assignment_role_profiles {
         validate_unique_strings("model.capability_flags", &profile.model.capability_flags)?;
@@ -2461,7 +2536,7 @@ fn field_optional_string(out: &mut String, name: &str, value: Option<&str>, firs
     }
 }
 
-fn canonical_template(value: &TemplateWireV1) -> String {
+fn canonical_template(value: &TemplateWireV2) -> String {
     let placeholders = value
         .placeholders
         .iter()
@@ -2477,7 +2552,7 @@ fn canonical_template(value: &TemplateWireV1) -> String {
     )
 }
 
-fn canonical_repository(value: &RepositoryWireV1) -> String {
+fn canonical_repository(value: &RepositoryWireV2) -> String {
     format!(
         "{{\"canonical_local_path\":{},\"default_branch\":{},\"delivery_mode\":{},\"repository_key\":{}}}",
         json_quote(&value.canonical_local_path),
@@ -2487,7 +2562,7 @@ fn canonical_repository(value: &RepositoryWireV1) -> String {
     )
 }
 
-fn canonical_model(value: &ModelWireV1) -> String {
+fn canonical_model(value: &ModelWireV2) -> String {
     format!(
         "{{\"capability_flags\":[{}],\"context_token_limit\":{},\"model_id\":{},\"output_token_limit\":{},\"price_cache_read_micro_usd_per_million_tokens\":{},\"price_cache_write_micro_usd_per_million_tokens\":{},\"price_input_micro_usd_per_million_tokens\":{},\"price_output_micro_usd_per_million_tokens\":{},\"provider\":{},\"thinking_level\":{}}}",
         value
@@ -2508,20 +2583,21 @@ fn canonical_model(value: &ModelWireV1) -> String {
     )
 }
 
-fn canonical_limits(value: &LimitsWireV1) -> String {
+fn canonical_limits(value: &LimitsWireV2) -> String {
     format!(
         "{{\"output_byte_limit\":{},\"turn_limit\":{},\"wall_limit_millis\":{}}}",
         value.output_byte_limit, value.turn_limit, value.wall_limit_millis
     )
 }
 
-fn canonical_assignment_role_profile(value: &AssignmentRoleWireV1) -> String {
+fn canonical_assignment_role_profile(value: &AssignmentRoleWireV2) -> String {
     format!(
-        "{{\"assignment_role\":{},\"assignment_template\":{},\"limits\":{},\"model\":{},\"system_template\":{},\"tools\":[{}]}}",
+        "{{\"assignment_role\":{},\"assignment_template\":{},\"limits\":{},\"model\":{},\"policy\":{},\"system_template\":{},\"tools\":[{}]}}",
         json_quote(&value.assignment_role),
         canonical_template(&value.assignment_template),
         canonical_limits(&value.limits),
         canonical_model(&value.model),
+        canonical_policy(&value.policy),
         canonical_template(&value.system_template),
         value
             .tools
@@ -2532,7 +2608,17 @@ fn canonical_assignment_role_profile(value: &AssignmentRoleWireV1) -> String {
     )
 }
 
-fn canonical_assignment_role_profiles(values: &[AssignmentRoleWireV1]) -> String {
+fn canonical_policy(value: &PolicyWireV2) -> String {
+    format!(
+        "{{\"byte_limit\":{},\"digest\":{},\"entrypoint\":{},\"source_path\":{}}}",
+        value.byte_limit,
+        json_quote(&value.digest),
+        json_quote(&value.entrypoint),
+        json_quote(&value.source_path)
+    )
+}
+
+fn canonical_assignment_role_profiles(values: &[AssignmentRoleWireV2]) -> String {
     format!(
         "[{}]",
         values
@@ -2543,7 +2629,7 @@ fn canonical_assignment_role_profiles(values: &[AssignmentRoleWireV1]) -> String
     )
 }
 
-fn canonical_ticket_policy(value: &TicketPolicyWireV1) -> String {
+fn canonical_ticket_policy(value: &TicketPolicyWireV2) -> String {
     format!(
         "{{\"low_water\":{},\"maximum\":{},\"proposal_maximum\":{},\"target\":{},\"ticket_bounds\":{{\"acceptance_criteria_limit\":{},\"contract_read_limit\":{},\"narrative_byte_limit\":{}}}}}",
         value.low_water,
@@ -2556,7 +2642,7 @@ fn canonical_ticket_policy(value: &TicketPolicyWireV1) -> String {
     )
 }
 
-fn canonical_required_reads(values: &[RequiredReadWireV1]) -> String {
+fn canonical_required_reads(values: &[RequiredReadWireV2]) -> String {
     format!(
         "[{}]",
         values
@@ -2571,7 +2657,7 @@ fn canonical_required_reads(values: &[RequiredReadWireV1]) -> String {
     )
 }
 
-fn canonical_executable(value: &ExecutableWireV1) -> Result<String, FrameError> {
+fn canonical_executable(value: &ExecutableWireV2) -> Result<String, FrameError> {
     match (&value.approved_tool, &value.repository_path) {
         (Some(tool), None) => Ok(format!("{{\"approved_tool\":{}}}", json_quote(tool))),
         (None, Some(path)) => Ok(format!("{{\"repository_path\":{}}}", json_quote(path))),
@@ -2582,7 +2668,7 @@ fn canonical_executable(value: &ExecutableWireV1) -> Result<String, FrameError> 
     }
 }
 
-fn canonical_command(value: &CommandWireV1) -> Result<String, FrameError> {
+fn canonical_command(value: &CommandWireV2) -> Result<String, FrameError> {
     Ok(format!(
         "{{\"argv\":[{}],\"environment\":[{}],\"executable\":{},\"expected_exit_status\":{},\"name\":{},\"stderr_byte_limit\":{},\"stdout_byte_limit\":{},\"timeout_millis\":{},\"working_directory\":{}}}",
         value
@@ -2611,7 +2697,7 @@ fn canonical_command(value: &CommandWireV1) -> Result<String, FrameError> {
     ))
 }
 
-fn canonical_commands(values: &[CommandWireV1]) -> Result<String, FrameError> {
+fn canonical_commands(values: &[CommandWireV2]) -> Result<String, FrameError> {
     Ok(format!(
         "[{}]",
         values
@@ -2622,7 +2708,7 @@ fn canonical_commands(values: &[CommandWireV1]) -> Result<String, FrameError> {
     ))
 }
 
-fn canonical_validation(value: &ValidationWireV1) -> Result<String, FrameError> {
+fn canonical_validation(value: &ValidationWireV2) -> Result<String, FrameError> {
     let focused = value
         .focused
         .iter()
@@ -2638,7 +2724,7 @@ fn canonical_validation(value: &ValidationWireV1) -> Result<String, FrameError> 
     Ok(format!("{{\"focused\":[{focused}],\"full\":[{full}]}}"))
 }
 
-fn canonical_git_policy(value: &GitWireV1) -> String {
+fn canonical_git_policy(value: &GitWireV2) -> String {
     format!(
         "{{\"delivery_mode\":{},\"forbidden_paths\":[{}],\"provenance_trailers_required\":{}}}",
         json_quote(&value.delivery_mode),
@@ -2652,7 +2738,7 @@ fn canonical_git_policy(value: &GitWireV1) -> String {
     )
 }
 
-fn canonical_commit_message_policy(value: &CommitMessageWireV1) -> String {
+fn canonical_commit_message_policy(value: &CommitMessageWireV2) -> String {
     format!(
         "{{\"body_byte_limit\":{},\"subject_byte_limit\":{}}}",
         value.body_byte_limit, value.subject_byte_limit
@@ -2660,21 +2746,21 @@ fn canonical_commit_message_policy(value: &CommitMessageWireV1) -> String {
 }
 
 /// Parses a canonical JSON bundle and admits it into the closed Rust domain
-/// values. The caller still owns CAS adoption: every template path/digest must
-/// be read from the application source root and sealed independently before an
-/// application revision is written.
-pub fn parse_application_bundle_v1(payload: &[u8]) -> Result<ApplicationBundleV1, FrameError> {
+/// values. The caller still owns CAS adoption: every template and policy
+/// path/digest must be read from the explicit application source bundle and
+/// sealed independently before an application revision is written.
+pub fn parse_application_bundle_v2(payload: &[u8]) -> Result<ApplicationBundleV2, FrameError> {
     let payload = std::str::from_utf8(payload).map_err(|_| FrameError::InvalidUtf8)?;
-    let wire: ApplicationBundleWireV1 =
+    let wire: ApplicationBundleWireV2 =
         json::from_str(payload).map_err(|error| FrameError::InvalidJson {
             operation: "application bundle",
             detail: format!("{error:?}"),
         })?;
-    let canonical = canonical_application_bundle_json_v1(&wire)?;
+    let canonical = canonical_application_bundle_json_v2(&wire)?;
     if canonical.as_bytes() != payload.as_bytes() {
         return Err(FrameError::InvalidJson {
             operation: "application bundle",
-            detail: "bundle bytes are not canonical V1 JSON or contain unknown fields".into(),
+            detail: "bundle bytes are not canonical V2 JSON or contain unknown fields".into(),
         });
     }
     let bundle = wire
@@ -2691,26 +2777,26 @@ pub fn parse_application_bundle_v1(payload: &[u8]) -> Result<ApplicationBundleV1
 }
 
 /// Admits a canonical bundle and returns the immutable application-revision
-/// identity input. The caller must pass the exact bytes emitted by the Deno
-/// compiler; whitespace or key-order changes therefore produce a different
-/// identity and are not silently normalized at the authority boundary.
-pub fn admit_application_bundle_v1(
+/// identity input. The caller must pass exact compiler bytes; whitespace or
+/// key-order changes therefore produce a different identity and are not
+/// silently normalized at the authority boundary.
+pub fn admit_application_bundle_v2(
     payload: &[u8],
-) -> Result<(ApplicationBundleV1, ContentDigest), FrameError> {
-    let bundle = parse_application_bundle_v1(payload)?;
+) -> Result<(ApplicationBundleV2, ContentDigest), FrameError> {
+    let bundle = parse_application_bundle_v2(payload)?;
     Ok((bundle, ContentDigest::of_bytes(payload)))
 }
 
-pub fn decode_application_bundle_v1(
+pub fn decode_application_bundle_v2(
     frame: &[u8],
     maximum: usize,
-) -> Result<ApplicationBundleV1, FrameError> {
-    parse_application_bundle_v1(decode_frame(frame, maximum)?)
+) -> Result<ApplicationBundleV2, FrameError> {
+    parse_application_bundle_v2(decode_frame(frame, maximum)?)
 }
 
-impl ApplicationBundleWireV1 {
-    fn into_domain(self) -> Result<ApplicationBundleV1, String> {
-        Ok(ApplicationBundleV1 {
+impl ApplicationBundleWireV2 {
+    fn into_domain(self) -> Result<ApplicationBundleV2, String> {
+        Ok(ApplicationBundleV2 {
             format_version: self.format_version,
             application_key: ApplicationKey::parse(self.application_key)
                 .map_err(contract_detail)?,
@@ -2723,18 +2809,18 @@ impl ApplicationBundleWireV1 {
             assignment_role_profiles: self
                 .assignment_role_profiles
                 .into_iter()
-                .map(AssignmentRoleWireV1::into_domain)
+                .map(AssignmentRoleWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             ticket_policy: self.ticket_policy.into_domain()?,
             required_reads: self
                 .required_reads
                 .into_iter()
-                .map(RequiredReadWireV1::into_domain)
+                .map(RequiredReadWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             reproducer_profiles: self
                 .reproducer_profiles
                 .into_iter()
-                .map(CommandWireV1::into_domain)
+                .map(CommandWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             validation_profiles: self.validation_profiles.into_domain()?,
             git_policy: self.git_policy.into_domain()?,
@@ -2743,9 +2829,9 @@ impl ApplicationBundleWireV1 {
     }
 }
 
-impl RepositoryWireV1 {
-    fn into_domain(self) -> Result<RepositoryBindingV1, String> {
-        Ok(RepositoryBindingV1 {
+impl RepositoryWireV2 {
+    fn into_domain(self) -> Result<RepositoryBindingV2, String> {
+        Ok(RepositoryBindingV2 {
             repository_key: self.repository_key,
             canonical_local_path: AbsoluteHostPath::parse(self.canonical_local_path)
                 .map_err(contract_detail)?,
@@ -2755,28 +2841,29 @@ impl RepositoryWireV1 {
     }
 }
 
-impl TemplateWireV1 {
-    fn into_domain(self) -> Result<TemplateArtifactV1, String> {
-        Ok(TemplateArtifactV1 {
+impl TemplateWireV2 {
+    fn into_domain(self) -> Result<TemplateArtifactV2, String> {
+        Ok(TemplateArtifactV2 {
             source_path: ApplicationRelativePath::parse(self.source_path)
                 .map_err(contract_detail)?,
             digest: ContentDigest::from_str(&self.digest).map_err(contract_detail)?,
             placeholders: self
                 .placeholders
                 .into_iter()
-                .map(|value| TemplatePlaceholderV1::parse(value).map_err(contract_detail))
+                .map(|value| TemplatePlaceholderV2::parse(value).map_err(contract_detail))
                 .collect::<Result<_, _>>()?,
             rendered_byte_limit: self.rendered_byte_limit,
         })
     }
 }
 
-impl AssignmentRoleWireV1 {
-    fn into_domain(self) -> Result<AssignmentRoleProfileV1, String> {
-        Ok(AssignmentRoleProfileV1 {
+impl AssignmentRoleWireV2 {
+    fn into_domain(self) -> Result<AssignmentRoleProfileV2, String> {
+        Ok(AssignmentRoleProfileV2 {
             assignment_role: parse_assignment_role(&self.assignment_role)?,
             system_template: self.system_template.into_domain()?,
             assignment_template: self.assignment_template.into_domain()?,
+            policy: self.policy.into_domain()?,
             tools: self
                 .tools
                 .into_iter()
@@ -2788,9 +2875,21 @@ impl AssignmentRoleWireV1 {
     }
 }
 
-impl ModelWireV1 {
-    fn into_domain(self) -> Result<ModelProfileV1, String> {
-        Ok(ModelProfileV1 {
+impl PolicyWireV2 {
+    fn into_domain(self) -> Result<ActorPolicyArtifactV2, String> {
+        Ok(ActorPolicyArtifactV2 {
+            source_path: ApplicationRelativePath::parse(self.source_path)
+                .map_err(contract_detail)?,
+            digest: ContentDigest::from_str(&self.digest).map_err(contract_detail)?,
+            byte_limit: self.byte_limit,
+            entrypoint: PolicyEntrypointV2::parse(&self.entrypoint).map_err(contract_detail)?,
+        })
+    }
+}
+
+impl ModelWireV2 {
+    fn into_domain(self) -> Result<ModelProfileV2, String> {
+        Ok(ModelProfileV2 {
             provider: self.provider,
             model_id: self.model_id,
             thinking_level: parse_thinking_level(&self.thinking_level)?,
@@ -2817,9 +2916,9 @@ impl ModelWireV1 {
     }
 }
 
-impl LimitsWireV1 {
-    fn into_domain(self) -> Result<SessionLimitsV1, String> {
-        Ok(SessionLimitsV1 {
+impl LimitsWireV2 {
+    fn into_domain(self) -> Result<SessionLimitsV2, String> {
+        Ok(SessionLimitsV2 {
             turn_limit: self.turn_limit,
             wall_limit: DurationMillis::new(self.wall_limit_millis),
             output_byte_limit: self.output_byte_limit,
@@ -2827,9 +2926,9 @@ impl LimitsWireV1 {
     }
 }
 
-impl TicketPolicyWireV1 {
-    fn into_domain(self) -> Result<TicketPolicyV1, String> {
-        Ok(TicketPolicyV1 {
+impl TicketPolicyWireV2 {
+    fn into_domain(self) -> Result<TicketPolicyV2, String> {
+        Ok(TicketPolicyV2 {
             low_water: self.low_water,
             target: self.target,
             maximum: self.maximum,
@@ -2839,9 +2938,9 @@ impl TicketPolicyWireV1 {
     }
 }
 
-impl TicketBoundsWireV1 {
-    fn into_domain(self) -> TicketBoundsV1 {
-        TicketBoundsV1 {
+impl TicketBoundsWireV2 {
+    fn into_domain(self) -> TicketBoundsV2 {
+        TicketBoundsV2 {
             narrative_byte_limit: self.narrative_byte_limit,
             acceptance_criteria_limit: self.acceptance_criteria_limit,
             contract_read_limit: self.contract_read_limit,
@@ -2849,18 +2948,18 @@ impl TicketBoundsWireV1 {
     }
 }
 
-impl RequiredReadWireV1 {
-    fn into_domain(self) -> Result<RequiredReadV1, String> {
-        Ok(RequiredReadV1 {
+impl RequiredReadWireV2 {
+    fn into_domain(self) -> Result<RequiredReadV2, String> {
+        Ok(RequiredReadV2 {
             path: RepositoryRelativePath::parse(self.path).map_err(contract_detail)?,
             reason: self.reason,
         })
     }
 }
 
-impl CommandWireV1 {
-    fn into_domain(self) -> Result<CommandProfileV1, String> {
-        Ok(CommandProfileV1 {
+impl CommandWireV2 {
+    fn into_domain(self) -> Result<CommandProfileV2, String> {
+        Ok(CommandProfileV2 {
             name: self.name,
             executable: self.executable.into_domain()?,
             argv: self.argv,
@@ -2869,7 +2968,7 @@ impl CommandWireV1 {
             environment: self
                 .environment
                 .into_iter()
-                .map(EnvironmentWireV1::into_domain)
+                .map(EnvironmentWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             timeout: DurationMillis::new(self.timeout_millis),
             stdout_byte_limit: self.stdout_byte_limit,
@@ -2879,11 +2978,11 @@ impl CommandWireV1 {
     }
 }
 
-impl ExecutableWireV1 {
-    fn into_domain(self) -> Result<ExecutableV1, String> {
+impl ExecutableWireV2 {
+    fn into_domain(self) -> Result<ExecutableV2, String> {
         match (self.approved_tool, self.repository_path) {
-            (Some(tool), None) => Ok(ExecutableV1::ApprovedTool(parse_approved_tool(&tool)?)),
-            (None, Some(path)) => Ok(ExecutableV1::RepositoryPath(
+            (Some(tool), None) => Ok(ExecutableV2::ApprovedTool(parse_approved_tool(&tool)?)),
+            (None, Some(path)) => Ok(ExecutableV2::RepositoryPath(
                 RepositoryRelativePath::parse(path).map_err(contract_detail)?,
             )),
             _ => Err("executable must contain exactly one closed variant".to_owned()),
@@ -2891,35 +2990,35 @@ impl ExecutableWireV1 {
     }
 }
 
-impl EnvironmentWireV1 {
-    fn into_domain(self) -> Result<EnvironmentAdditionV1, String> {
-        Ok(EnvironmentAdditionV1 {
+impl EnvironmentWireV2 {
+    fn into_domain(self) -> Result<EnvironmentAdditionV2, String> {
+        Ok(EnvironmentAdditionV2 {
             name: self.name,
             value: self.value,
         })
     }
 }
 
-impl ValidationWireV1 {
-    fn into_domain(self) -> Result<ValidationProfilesV1, String> {
-        Ok(ValidationProfilesV1 {
+impl ValidationWireV2 {
+    fn into_domain(self) -> Result<ValidationProfilesV2, String> {
+        Ok(ValidationProfilesV2 {
             focused: self
                 .focused
                 .into_iter()
-                .map(CommandWireV1::into_domain)
+                .map(CommandWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
             full: self
                 .full
                 .into_iter()
-                .map(CommandWireV1::into_domain)
+                .map(CommandWireV2::into_domain)
                 .collect::<Result<_, _>>()?,
         })
     }
 }
 
-impl GitWireV1 {
-    fn into_domain(self) -> Result<GitPolicyV1, String> {
-        Ok(GitPolicyV1 {
+impl GitWireV2 {
+    fn into_domain(self) -> Result<GitPolicyV2, String> {
+        Ok(GitPolicyV2 {
             forbidden_paths: self
                 .forbidden_paths
                 .into_iter()
@@ -2931,9 +3030,9 @@ impl GitWireV1 {
     }
 }
 
-impl CommitMessageWireV1 {
-    fn into_domain(self) -> Result<CommitMessagePolicyV1, String> {
-        Ok(CommitMessagePolicyV1 {
+impl CommitMessageWireV2 {
+    fn into_domain(self) -> Result<CommitMessagePolicyV2, String> {
+        Ok(CommitMessagePolicyV2 {
             subject_byte_limit: self.subject_byte_limit,
             body_byte_limit: self.body_byte_limit,
         })
@@ -2958,9 +3057,9 @@ fn validate_bounded_wire_text(
     Ok(())
 }
 
-fn parse_delivery_mode(value: &str) -> Result<DeliveryModeV1, String> {
+fn parse_delivery_mode(value: &str) -> Result<DeliveryModeV2, String> {
     if value == "local_fast_forward_only" {
-        Ok(DeliveryModeV1::LocalFastForwardOnly)
+        Ok(DeliveryModeV2::LocalFastForwardOnly)
     } else {
         Err(format!("unsupported delivery mode {value:?}"))
     }
@@ -2975,54 +3074,53 @@ fn parse_assignment_role(value: &str) -> Result<AssignmentRole, String> {
     }
 }
 
-fn parse_thinking_level(value: &str) -> Result<ThinkingLevelV1, String> {
+fn parse_thinking_level(value: &str) -> Result<ThinkingLevelV2, String> {
     match value {
-        "none" => Ok(ThinkingLevelV1::None),
-        "low" => Ok(ThinkingLevelV1::Low),
-        "medium" => Ok(ThinkingLevelV1::Medium),
-        "high" => Ok(ThinkingLevelV1::High),
-        "xhigh" => Ok(ThinkingLevelV1::XHigh),
+        "none" => Ok(ThinkingLevelV2::None),
+        "low" => Ok(ThinkingLevelV2::Low),
+        "medium" => Ok(ThinkingLevelV2::Medium),
+        "high" => Ok(ThinkingLevelV2::High),
+        "xhigh" => Ok(ThinkingLevelV2::XHigh),
         _ => Err(format!("unsupported thinking level {value:?}")),
     }
 }
 
-fn parse_model_capability(value: &str) -> Result<ModelCapabilityV1, String> {
+fn parse_model_capability(value: &str) -> Result<ModelCapabilityV2, String> {
     match value {
-        "reasoning" => Ok(ModelCapabilityV1::Reasoning),
+        "reasoning" => Ok(ModelCapabilityV2::Reasoning),
         _ => Err(format!("unsupported model capability {value:?}")),
     }
 }
 
-fn parse_approved_tool(value: &str) -> Result<ApprovedToolV1, String> {
+fn parse_approved_tool(value: &str) -> Result<ApprovedToolV2, String> {
     match value {
-        "cargo" => Ok(ApprovedToolV1::Cargo),
-        "git" => Ok(ApprovedToolV1::Git),
-        "deno" => Ok(ApprovedToolV1::Deno),
+        "cargo" => Ok(ApprovedToolV2::Cargo),
+        "git" => Ok(ApprovedToolV2::Git),
         _ => Err(format!("unsupported approved tool {value:?}")),
     }
 }
 
-fn parse_tool(value: &str) -> Result<ActorToolV1, String> {
+fn parse_tool(value: &str) -> Result<ActorToolV2, String> {
     match value {
-        "workspace_read" => Ok(ActorToolV1::WorkspaceRead),
-        "workspace_write" => Ok(ActorToolV1::WorkspaceWrite),
-        "workspace_edit" => Ok(ActorToolV1::WorkspaceEdit),
-        "workspace_search" => Ok(ActorToolV1::WorkspaceSearch),
-        "workspace_list" => Ok(ActorToolV1::WorkspaceList),
-        "shell" => Ok(ActorToolV1::Shell),
-        "forum_search" => Ok(ActorToolV1::ForumSearch),
-        "forum_list_topics" => Ok(ActorToolV1::ForumListTopics),
-        "forum_list_threads" => Ok(ActorToolV1::ForumListThreads),
-        "forum_read_thread" => Ok(ActorToolV1::ForumReadThread),
-        "publication_create" => Ok(ActorToolV1::PublicationCreate),
-        "artifact_seal" => Ok(ActorToolV1::ArtifactSeal),
-        "artifact_read" => Ok(ActorToolV1::ArtifactRead),
-        "product_submit_ticket" => Ok(ActorToolV1::ProductSubmitTicket),
-        "candidate_checkpoint_regression" => Ok(ActorToolV1::CandidateCheckpointRegression),
-        "candidate_submit" => Ok(ActorToolV1::CandidateSubmit),
-        "quality_run_full_suite" => Ok(ActorToolV1::QualityRunFullSuite),
-        "quality_submit_review" => Ok(ActorToolV1::QualitySubmitReview),
-        "work_complete" => Ok(ActorToolV1::WorkComplete),
+        "workspace_read" => Ok(ActorToolV2::WorkspaceRead),
+        "workspace_write" => Ok(ActorToolV2::WorkspaceWrite),
+        "workspace_edit" => Ok(ActorToolV2::WorkspaceEdit),
+        "workspace_search" => Ok(ActorToolV2::WorkspaceSearch),
+        "workspace_list" => Ok(ActorToolV2::WorkspaceList),
+        "shell" => Ok(ActorToolV2::Shell),
+        "forum_search" => Ok(ActorToolV2::ForumSearch),
+        "forum_list_topics" => Ok(ActorToolV2::ForumListTopics),
+        "forum_list_threads" => Ok(ActorToolV2::ForumListThreads),
+        "forum_read_thread" => Ok(ActorToolV2::ForumReadThread),
+        "publication_create" => Ok(ActorToolV2::PublicationCreate),
+        "artifact_seal" => Ok(ActorToolV2::ArtifactSeal),
+        "artifact_read" => Ok(ActorToolV2::ArtifactRead),
+        "product_submit_ticket" => Ok(ActorToolV2::ProductSubmitTicket),
+        "candidate_checkpoint_regression" => Ok(ActorToolV2::CandidateCheckpointRegression),
+        "candidate_submit" => Ok(ActorToolV2::CandidateSubmit),
+        "quality_run_full_suite" => Ok(ActorToolV2::QualityRunFullSuite),
+        "quality_submit_review" => Ok(ActorToolV2::QualitySubmitReview),
+        "work_complete" => Ok(ActorToolV2::WorkComplete),
         _ => Err(format!("unsupported actor tool {value:?}")),
     }
 }

@@ -4,7 +4,7 @@
 //! adapters invoke its typed commands; application and actor code never see a
 //! raw database pool or arbitrary write surface.
 
-use factory_protocol::{ApplicationBundleV1, ContractError};
+use factory_protocol::{ApplicationBundleV2, ContractError};
 
 /// Authenticated local-operator application registration, inspection, and
 /// activation. This module is never linked from an actor route.
@@ -53,6 +53,6 @@ mod forum_store_database_tests;
 
 /// Validates the generic portion of an application bundle before kernel
 /// admission adds artifact custody and durable identity.
-pub fn validate_bundle_contract(bundle: &ApplicationBundleV1) -> Result<(), ContractError> {
+pub fn validate_bundle_contract(bundle: &ApplicationBundleV2) -> Result<(), ContractError> {
     bundle.validate()
 }
