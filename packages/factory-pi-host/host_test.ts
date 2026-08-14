@@ -89,6 +89,12 @@ class FakeFactory implements PiSessionFactory {
   }
 }
 
+class RejectingFactory implements PiSessionFactory {
+  create(): Promise<PiSessionLike> {
+    return Promise.reject(new Error("pinned model initialization failed"));
+  }
+}
+
 class FakeSealer implements ArtifactSealer {
   readonly roles: string[] = [];
   async seal(
@@ -435,6 +441,32 @@ Deno.test("all provider stop reasons normalize without inventing cost", async ()
   );
   assertEquals(result.status, "cost_unknown");
   assertEquals(result.summary.cost_micro_usd, null);
+});
+
+Deno.test("session construction failure preserves the host detail while failing closed on cost", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-create-failure-" });
+  let submission: { operation: unknown; stop_reason: string; failure_reason: string | null } | undefined;
+  const result = await runAssignment(packet(root, false), {
+    ...deps(new RejectingFactory()),
+    terminal_submission: {
+      submit: (operation, _payload, _manifest, summary) => {
+        submission = {
+          operation,
+          stop_reason: summary.stop_reason,
+          failure_reason: summary.failure_reason,
+        };
+        return Promise.resolve();
+      },
+    },
+  });
+  assertEquals(result.status, "cost_unknown");
+  assertEquals(result.error, "pinned model initialization failed");
+  assertEquals(result.summary.cost_micro_usd, null);
+  assertEquals(submission, {
+    operation: null,
+    stop_reason: "unknown_cost",
+    failure_reason: "pinned model initialization failed",
+  });
 });
 
 Deno.test("missing exact required read sends failure reconciliation without authority", async () => {

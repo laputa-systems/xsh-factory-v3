@@ -254,7 +254,12 @@ function base64Encode(bytes: Uint8Array): string {
 
 if (import.meta.main) {
   try {
-    await runPiHostMain();
+    const result = await runPiHostMain();
+    if (result.status !== "succeeded") {
+      console.error(
+        `factory-pi-host ${result.status}: ${result.error ?? "no failure detail was supplied"}`,
+      );
+    }
   } catch (error) {
     console.error(
       `factory-pi-host halted: ${error instanceof Error ? error.message : String(error)}`,

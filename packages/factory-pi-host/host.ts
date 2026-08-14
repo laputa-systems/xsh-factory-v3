@@ -340,7 +340,12 @@ export async function runAssignment(
     error = "daemon authority disconnected";
   } else if (summary.cost_status === "unknown") {
     status = "cost_unknown";
-    error = "provider cost was absent or unknown";
+    // Keep the original host failure visible even though the kernel must
+    // still reject an outcome without cost evidence.  Otherwise a setup
+    // failure (for example, an incompatible pinned model) is recorded only
+    // as an opaque unknown-cost terminal state and cannot be diagnosed from
+    // the captured host result.
+    error = summary.failure_reason ?? "provider cost was absent or unknown";
   } else if (
     summary.cost_micro_usd !== null &&
     summary.cost_micro_usd > packet.aggregate_cost_remaining_micro_usd
