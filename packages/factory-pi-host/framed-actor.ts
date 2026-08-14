@@ -701,6 +701,23 @@ function modelToolWireInput(
   } else {
     semantic = input;
   }
+  if (name === "product_submit_ticket") {
+    const proposal = object(semantic);
+    const reproducer = proposal === undefined ? undefined : object(proposal.reproducer);
+    if (reproducer === undefined) return semantic;
+    // The full tool schema retains the kernel's complete two-run DTO. Its
+    // second observation is a required duplicate of the first, however, so
+    // derive it here instead of accepting a hand-copied artifact identity.
+    // This prevents one model transcription typo from creating an invalid
+    // state while preserving the exact typed wire shape the kernel verifies.
+    semantic = {
+      ...proposal,
+      reproducer: {
+        ...reproducer,
+        second_observation: reproducer.first_observation,
+      },
+    };
+  }
   if (!SESSION_MUTATING_TOOLS.has(name)) return semantic;
   const fields = object(semantic);
   if (fields === undefined) return semantic;

@@ -263,6 +263,56 @@ Deno.test("Product submission custom tool exposes the closed proposal schema", (
   assert(schema.required?.includes("duplicate_search"));
   assert(!schema.required?.includes("sponsor"));
   assert("narrative" in (schema.properties ?? {}));
+  const reproducer = schema.properties?.reproducer as {
+    readonly required?: readonly string[];
+    readonly properties?: Record<string, unknown>;
+  };
+  assert(reproducer.required?.includes("second_observation"));
+  assert("second_observation" in (reproducer.properties ?? {}));
+});
+
+Deno.test("Product submission derives the required duplicate observation from the first", async () => {
+  let request: Record<string, unknown> | undefined;
+  const client = new FramedActorClient({
+    exchange: (frame) => {
+      request = decodeJsonFrame<Record<string, unknown>>(frame, "product.submit_ticket");
+      return Promise.resolve(encodeJsonFrame({
+        protocol_version: 1,
+        request_id: request.request_id,
+        operation: "product.submit_ticket",
+        audit_id: 7,
+        aggregate_revision: 4,
+      }));
+    },
+  });
+  const [tool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+  const observation = {
+    exit_status: 0,
+    stdout: { artifact_id: 8, digest: "a".repeat(64), byte_length: 0 },
+    stderr: { artifact_id: 9, digest: "b".repeat(64), byte_length: 12 },
+  };
+
+  await tool.sdk_definition.invoke({
+    reproducer: {
+      comparison_rule_version: 1,
+      command: { artifact_id: 1, digest: "c".repeat(64), byte_length: 12 },
+      stdin: { artifact_id: 2, digest: "d".repeat(64), byte_length: 12 },
+      expected_observation: {
+        exit_status: 3,
+        stdout: { artifact_id: 3, digest: "e".repeat(64), byte_length: 0 },
+        stderr: { artifact_id: 4, digest: "f".repeat(64), byte_length: 12 },
+      },
+      first_observation: observation,
+      second_observation: {
+        exit_status: 99,
+        stdout: { artifact_id: 98, digest: "9".repeat(64), byte_length: 8 },
+        stderr: { artifact_id: 97, digest: "8".repeat(64), byte_length: 9 },
+      },
+    },
+  });
+
+  const submitted = request?.reproducer as Record<string, unknown>;
+  assertEquals(submitted.second_observation, observation);
 });
 
 Deno.test("Product submission names a safe correction for a rejected reproducer profile", async () => {
