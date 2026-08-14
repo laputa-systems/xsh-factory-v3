@@ -57,9 +57,9 @@ Deno.test("Engineering checkpoint host wrapper mints its revision and idempotenc
     protocol_version: 1,
     request_id: "host-request-1",
     operation: "candidate.checkpoint_regression",
-    regression_command: "reproducer",
-    expected_failure: "ticket-attempt-2-reproducer",
     client_command_id: "actor-candidate_checkpoint_regression-41",
     expected_revision: 7,
+    regression_command: "reproducer",
+    expected_failure: "ticket-attempt-2-reproducer",
   });
 });

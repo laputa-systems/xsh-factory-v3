@@ -704,12 +704,25 @@ function modelToolWireInput(
   if (!SESSION_MUTATING_TOOLS.has(name)) return semantic;
   const fields = object(semantic);
   if (fields === undefined) return semantic;
-  const command = {
-    ...fields,
-    client_command_id: `actor-${name}-${commandContext.next_command_id()}`,
+  // Rust's closed mutating DTOs deliberately place the retry identity before
+  // the operation-specific fields.  Build that ordering here rather than
+  // relying on the JSON property order returned by a model tool call: the
+  // kernel's canonical-frame check must accept the host's own valid command
+  // while still rejecting reordered or expanded bytes at its boundary.
+  const {
+    client_command_id: _ignoredCommandId,
+    expected_revision: _ignoredRevision,
+    ...semanticFields
+  } = fields;
+  const client_command_id = `actor-${name}-${commandContext.next_command_id()}`;
+  if (name === "publication_create") {
+    return { client_command_id, ...semanticFields };
+  }
+  return {
+    client_command_id,
+    expected_revision: commandContext.session_revision,
+    ...semanticFields,
   };
-  if (name === "publication_create") return command;
-  return { ...command, expected_revision: commandContext.session_revision };
 }
 
 const HIDDEN_MODEL_RESULT_FIELDS = new Set([

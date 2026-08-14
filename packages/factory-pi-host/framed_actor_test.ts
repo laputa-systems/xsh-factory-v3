@@ -138,6 +138,45 @@ Deno.test("inherited actor transport handles short writes and validates response
   assertEquals(request.canonical_path, "AGENTS.md");
 });
 
+Deno.test("actor artifact sealing frames canonical retry identity before semantic fields", async () => {
+  let requestBytes: Uint8Array | undefined;
+  const transport = {
+    exchange: (frame: Uint8Array) => {
+      requestBytes = frame;
+      const request = decodeJsonFrame<Record<string, unknown>>(
+        frame,
+        "artifact.seal_workspace_file",
+      );
+      return Promise.resolve(encodeJsonFrame({
+        protocol_version: 1,
+        request_id: request.request_id,
+        operation: "artifact.seal_workspace_file",
+        artifact_id: 7,
+        digest: "a".repeat(64),
+        byte_length: 12,
+        aggregate_revision: 4,
+      }));
+    },
+  };
+  const [tool] = createFramedToolAdapters(
+    new FramedActorClient(transport),
+    ["artifact_seal"],
+    { session_revision: 4, next_command_id: () => 9 },
+  );
+
+  await tool.sdk_definition.invoke({
+    workspace_relative_path: ".product-evidence/narrative",
+    byte_limit: 4096,
+  });
+
+  const bytes = requestBytes;
+  assert(bytes !== undefined);
+  assertEquals(
+    new TextDecoder().decode(bytes.slice(4)),
+    '{"protocol_version":1,"request_id":"host-request-1","operation":"artifact.seal_workspace_file","client_command_id":"actor-artifact_seal-9","expected_revision":4,"workspace_relative_path":".product-evidence/narrative","byte_limit":4096}',
+  );
+});
+
 Deno.test("inherited full-duplex transport writes before reading one serialized FsFile", async () => {
   const response = encodeJsonFrame({ operation: "test.response", accepted: true });
   const file = new SerializedResourceDuplex(response);
