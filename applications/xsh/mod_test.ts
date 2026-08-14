@@ -43,6 +43,9 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   const second = await compileApplicationV1(xshApplicationV1, sourceRoot);
 
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
+  if (first.bundle.predecessor_bundle !== null) {
+    throw new Error("the current XSH declaration must be an explicit fresh-registry root");
+  }
   if (first.templates.length !== 7 || second.templates.length !== 7) {
     throw new Error("XSH application must compile exactly its seven worker templates");
   }

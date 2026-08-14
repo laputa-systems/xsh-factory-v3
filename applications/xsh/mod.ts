@@ -154,10 +154,11 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // The installed V1 bundle is the explicit lineage parent for this
-  // validation-profile and prompt revision. Admission rejects an accidental
-  // fork from any other active application bundle.
-  predecessor_bundle: "85244e80355aaf95917604a0b949aa628bd60b43ef20ddfbc74e020bcf56122c",
+  // This declaration is the explicit root for a freshly initialized Factory
+  // registry.  Once admitted, a policy change must instead pin this exact
+  // bundle as its predecessor so the kernel rejects an accidental lineage
+  // fork.
+  predecessor_bundle: null,
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
