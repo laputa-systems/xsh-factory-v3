@@ -81,8 +81,10 @@ const researchReviewModel = {
 const engineeringModel = {
   provider: "openrouter",
   model_id: "openai/gpt-5.6-luna",
-  // Pi 0.84.1's frozen descriptor exposes `xhigh`, not `high`, for Luna.
-  thinking_level: "xhigh" as const,
+  // Product has already proved this exact pinned descriptor with reasoning
+  // disabled. Keep Engineering on that proven request shape until a paid
+  // session supplies costed evidence for a reasoning-enabled successor.
+  thinking_level: "none" as const,
   context_token_limit: 1_050_000,
   output_token_limit: 128_000,
   price_input_micro_usd_per_million_tokens: 100_000,
@@ -92,10 +94,10 @@ const engineeringModel = {
   capability_flags: ["reasoning" as const],
 };
 
-// Product has one prescribed evidence-collection path. A reliable no-
-// reasoning model is less expensive than repeatedly paying a weaker model to
-// rediscover the checkout or implementation details that Product does not own.
-const productModel = { ...engineeringModel, thinking_level: "none" as const };
+// Product and Engineering share the one provider shape proven by Product's
+// sealed session; their distinct authority comes from their profiles, prompts,
+// evidence inputs, and tool allowlists rather than an untracked model variant.
+const productModel = engineeringModel;
 
 /**
  * Product buffer pressure is declarative application policy. The generic
@@ -154,10 +156,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This policy revision succeeds the fresh-registry root already admitted to
-  // the live registry. Pinning that exact bundle makes a policy change an
-  // append-only lineage step rather than an accidental application fork.
-  predecessor_bundle: "932106af6a4808cf4c2c26c9f2819bc0dfd6742635c73e0d3dc9149d374e6c4f",
+  // This policy revision succeeds the active registered revision. Pinning
+  // that exact bundle makes the model-policy change append-only rather than
+  // an accidental application fork.
+  predecessor_bundle: "8252112e1068ea068aa5e807316a27a0f45fbca561a68768f94ee826388934a7",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
