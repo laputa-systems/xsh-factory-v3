@@ -135,6 +135,7 @@ Deno.test("model-visible tool descriptors hide control-plane vocabulary", () => 
     "forum_list_topics",
     "forum_list_threads",
     "forum_read_thread",
+    "publication_create",
   ]);
   const forum = createForumTools(new ForumAdapter(noTransport));
   const common = createCommonToolAdapters({
@@ -155,6 +156,11 @@ Deno.test("model-visible tool descriptors hide control-plane vocabulary", () => 
       throw new Error(`${tool.name} exposes control-plane vocabulary ${JSON.stringify(match[0])}`);
     }
   }
+  // Exercise the live SDK boundary as well as this independent vocabulary
+  // scan. `toPiToolDefinition` is invoked during session construction, so an
+  // omitted custom tool here could otherwise leave an Engineering assignment
+  // unable to start before it reaches the provider.
+  for (const tool of framed) toPiToolDefinition(tool);
 });
 
 Deno.test("model-visible evidence labels use only task vocabulary", () => {

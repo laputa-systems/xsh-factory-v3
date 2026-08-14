@@ -570,7 +570,6 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
                 "experiment",
                 "claim",
                 "decision",
-                "office",
               ],
             },
             id: { type: "integer", minimum: 1 },
