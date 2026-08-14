@@ -26,6 +26,38 @@ relations; CAS holds immutable bytes.
 packet to `pi-agent-core-rs`, and speaks the framed kernel descriptor. It has
 no independent lifecycle authority.
 
+The active actor runtime is one qualified Rust executable built against the
+direct local `/Users/josh/d/pi-agent-core-rs` checkout and the pinned
+`nightly-2026-07-24` toolchain. The installed-runtime receipt binds the host
+binary, complete host source graph, core `Cargo.lock`, exact core `HEAD`,
+complete core source inventory, and their digests. Qualification refuses a
+missing or dirty core checkout, and the kernel rechecks the receipt before
+every launch. The packet carries the host path, core `HEAD`, core source
+digest, toolchain, and credential-variable name; it never carries the
+credential value.
+
+The host admits one bounded newline frame on inherited FD 0, verifies the
+canonical packet and identity, and then uses only the inherited full-duplex
+descriptor. It does not accept a socket path, database URL, resume input, or
+application source path. The daemon remains the owner of SQL, CAS, Git,
+worktrees, validation, campaign state, terminal reconciliation, and delivery.
+The selected credential is available only to the provider; child tools and
+evidence do not receive it.
+
+The application bundle is V2-only and inert. Each role's sealed Luau policy is
+carried in the packet, checked against the exact packet tool allowlist, and
+bound to narrow Rust capabilities. A policy declaration is prompt-facing data,
+not authority: it cannot open files, inspect the environment, access a socket
+or database, run a process, or choose another assignment. The host never reads
+mutable application source at actor runtime.
+
+Runtime replacement is explicit. Deployment changes are made with the daemon
+stopped, then begin from a fresh database and runtime root; prior runtime state
+is not parsed, migrated, recovered, or dual-dispatched. The provider-free
+`pi-agent-core-rs-acceptance` gate proves this Rust runtime, the V2 bundle,
+packet and policy boundaries, terminal evidence, and the full candidate-to-
+delivery path before paid work is separately authorized.
+
 The XSH application declares only data: exact repository pin, templates,
 allowed tools, model descriptors, required reads, reproducer/validation
 profiles, and commit policy. It is compiled to an inert bundle and admitted by
@@ -79,6 +111,37 @@ cannot create a ticket, certify validation, grant authority, or change a
 decision. Existing rows are not silently reinterpreted as institutional
 anchors; migration or read-only retention is a separate, explicit decision.
 
+## Compiled harness and replay
+
+`HarnessSpecV2` is the explicit, reproducible input to one actor invocation.
+It names the application revision, durable office, assignment role, bounded
+objective, admitted capabilities, remaining campaign allowance, compiler
+version, and an ordered set of `ContextItemV2` references. A context item is a
+typed institutional ID or sealed artifact plus one closed inclusion class
+(`DirectTarget`, `RequiredConstraint`, `DirectEvidence`, or
+`CurrentDecision`) and a bounded selection reason; it is never raw prompt
+text or a generic `kind + id` pair.
+
+The kernel resolves those references, renders the already-admitted templates,
+and seals the canonical spec, prompt artifacts, packet, and packet digest in a
+`HarnessCompilationV2` receipt. Initial selection is deterministic and
+limited to the direct target, required constraints, direct evidence, and
+current decision links. The actor receives only the resulting packet and
+listed evidence. Harness compilation is materialized runtime state with
+sealed replay outputs, not agent memory or a retrieval/plugin escape hatch.
+
+## Boundary value discipline
+
+Every externally visible value is one of four kinds: a command carrying caller
+intent and expected revision; a durable fact whose identity and links the
+kernel verified; admitted policy; or a read-only projection. Commands do not
+assert kernel-derived facts, policy does not carry executable callbacks or
+authority, and projections do not become a second source of truth. New
+relations therefore require a typed ID/domain value, wire conversion when
+needed, authorization, migration constraints, navigation/search behavior, and
+focused contract tests in the same change. Prefer narrow IDs plus kernel
+resolvers over broad context aggregates or generic maps.
+
 ## Worktree and delivery custody
 
 The kernel qualifies the clean local XSH default head and materializes owned
@@ -97,7 +160,7 @@ format for Factory work.
 Assignment and validation worktrees are transient. Exact owned worktree
 removal is verified rather than using broad pruning; durable output is the CAS
 evidence, candidate tree/commit identity, and portable patch. CAS retention is
-not yet collected—see `PLAN.md`.
+not yet collected—see the [V1 backlog](../V1.md).
 
 ## Design constraints
 

@@ -13,7 +13,7 @@ use crate::{
     DurationMillis, MicroUsd, RepositoryRelativePath,
 };
 
-/// The only application bundle format admitted after the Rust cutover.
+/// The only application bundle format admitted by the Rust runtime.
 pub const APPLICATION_BUNDLE_V2_FORMAT: u16 = 2;
 
 /// Maximum bytes for a single application source artifact.  Individual

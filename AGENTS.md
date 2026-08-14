@@ -52,8 +52,8 @@ qualified application, or repository state, resolve it from that evidence. If
 the missing value would change the campaign contract or cannot be established
 without guessing, stop before spending budget and ask the user.
 
-`PLAN.md` is a short list of known architectural gaps, not an implementation
-contract. `V1.md` is deferred work only. Keep the Rust kernel generic;
+`V1.md` is the deferred-work backlog, not an implementation contract. Keep the
+Rust kernel generic;
 `applications/xsh` may declare closed policy and templates but cannot control
 the database, CAS, Git, or session lifecycle.
 

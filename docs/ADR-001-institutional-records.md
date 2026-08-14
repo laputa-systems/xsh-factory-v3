@@ -147,3 +147,18 @@ paid actors, dynamic organizations, automated delegation, agent social graphs,
 personal reputation, semantic retrieval, embeddings, remote workers, or a
 generic workflow engine. Those are separate proposals and must not be smuggled
 into the initial institutional model.
+
+## Implementation record
+
+The tightening contract was implemented as separate reviewable boundaries.
+These commit identifiers preserve the historical seam that introduced each
+part; the current code and canonical documents remain authoritative.
+
+| Phase | Delivered boundary | Commit |
+| --- | --- | --- |
+| 0 | Vocabulary, architecture contract, and Forum retirement rule | `7228875` |
+| 1 | Durable offices and fungible assignment roles | `085afe8` |
+| 2 | Typed institutional records, links, search, and navigation | `cdd2bc0` |
+| 3 | Anchored immutable publications and read-only legacy Forum paths | `083a543` |
+| 4 | Explicit sealed harness compilation and assignment-owned replay receipt | `6666730` |
+| 5 | Closed canonical frames, exact response shapes, and cross-layer parity fixtures | `2ac96ae` |

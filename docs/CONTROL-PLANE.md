@@ -93,4 +93,4 @@ The current remaining weakness is intentional and explicit: Engineering work
 is only admitted as a candidate after its actor calls `candidate_submit`. A
 tool/protocol failure after a useful checkout can therefore lose an otherwise
 recoverable patch. The next architecture change moves that recovery boundary
-into controller-owned terminal reconciliation; see `PLAN.md`.
+into controller-owned terminal reconciliation; see the [V1 backlog](../V1.md).

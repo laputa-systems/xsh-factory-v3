@@ -16,11 +16,11 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint pi-agent-core-rs-test rust-cutover-absence factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
-# during this cutover.
+# while the local core source remains the explicit dependency.
 cache:
 	test -f "$(PI_AGENT_CORE_MANIFEST)"
 	cargo fetch --manifest-path "$(PI_AGENT_CORE_MANIFEST)"
@@ -38,19 +38,6 @@ lint: pi-agent-core-rs-test
 	cargo clippy --all-targets --all-features -- $(CLIPPY_GATE_FLAGS)
 	cargo check --workspace --all-targets
 	cargo test --workspace
-
-# Hard-cutover guard: no active source or operational path may retain the
-# retired runtime implementation. Historical migration prose is kept in the
-# cutover plan and is intentionally outside this guard.
-rust-cutover-absence:
-	@test ! -e "$$(printf 'de%s.json' 'no')"
-	@test ! -e "$$(printf 'de%s.lock' 'no')"
-	@test ! -e .gitmodules
-	@test -z "$$(find packages tools -type f -print -quit 2>/dev/null)"
-	@test -z "$$(find tests -type f -name '*.'"$$(printf 't%s' 's')" -print -quit 2>/dev/null)"
-	@legacy_pattern="$$(printf '%s' 'de''no|type''script|pi-''headless|factory-''sdk|np''m|\.m''js\b|\.t''s\b')"; \
-	! rg -n -i "$$legacy_pattern" README.md docs applications crates tests tools \
-		--glob '!tests/**/*.json' --glob '!target/**' 2>/dev/null
 
 # The credential is introduced only at the daemon process boundary. Callers
 # must choose the dedicated database and runtime root explicitly; this target
@@ -219,10 +206,9 @@ provider-free-acceptance:
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_VERTICAL_URL" $(MAKE) provider-free-vertical
 	$(MAKE) backup-restore-test
 
-# Named first full gate from the cutover contract. It includes the absence
-# guard before the complete provider-free qualification, so a passing result
-# cannot silently retain a retired runtime path.
-pi-agent-core-rs-acceptance: rust-cutover-absence provider-free-acceptance
+# Named first full gate from the Rust runtime qualification contract. The complete provider-free
+# qualification is now the permanent Rust-only acceptance path.
+pi-agent-core-rs-acceptance: provider-free-acceptance
 
 # Requires a disposable PostgreSQL 18 database and an externally installed
 # sqlx-cli matching the pinned project crate. It verifies committed `.sqlx`

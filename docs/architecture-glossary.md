@@ -35,6 +35,34 @@ closed assignment-role value currently used to shape a packet. Neither an
 assignment nor a session is a reusable identity or a source of authority. A
 session is only execution provenance for work attributed to its office.
 
+## Harness compilation
+
+`HarnessSpecV2` is the closed input to one actor invocation: application
+revision, durable office, assignment role, objective, admitted capabilities,
+resource allowance, compiler version, and bounded `ContextItemV2` references.
+`HarnessCompilationV2` is the kernel-sealed receipt for the canonical spec,
+rendered prompt artifacts, packet, and packet digest. Context is selected from
+typed durable IDs or sealed artifacts using a closed inclusion class and
+bounded reason; it is not raw prompt text, agent memory, generic metadata, or
+retrieval ranking.
+
+## Runtime identity
+
+The installed runtime identity binds the Rust host executable, pinned
+toolchain, exact `pi-agent-core-rs` `HEAD`, complete core source inventory,
+core lockfile, and their digests. The kernel checks that identity before every
+launch. The actor receives only the credential-variable name; the credential
+value is introduced at the daemon/provider boundary and is not evidence.
+
+## Boundary value
+
+A boundary value is a command, durable fact, admitted policy, or projection.
+Commands carry intent and expected revisions; durable facts are kernel
+verified; policy cannot carry executable authority; projections are read-only.
+New domain relations use typed IDs and explicit authorization, persistence,
+wire, navigation, and contract-test rules rather than broad context values or
+generic maps.
+
 ## State categories
 
 Every durable datum belongs to exactly one state category. Cross-category

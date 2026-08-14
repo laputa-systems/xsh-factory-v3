@@ -15,7 +15,10 @@ make lint
 `make cache` fetches the two locked Cargo workspaces. `make lint` is the Grand
 Architect's pre-commit gate: it runs the local `pi-agent-core-rs` tests,
 formats and checks Rust source, and runs the Factory workspace tests. Neither
-starts a provider-backed actor or uses remote Git.
+starts a provider-backed actor or uses remote Git. The shared toolchain is the
+pinned `nightly-2026-07-24`; qualification also refuses a missing or dirty
+`/Users/josh/d/pi-agent-core-rs` checkout and records its exact source
+identity.
 
 ## Initialize and serve
 
@@ -38,7 +41,9 @@ serve ...`; the credential is neither copied into source, the database, CAS,
 prompts, nor shell command arguments. It binds a mode-`0600` Unix operator
 socket under the runtime root. Stop the daemon before replacing a kernel,
 schema, Rust dependency source, or agent-core build input, then run `factoryctl init`
-again before serving the new build.
+again before serving the new build. A runtime replacement retires the old
+runtime state: start the new daemon with a fresh database and runtime root
+rather than attempting compatibility recovery or dual dispatch.
 
 ## Application revisions and campaigns
 

@@ -8,6 +8,16 @@ shell chunks, tool-call rows, or transcript text. The append-only CAS stores
 the actual bounded bytes: application/template sources, assignment evidence,
 command receipts, patches, reports, and session archives.
 
+## Installed runtime identity
+
+The stopped-daemon installation receipt is evidence for the executable that
+may launch actors. It binds the Rust host binary and complete host source
+graph, the core lockfile, the exact local core checkout `HEAD`, complete core
+source inventory, Rust toolchain, and all corresponding digests. The kernel
+rechecks those files and the clean core checkout before spawning a host. A
+packet's runtime identity is therefore a qualified fact, not an actor claim;
+the provider credential remains only an inherited process-boundary value.
+
 `var/` is an operational runtime root. Its sockets, locks, staging files,
 temporary worktrees, and local build caches are transient. Terminal controller
 cleanup removes each owned worktree and its staging directory after necessary
@@ -65,5 +75,5 @@ CAS patch and Git identities are the durable product artifact; the full
 temporary worktree is not retained.
 
 This boundary still needs controller-owned recovery when an actor dies before
-candidate submission. That gap is tracked in `PLAN.md`; do not attempt manual
-worktree salvage or direct product commits as a workaround.
+candidate submission. That gap is tracked in the [V1 backlog](../V1.md); do
+not attempt manual worktree salvage or direct product commits as a workaround.
