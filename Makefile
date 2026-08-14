@@ -16,7 +16,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -38,6 +38,9 @@ lint: pi-agent-core-rs-test
 	cargo clippy --all-targets --all-features -- $(CLIPPY_GATE_FLAGS)
 	cargo check --workspace --all-targets
 	cargo test --workspace
+
+release-build:
+	cargo build --release --workspace
 
 # The credential is introduced only at the daemon process boundary. Callers
 # must choose the dedicated database and runtime root explicitly; this target

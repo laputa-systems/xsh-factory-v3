@@ -10,7 +10,13 @@ package registry.
 ```sh
 make cache
 make lint
+make release-build
 ```
+
+`make release-build` builds `factoryd`, `factoryctl`, and `factory-pi-host`
+from the same release workspace. `factoryctl init` selects the actor host from
+the same Cargo profile as the selected `factoryd`, preventing mixed debug and
+release protocol binaries from entering an installed runtime.
 
 `make cache` fetches the two locked Cargo workspaces. `make lint` is the Grand
 Architect's pre-commit gate: it runs the local `pi-agent-core-rs` tests,

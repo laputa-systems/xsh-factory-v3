@@ -1546,11 +1546,11 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
     let kernel_source_files = closed_kernel_source_files(&installation_root)?;
     let host_source_root = installation_root.join("crates/factory-pi-host");
     let host_source_files = closed_regular_file_inventory(&host_source_root)?;
-    let host_executable = resolve_host_executable(&installation_root)?;
     let factoryd = match factoryd {
         Some(factoryd) => factoryd,
         None => default_factoryd_executable()?,
     };
+    let host_executable = resolve_host_executable(&installation_root, &factoryd)?;
     Ok(InitCommand {
         factoryd,
         database_url: required(database_url, "--database-url")?,
@@ -1596,28 +1596,49 @@ fn is_installation_root(path: &Path) -> bool {
         && path.join("crates/factory-pi-host/src/main.rs").is_file()
 }
 
-fn resolve_host_executable(installation_root: &Path) -> Result<PathBuf, String> {
-    [
-        installation_root.join("target/debug/factory-pi-host"),
-        installation_root.join("target/release/factory-pi-host"),
-    ]
-    .into_iter()
-    .find_map(|path| {
-        let canonical = exact_regular_file("factory-pi-host executable", &path).ok()?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode = fs::metadata(&canonical).ok()?.permissions().mode();
-            if mode & 0o111 == 0 {
-                return None;
+fn resolve_host_executable(installation_root: &Path, factoryd: &Path) -> Result<PathBuf, String> {
+    let profiles = if executable_profile(factoryd) == Some("release") {
+        ["release", "debug"]
+    } else {
+        ["debug", "release"]
+    };
+    profiles
+        .into_iter()
+        .map(|profile| {
+            installation_root
+                .join("target")
+                .join(profile)
+                .join("factory-pi-host")
+        })
+        .find_map(|path| {
+            let canonical = exact_regular_file("factory-pi-host executable", &path).ok()?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                let mode = fs::metadata(&canonical).ok()?.permissions().mode();
+                if mode & 0o111 == 0 {
+                    return None;
+                }
             }
-        }
-        Some(canonical)
-    })
-    .ok_or_else(|| {
-        "cannot find an executable factory-pi-host binary; build it before `factoryctl init`"
-            .to_owned()
-    })
+            Some(canonical)
+        })
+        .ok_or_else(|| {
+            "cannot find an executable factory-pi-host binary; build it before `factoryctl init`"
+                .to_owned()
+        })
+}
+
+fn executable_profile(executable: &Path) -> Option<&'static str> {
+    let profile = executable.parent()?.file_name()?.to_str()?;
+    let target = executable.parent()?.parent()?.file_name()?.to_str()?;
+    if target != "target" {
+        return None;
+    }
+    match profile {
+        "debug" => Some("debug"),
+        "release" => Some("release"),
+        _ => None,
+    }
 }
 
 fn default_factoryd_executable() -> Result<PathBuf, String> {
@@ -2763,6 +2784,23 @@ mod tests {
             "other=OTHER_KEY".to_owned(),
         ]);
         assert!(parse_args(unsupported_credential).is_err());
+    }
+
+    #[test]
+    fn init_selects_the_host_from_the_factoryd_build_profile() {
+        let factoryd = installation_root().join("target/release/factoryd");
+        let factoryd_string = factoryd.to_string_lossy().into_owned();
+        let parsed =
+            parse_args(init_arguments(&factoryd_string)).expect("complete release init command");
+        assert!(matches!(
+            parsed,
+            CliCommand::Init(InitCommand {
+                factoryd: selected_factoryd,
+                host_executable,
+                ..
+            }) if selected_factoryd == factoryd
+                && host_executable == installation_root().join("target/release/factory-pi-host")
+        ));
     }
 
     #[cfg(unix)]
