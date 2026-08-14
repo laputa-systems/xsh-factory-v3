@@ -350,9 +350,24 @@ fn seal_application_inputs(
     cas: &CasStore,
     command: &AdmitCompiledApplication,
 ) -> Result<SealedApplicationInputs, StoreError> {
-    let bundle_seal = cas.adopt(&command.source_root, &command.bundle_relative_path)?;
-    let bundle_bytes = cas.read_verified(bundle_seal.digest())?;
-    let (bundle, bundle_digest) = factory_protocol::admit_application_bundle_v2(&bundle_bytes)
+    // Application source is commonly stored as a text file. The compiler
+    // accepts one conventional terminal LF, but the durable bundle identity
+    // must be the strict canonical JSON bytes that every later runtime parser
+    // consumes. First adopt the assigned regular source file to retain the
+    // staging-root and no-symlink custody checks, then seal only that bounded
+    // source convention as kernel-owned canonical bytes. Any other whitespace
+    // remains part of the payload and is rejected by the protocol parser.
+    let source_bundle_seal = cas.adopt(&command.source_root, &command.bundle_relative_path)?;
+    let source_bundle_bytes = cas.read_verified(source_bundle_seal.digest())?;
+    let bundle_bytes = source_bundle_bytes
+        .strip_suffix(b"\n")
+        .unwrap_or(source_bundle_bytes.as_slice());
+    let bundle_seal = if bundle_bytes.len() == source_bundle_bytes.len() {
+        source_bundle_seal
+    } else {
+        cas.adopt_kernel_bytes(bundle_bytes)?
+    };
+    let (bundle, bundle_digest) = factory_protocol::admit_application_bundle_v2(bundle_bytes)
         .map_err(|error| StoreError::InvalidApplicationBundle(error.to_string()))?;
     if bundle_digest != bundle_seal.digest() {
         return Err(StoreError::ApplicationBundleDigestMismatch);

@@ -234,14 +234,18 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         fs::create_dir_all(source_root.join("policies")).expect("policy directory");
         fs::write(source_root.join("policies/test.luau"), b"return {}\n").expect("policy");
         let application_key = unique("application");
+        let bundle_source = application_bundle_json(
+            &application_key,
+            &repository_key,
+            &repository_path,
+            &template_digests,
+        );
+        // The operator-facing source file has the conventional final LF used
+        // by checked-in text files. Admission must seal canonical bytes and
+        // succeed through the same direct kernel path as a live deployment.
         fs::write(
             source_root.join("bundle.json"),
-            application_bundle_json(
-                &application_key,
-                &repository_key,
-                &repository_path,
-                &template_digests,
-            ),
+            format!("{bundle_source}\n"),
         )
         .expect("bundle");
         let command = AdmitCompiledApplication {
