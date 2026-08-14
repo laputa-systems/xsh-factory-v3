@@ -76,6 +76,26 @@ order. Do not report success or submit until
 `cargo test --locked --test integration runtime::coverage::xsh_native_tests -- --exact` passes;
 it catches the serial trace contract and `par-map-result` together.
 
+### Required implementation sequence
+
+Do not make a test-only or local-output change. The prior candidate made the incorrect minimal
+edit of preserving `LoweredValue::ResultErr` while continuing to return `LoweredValue` from
+`eval_indexed_par_map_item`; that leaves `Err(RuntimeError)` swallowed and the direct reproducer
+still exits 0. Start by changing that helper's Rust return type to
+`Result<LoweredValue, RuntimeError>`. Its successful value is `Ok(...)`; an evaluator
+`Err(error)` must leave the helper as `Err(error)` with no `stderr` side effect and no fallback
+`LoweredValue`. Then make every direct caller type-correct deliberately: the serial `ParMapBlock`
+collector must use the exact coordinator match above, and parallel workers/collectors must retain
+the per-item `Result` plus index until the coordinator wraps an error. Inspect and repair the
+fused `par-map` / flat-map-reduce callers too, so they neither feed a `Result` to value-only
+helpers nor discard a typed failure. `LoweredValue::ResultErr` remains a successful
+`Ok(LoweredValue::ResultErr(...))` result.
+
+Before editing the XSH test, run the sealed direct reproducer once on your implementation. It
+must exit 3 after the Rust control-flow change. If it exits 0, the implementation is incomplete;
+do not update assertions or submit. The changed stream test is proof of the already-working
+runtime behavior, not a substitute for it.
+
 The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
 `test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
 not the desired contract. Change it into regression coverage that requires status 3,
