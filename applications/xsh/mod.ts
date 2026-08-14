@@ -168,10 +168,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This Product-input correction succeeds active application revision 13.
+  // This Engineering-budget correction succeeds active application revision 14.
   // Pinning that exact bundle makes the change append-only rather than an
   // accidental application fork.
-  predecessor_bundle: "df43b85de98b36321cba267476d55d4d8add954fa1e1030c4b37879807f12239",
+  predecessor_bundle: "3a4f96e5424b84d9eba1fa2a9a999bcf63e80ea6578b06dafe24d180bc6ed9c3",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -220,10 +220,12 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
       ],
       model: engineeringModel,
       // Engineering receives a bounded defect and controller-owned evidence.
-      // Twenty-four turns cover the checkpoint, narrow source inspection,
-      // fix, direct reproducer, native gate, and submission without inviting a
-      // second research campaign inside one implementation assignment.
-      limits: { turn_limit: 24, wall_limit_millis: 900_000, output_byte_limit: 67_108_864 },
+      // Thirty-two turns leave room to checkpoint, inspect a complex XSH
+      // defect, correct a false lead, run the direct reproducer and native
+      // gate, and submit the candidate. The existing wall limit retains a
+      // firm completion bound without turning a nearly-complete repair into a
+      // paid retry.
+      limits: { turn_limit: 32, wall_limit_millis: 900_000, output_byte_limit: 67_108_864 },
     },
     {
       assignment_role: "quality",

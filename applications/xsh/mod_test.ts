@@ -35,9 +35,9 @@ Deno.test("XSH worker templates compile deterministically and expose a bounded p
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "df43b85de98b36321cba267476d55d4d8add954fa1e1030c4b37879807f12239"
+      "3a4f96e5424b84d9eba1fa2a9a999bcf63e80ea6578b06dafe24d180bc6ed9c3"
   ) {
-    throw new Error("the product input correction must pin the active r13 bundle");
+    throw new Error("the Engineering budget correction must pin the active r14 bundle");
   }
   assertExactTemplateDeclaration(first);
 
@@ -113,10 +113,10 @@ Deno.test("XSH worker templates compile deterministically and expose a bounded p
   }
   const engineeringProfile = profileFor("engineering");
   if (
-    engineeringProfile.limits.turn_limit !== 24 ||
+    engineeringProfile.limits.turn_limit !== 32 ||
     engineeringProfile.limits.wall_limit_millis !== 900_000
   ) {
-    throw new Error("Engineering must retain the bounded implementation budget");
+    throw new Error("Engineering must allow completion of a bounded XSH repair");
   }
   if (engineeringProfile.tools.includes("artifact_seal")) {
     throw new Error("Engineering must not own completion-evidence sealing");
