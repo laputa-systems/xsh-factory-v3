@@ -115,7 +115,7 @@ paid-cycle-verify:
 	factory_cost_usd="$${delivery_proof#*|}"; \
 	test "$$delivered_commit" = "$$(git -C "$(CURDIR)/../xsh" rev-parse HEAD)"; \
 	test -z "$$(git -C "$(CURDIR)/../xsh" status --porcelain)"; \
-	git -C "$(CURDIR)/../xsh" log -1 --format='%B' | grep -F -- "Factory-Cost: $$factory_cost_usd"; \
+	git -C "$(CURDIR)/../xsh" log -1 --format='%B' | awk -v expected="$$factory_cost_usd" '($$1 == "Factory-Cost:" && $$2 == sprintf("%c%s", 36, expected)) { found = 1 } END { exit !found }'; \
 	printf 'paid cycle %s delivered XSH commit %s; Factory-Cost $$%s\n' "$(FACTORY_PAID_CYCLE_ID)" "$$delivered_commit" "$$factory_cost_usd"
 
 postgres-test:

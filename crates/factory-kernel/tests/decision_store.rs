@@ -605,6 +605,7 @@ impl Fixture {
             expected_ticket_revision: ExpectedRevision::new(self.ticket_revision),
             expected_campaign_revision: ExpectedRevision::new(self.campaign_revision),
             expected_old_commit: object('a'),
+            candidate_commit: object('d'),
             resulting_commit: object('d'),
             resulting_tree: object('c'),
             factory_cost_micro_usd: self.provider_cost_spent,

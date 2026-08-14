@@ -327,6 +327,7 @@ pub struct RecordDelivery {
     pub expected_ticket_revision: ExpectedRevision,
     pub expected_campaign_revision: ExpectedRevision,
     pub expected_old_commit: RepositoryObjectIdV1,
+    pub candidate_commit: RepositoryObjectIdV1,
     pub resulting_commit: RepositoryObjectIdV1,
     pub resulting_tree: RepositoryObjectIdV1,
     pub factory_cost_micro_usd: u64,
@@ -1368,7 +1369,7 @@ impl DecisionStore {
             .candidate_commit
             .as_deref()
             .ok_or(DecisionStoreError::CandidateCommitMissing)?;
-        if candidate_commit != command.resulting_commit.as_str()
+        if candidate_commit != command.candidate_commit.as_str()
             || candidate.base_commit != command.expected_old_commit.as_str()
             || candidate.candidate_tree != command.resulting_tree.as_str()
         {
@@ -1422,7 +1423,7 @@ impl DecisionStore {
                  recovery_status, receipt_artifact_id
              ) VALUES ($1, $2, $3, $4, $5, $6, 0, 1, 0, $7) RETURNING id",
             command.candidate_id.get(),
-            candidate_commit,
+            command.candidate_commit.as_str(),
             command.expected_old_commit.as_str(),
             command.resulting_commit.as_str(),
             command.resulting_tree.as_str(),
@@ -2916,6 +2917,7 @@ fn delivery_fingerprint(command: &RecordDelivery) -> ContentDigest {
     hash_expected(&mut hasher, command.expected_ticket_revision);
     hash_expected(&mut hasher, command.expected_campaign_revision);
     hash_object(&mut hasher, &command.expected_old_commit);
+    hash_object(&mut hasher, &command.candidate_commit);
     hash_object(&mut hasher, &command.resulting_commit);
     hash_object(&mut hasher, &command.resulting_tree);
     hasher.update(&command.factory_cost_micro_usd.to_le_bytes());

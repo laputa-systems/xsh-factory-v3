@@ -430,6 +430,8 @@ impl DurableAuthorityResolver {
                 .ok_or_else(|| "accepted candidate is missing its local commit".to_owned())?,
         )
         .map_err(|error| format!("stored candidate commit is invalid: {error}"))?;
+        let candidate_commit_object = RepositoryObjectIdV1::parse(candidate_commit.to_string())
+            .map_err(|error| error.to_string())?;
         let candidate_tree = GitTreeId::parse(row.candidate_tree)
             .map_err(|error| format!("stored candidate tree is invalid: {error}"))?;
         let candidate_ref = CandidateRefName::new(ticket_id, command.candidate_id);
@@ -458,20 +460,13 @@ impl DurableAuthorityResolver {
         } else if repository.snapshot().base_tree() == &candidate_tree
             && repository.snapshot().base_commit() != &expected_old_commit
         {
-            let recovered = self
-                .git
-                .recover_candidate_commit(
-                    &repository,
-                    candidate_ref.clone(),
-                    candidate_commit,
-                    candidate_tree,
-                )
-                .map_err(|error| format!("stored candidate commit cannot be recovered: {error}"))?;
             self.git
                 .recover_completed_local_fast_forward_with_factory_cost(
                     &repository,
                     expected_old_commit,
-                    &recovered,
+                    candidate_ref.clone(),
+                    candidate_commit,
+                    candidate_tree,
                     factory_cost_micro_usd,
                 )
                 .map_err(|error| {
@@ -542,6 +537,7 @@ impl DurableAuthorityResolver {
                     delivery.delivered_commit.to_string(),
                 )
                 .map_err(|error| error.to_string())?,
+                candidate_commit: candidate_commit_object,
                 resulting_tree: RepositoryObjectIdV1::parse(delivery.delivered_tree.to_string())
                     .map_err(|error| error.to_string())?,
                 factory_cost_micro_usd,

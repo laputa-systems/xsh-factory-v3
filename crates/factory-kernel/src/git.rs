@@ -1075,10 +1075,19 @@ impl GitCustody {
         &self,
         repository: &QualifiedRepository,
         expected_old_commit: GitCommitId,
-        candidate: &CandidateCommit,
+        candidate_ref: CandidateRefName,
+        candidate_commit: GitCommitId,
+        candidate_tree: GitTreeId,
         factory_cost_micro_usd: u64,
     ) -> Result<LocalDeliveryReceipt, GitCustodyError> {
-        self.assert_candidate(repository, candidate)?;
+        let candidate = CandidateCommit {
+            commit: candidate_commit,
+            candidate_ref,
+            base_commit: expected_old_commit.clone(),
+            candidate_tree,
+            ref_was_present: true,
+        };
+        self.assert_candidate(repository, &candidate)?;
         if repository.snapshot.base_tree != candidate.candidate_tree
             || repository.snapshot.base_commit == expected_old_commit
         {
