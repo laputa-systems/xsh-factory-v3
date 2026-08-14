@@ -38,6 +38,18 @@ const command = (
   expected_exit_status,
 });
 
+// Product opportunities are admitted as exact commands rather than actor-made
+// shell strings. Each one names a known ignored conformance vector whose
+// desired state is a passing test; Product can therefore prove a real gap
+// twice without inventing a new execution boundary.
+const ignoredVector = (name: string, test_name: string) =>
+  command(
+    name,
+    ["test", "--locked", test_name, "--", "--ignored"],
+    300_000,
+    4_194_304,
+  );
+
 const commonActorTools: readonly ActorToolV1[] = [
   "workspace_read",
   "workspace_write",
@@ -156,10 +168,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This policy revision succeeds active application revision 11. Pinning
-  // that exact bundle makes the model-policy change append-only rather than
-  // an accidental application fork.
-  predecessor_bundle: "40f4de4fe4c092a30b655d85797ccf9691a79c4196db9c7f9295977e20a1b39a",
+  // This product-portfolio revision succeeds active application revision 12.
+  // Pinning that exact bundle makes the change append-only rather than an
+  // accidental application fork.
+  predecessor_bundle: "851719fbde9a1a2b10cf469946a75ff14350980fde1efc2e5472637b823dd1ac",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
@@ -245,13 +257,8 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
     { path: "docs/TEST-MAP.md", reason: "authoritative validation map" },
   ],
   reproducer_profiles: [
-    command(
-      "reproducer",
-      ["run", "--quiet", "--locked", "--bin", "xsh", "--", "/dev/stdin"],
-      300_000,
-      4_194_304,
-      3,
-    ),
+    ignoredVector("sha256_crypt_vector", "sha256_drepper_vector"),
+    ignoredVector("sha512_crypt_vector", "sha512_drepper_vector"),
   ],
   validation_profiles: {
     focused: [command("focused", ["test", "--locked", "-p", "xsh", "--lib"], 900_000, 67_108_864)],

@@ -10,69 +10,67 @@ Before any other action, call `workspace_read` once for each exact required path
 - `docs/CHAPTER-01-why-xsh.md`
 - `docs/TEST-MAP.md`
 
-Reading through `bash` does not satisfy this proof. Your job is to establish one bounded public
-behavior defect, not to construct its eventual regression test or diagnose its implementation.
-Investigate only a `par-map` worker index failure. The supplied program maps `[1, 2, 3]` over the
-one-item list `["only"]`, so every worker must fail with `index-out-of-range`. The public contract
-requires `par-map` to stop with a structured terminal failure, preserving the worker's cause and
-item identity, with exit status 3. Current behavior writes debug-shaped `par-map error` text and
-exits 0; that is the defect to report. In one shell command, run that exact program twice and write
-the fixed evidence files. Run no other exploration.
+Reading through `bash` does not satisfy this proof. Your job is to collect a small portfolio of
+independent, public conformance gaps—not to implement them, search for speculative work, or retry a
+defect that already passes. The two supplied vectors are known ignored SHA-crypt checks:
 
-Your shell already starts in the assigned checkout. Do not search the host or switch to another
-checkout; the one allowed shell command runs at that starting location.
+- `sha256_drepper_vector`, named by reproducer profile `sha256_crypt_vector`;
+- `sha512_drepper_vector`, named by reproducer profile `sha512_crypt_vector`.
 
-If that failure reproduces twice and is not already tracked, prepare exactly one proposal. Seal its
-narrative, evidence, canonical reproducer command, stdin, expected observation, and two matching
-actual observations. The command artifact must contain exactly these canonical JSON bytes, with no
-surrounding whitespace or newline:
+Their desired state is a passing Rust test. Run each supplied vector twice in one shell command on
+the assigned checkout. Submit each independently failing vector, in the listed order, as one
+complete proposal. Do not submit a vector that passes on both runs. If neither vector fails twice,
+invoke `work_complete` without a proposal. Do not search the host, change checkout, inspect source,
+or substitute another command: these two admitted commands are the whole investigation surface.
+
+The canonical command artifacts must contain exactly these JSON bytes, without surrounding
+whitespace or a newline:
 
 ```text
-{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
+{"argv":["test","--locked","sha256_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha256_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
+{"argv":["test","--locked","sha512_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha512_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
 ```
 
-Set `reproducer_profile` to exactly `reproducer`; put only the supplied two-line `par-map` program
-in the sealed stdin artifact. That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin`
-and expects the desired direct XSH exit status `3`. The expected observation is the exact replay
-expectation: empty stdout and a structured `par-map` failure that names `index-out-of-range` and an
-item index. Do not write an outer helper program, inspect process-status syntax, invoke
-`target/debug/xsh`, or design a regression test. Engineering owns that detail. Each
-`contract_reads` path must be unique and each reason at most 240 UTF-8 bytes. Set `contract_owner`
-to exactly `docs/TEST-MAP.md`; it must be one of the `contract_reads` paths, not a prose
-description. Submit only a complete proposal through `product_submit_ticket`, including an exact
-duplicate search.
+For each proposal, set `reproducer_profile` to its matching profile name. Both test commands ignore
+stdin, so use the one sealed empty stdin artifact for each proposal. The expected observation is a
+passing exit status 0 with empty expected stdout and stderr artifacts. The raw failing streams are
+diagnostic evidence; the supplied profile is status-only. Each actual observation must name the
+first run's artifact references in both `first_observation` and `second_observation`; the separately
+sealed second-run streams prove the repeated execution but are not the proposal's duplicate identity.
 
-There is one fixed evidence set: narrative, evidence, command, stdin, expected stdout, expected
-stderr, first stdout, first stderr, second stdout, and second stderr. After the one shell command
-that writes those files, issue all ten `artifact_seal` calls together; they are independent. Use
-their returned identities to submit the proposal in the next response. Do not serially re-inspect
-the workspace or explore after the defect is reproduced. Then invoke the visible `work_complete`
-tool directly. Do not write a `functions.work_complete` name or try to discover another tool
-interface.
+Use `docs/TEST-MAP.md` as `contract_owner` and include all three required documents as unique
+`contract_reads`, with a material reason of at most 240 UTF-8 bytes each. The title, scope, risk,
+and acceptance criteria must name only the selected SHA-crypt vector. State that the vector must
+pass from its ignored test command, preserve the known Drepper reference output, and become ordinary
+regression coverage once repaired. Carry one exact duplicate-search query for that vector. A proposal
+does not authorize an implementation change.
 
-The closed proposal requires its `first_observation` and `second_observation` artifact identities to
-match. Use the first run's stdout and stderr artifact references in both of those proposal fields.
-The separately sealed second-run files remain diagnostic evidence of the second execution; do not
-substitute them into `second_observation`.
-
-Use this exact shell body in the assigned checkout. Do not use Python, create observation JSON, or
-seal any file outside this ten-file set:
+Use this exact shell body in the assigned checkout. Do not use Python, create alternate observation
+JSON, or invoke any command outside this body:
 
 ```sh
 set +e
 mkdir -p .product-evidence
-printf '%s' '{"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/command.json
-printf '%s\n' 'let xs = ["only"]' 'let values = [1, 2, 3] |> par-map --jobs=2 { |index| xs[index] }' > .product-evidence/stdin
+: > .product-evidence/stdin
 : > .product-evidence/expected.stdout
-printf 'stream stage `par-map` item 0 failed: index-out-of-range' > .product-evidence/expected.stderr
-cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/first.stdout 2> .product-evidence/first.stderr
-first_status=$?
-cargo run --quiet --locked --bin xsh -- /dev/stdin < .product-evidence/stdin > .product-evidence/second.stdout 2> .product-evidence/second.stderr
-second_status=$?
-printf '%s' 'A failing par-map worker must terminate XSH with exit status 3 and preserve the worker error kind and item identity as structured error context.' > .product-evidence/narrative
-printf '%s' 'Both direct par-map reproducer runs exit 0 while printing debug-shaped par-map errors, rather than reporting one structured terminal index-out-of-range failure with the failed item index.' > .product-evidence/evidence
-printf '%s %s\n' "$first_status" "$second_status"
+: > .product-evidence/expected.stderr
+printf '%s' '{"argv":["test","--locked","sha256_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha256_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/sha256.command.json
+printf '%s' '{"argv":["test","--locked","sha512_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha512_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/sha512.command.json
+cargo test --locked sha256_drepper_vector -- --ignored > .product-evidence/sha256.first.stdout 2> .product-evidence/sha256.first.stderr
+sha256_first=$?
+cargo test --locked sha256_drepper_vector -- --ignored > .product-evidence/sha256.second.stdout 2> .product-evidence/sha256.second.stderr
+sha256_second=$?
+cargo test --locked sha512_drepper_vector -- --ignored > .product-evidence/sha512.first.stdout 2> .product-evidence/sha512.first.stderr
+sha512_first=$?
+cargo test --locked sha512_drepper_vector -- --ignored > .product-evidence/sha512.second.stdout 2> .product-evidence/sha512.second.stderr
+sha512_second=$?
+printf '%s %s %s %s\n' "$sha256_first" "$sha256_second" "$sha512_first" "$sha512_second"
 ```
 
-If the failure does not reproduce or is already tracked, invoke `work_complete` directly without a
-proposal.
+After the shell command, write one short narrative and one short evidence file for each vector that
+failed twice. Seal the shared stdin and expected files, the two command files, and every actual
+stream/narrative/evidence file required by the proposals together. Submit the SHA-256 proposal if
+and only if both of its statuses are nonzero; then submit the SHA-512 proposal if and only if both
+of its statuses are nonzero. The submissions are independent and nonterminal. Call `work_complete`
+only after all valid selected proposals have been submitted, or immediately when neither vector is a
+two-run failure.
