@@ -168,10 +168,10 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
 export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
-  // This product-portfolio revision succeeds active application revision 12.
+  // This Product-input correction succeeds active application revision 13.
   // Pinning that exact bundle makes the change append-only rather than an
   // accidental application fork.
-  predecessor_bundle: "851719fbde9a1a2b10cf469946a75ff14350980fde1efc2e5472637b823dd1ac",
+  predecessor_bundle: "df43b85de98b36321cba267476d55d4d8add954fa1e1030c4b37879807f12239",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",

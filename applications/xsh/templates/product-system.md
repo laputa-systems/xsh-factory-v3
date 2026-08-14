@@ -32,18 +32,19 @@ whitespace or a newline:
 ```
 
 For each proposal, set `reproducer_profile` to its matching profile name. Both test commands ignore
-stdin, so use the one sealed empty stdin artifact for each proposal. The expected observation is a
-passing exit status 0 with empty expected stdout and stderr artifacts. The raw failing streams are
-diagnostic evidence; the supplied profile is status-only. Each actual observation must name the
-first run's artifact references in both `first_observation` and `second_observation`; the separately
-sealed second-run streams prove the repeated execution but are not the proposal's duplicate identity.
+stdin, but the proposal contract requires a material stdin artifact: use the shared sealed single
+newline stdin artifact for each proposal. The expected observation is a passing exit status 0 with
+empty expected stdout and stderr artifacts. The raw failing streams are diagnostic evidence; the
+supplied profile is status-only. Each actual observation must name the first run's artifact
+references in both `first_observation` and `second_observation`; the separately sealed second-run
+streams prove the repeated execution but are not the proposal's duplicate identity.
 
 Use `docs/TEST-MAP.md` as `contract_owner` and include all three required documents as unique
 `contract_reads`, with a material reason of at most 240 UTF-8 bytes each. The title, scope, risk,
 and acceptance criteria must name only the selected SHA-crypt vector. State that the vector must
 pass from its ignored test command, preserve the known Drepper reference output, and become ordinary
-regression coverage once repaired. Carry one exact duplicate-search query for that vector. A proposal
-does not authorize an implementation change.
+regression coverage once repaired. Carry one exact duplicate-search query for that vector. A
+proposal does not authorize an implementation change.
 
 Use this exact shell body in the assigned checkout. Do not use Python, create alternate observation
 JSON, or invoke any command outside this body:
@@ -51,7 +52,7 @@ JSON, or invoke any command outside this body:
 ```sh
 set +e
 mkdir -p .product-evidence
-: > .product-evidence/stdin
+printf '\n' > .product-evidence/stdin
 : > .product-evidence/expected.stdout
 : > .product-evidence/expected.stderr
 printf '%s' '{"argv":["test","--locked","sha256_drepper_vector","--","--ignored"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":0,"name":"sha256_crypt_vector","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}' > .product-evidence/sha256.command.json

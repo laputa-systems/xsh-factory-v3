@@ -35,9 +35,9 @@ Deno.test("XSH worker templates compile deterministically and expose a bounded p
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "851719fbde9a1a2b10cf469946a75ff14350980fde1efc2e5472637b823dd1ac"
+      "df43b85de98b36321cba267476d55d4d8add954fa1e1030c4b37879807f12239"
   ) {
-    throw new Error("the product portfolio revision must pin the admitted predecessor bundle");
+    throw new Error("the product input correction must pin the active r13 bundle");
   }
   assertExactTemplateDeclaration(first);
 
@@ -75,6 +75,8 @@ Deno.test("XSH worker templates compile deterministically and expose a bounded p
       "sha512_crypt_vector",
       "Submit each independently failing vector",
       "Do not submit a vector that passes",
+      "single newline stdin artifact",
+      "printf '\\n' > .product-evidence/stdin",
     ]
   ) {
     assertContains(productSystem, required, "Product portfolio prompt");
