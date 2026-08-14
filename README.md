@@ -6,7 +6,8 @@ construction, and delivery. The XSH application contributes only versioned
 closed policy and worker templates.
 
 Start with the [architecture](docs/ARCHITECTURE.md), then the
-[control plane](docs/CONTROL-PLANE.md). Operators should read
+[control plane](docs/CONTROL-PLANE.md) and the
+[Grand Architect constitution](docs/CONSTITUTION.md). Operators should read
 [operations](docs/OPERATIONS.md), [evidence](docs/EVIDENCE.md), and
 [testing](docs/TESTING.md) before starting a campaign.
 

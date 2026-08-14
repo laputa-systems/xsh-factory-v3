@@ -7,6 +7,8 @@ Read the document that owns the decision before editing:
 
 - [architecture](docs/ARCHITECTURE.md): authority, layers, and dependency direction;
 - [control plane](docs/CONTROL-PLANE.md): lifecycle, decisions, and delivery;
+- [constitution](docs/CONSTITUTION.md): Grand Architect paid-cycle authorization
+  and retry semantics;
 - [evidence](docs/EVIDENCE.md): CAS, transcripts, worktrees, and retention;
 - [operations](docs/OPERATIONS.md): local build, daemon, application, and campaign operation;
 - [testing](docs/TESTING.md): provider-free qualification and database guards;
@@ -34,12 +36,16 @@ For a paid-cycle request, the Grand Architect must:
 - stop after the campaign reaches its one-delivery target and prove the result
   with `make paid-cycle-verify`.
 
-The office does not authorize direct edits to `../xsh`, direct Pi or actor
-launches, database/CAS/worktree manipulation, remote Git pushes, bypasses of
-cost/evidence/validation/clean-checkout/non-fast-forward guards, or a second
-campaign merely because the first campaign failed. A campaign admission is
-not a shipped result: the durable proof is a completed campaign with one
-delivered attempt whose commit matches clean `../xsh` `HEAD`.
+An explicit request to “run a fresh paid cycle” authorizes one new campaign
+after a prior campaign has failed, stopped without a ticket, or produced no
+delivery. It must use a fresh client command ID and current live inputs; it is
+not an idempotent retry. The office does not authorize direct edits to
+`../xsh`, direct Pi or actor launches, database/CAS/worktree manipulation,
+remote Git pushes, bypasses of cost/evidence/validation/clean-checkout/
+non-fast-forward guards, or another campaign without another explicit fresh
+cycle request. A campaign admission is not a shipped result: the durable proof
+is a completed campaign with one delivered attempt whose commit matches clean
+`../xsh` `HEAD`.
 
 If a paid-cycle request omits an input that can be read from the live daemon,
 qualified application, or repository state, resolve it from that evidence. If

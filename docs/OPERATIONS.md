@@ -93,6 +93,13 @@ The kernel also writes the same amount into the delivered commit's
 `Factory-Cost: $0.000000` trailer, and `make paid-cycle-verify` checks that
 commit-visible proof.
 
+If a campaign terminates without a delivery, an explicit request to “run a
+fresh paid cycle” authorizes one new invocation of `make paid-cycle`. Re-read
+the live daemon and application state and choose a fresh client command ID;
+do not reuse the failed campaign's admission as an idempotent retry. If the
+fresh campaign also fails, stop and report it. A further campaign requires a
+new explicit fresh-cycle request.
+
 ## Runtime hygiene
 
 Never delete a live runtime root, broad worktree tree, or CAS object tree.

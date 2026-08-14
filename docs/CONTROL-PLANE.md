@@ -71,6 +71,12 @@ even when the resident controller was rebuilt. The installed build is recorded
 separately by its qualification/install receipt; recovery does not silently
 rewrite in-flight campaign lineage.
 
+A new campaign after a terminal failure is not recovery of the failed campaign.
+An explicit fresh paid-cycle request is required; admission rereads the live
+daemon and application state and uses a fresh client command ID. The earlier
+campaign and its sealed evidence remain immutable, and one fresh request does
+not authorize an automatic campaign after that new attempt also fails.
+
 Artifact bytes are globally content-addressed. Their row records the first
 physical sealer, not exclusive campaign provenance, so final authority checks
 the exact sealed digest and byte length. Packet and validation operations still
