@@ -35,10 +35,13 @@ work.
    SDK, host, daemon, migrations, and operational tooling without receiving
    authority over `../xsh`. It needs its own repository binding, application
    policy/templates, reproducible validation profile, budget accounting,
-   Architect gates, and local delivery target. The lane should be able to
-   address scheduler throughput, operator-socket reliability, worktree
-   cleanup, and terminal-cost recovery as durable Factory changes while
-   remaining separate from XSH Product → Engineering → Quality work.
+   Architect gates, and local delivery target. Its commits must use the exact
+   same generic `CommitProvenance` trailer set as XSH Engineering commits,
+   including the final commit-visible `Factory-Cost` trailer; provenance may
+   not vary by role or repository. The lane should be able to address
+   scheduler throughput, operator-socket reliability, worktree cleanup, and
+   terminal-cost recovery as durable Factory changes while remaining separate
+   from XSH Product → Engineering → Quality work.
 
 Deferred scope such as self-upgrade, concurrent campaigns, remote workers, and
 stronger sandboxing remains in `V1.md` and is not implicitly approved.

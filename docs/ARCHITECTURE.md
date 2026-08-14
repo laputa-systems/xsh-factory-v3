@@ -44,6 +44,13 @@ the required reproducer plus full suite on a fresh exact worktree, constructs
 the commit only after validated evidence is available, and fast-forwards only
 a clean unchanged local default branch. It never pushes.
 
+The same generic Git custody contract applies to every future repository lane,
+including `factory-engineer`: candidate commits use the complete
+`CommitProvenance` trailer set, and the final delivered commit receives the
+kernel-created `Factory-Cost` trailer. XSH-specific vocabulary may shape an
+application packet, but it cannot create a weaker or different provenance
+format for Factory work.
+
 Assignment and validation worktrees are transient. Exact owned worktree
 removal is verified rather than using broad pruning; durable output is the CAS
 evidence, candidate tree/commit identity, and portable patch. CAS retention is
