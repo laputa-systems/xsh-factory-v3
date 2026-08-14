@@ -43,10 +43,13 @@ again before serving the new build.
 ## Application revisions and campaigns
 
 Compile `applications/xsh/bundle.v1.json`, then use `factoryctl daemon status`
-to obtain the installed build ID/revision. Register with those exact guards,
-seal a short operator rationale, and activate only while no campaign is
-running. Start campaigns through `factoryctl campaign start` with an explicit
-active application revision, aggregate micro-USD budget, deadline, and delivery
+to obtain the installed build ID/revision. XSH's bundle template paths are
+relative to `applications/xsh`, so admission uses that directory as
+`--source-root` and `bundle.v1.json` as `--bundle-relative-path`; the repository
+root is not a valid substitute. Register with those exact guards, seal a short
+operator rationale, and activate only while no campaign is running. Start
+campaigns through `factoryctl campaign start` with an explicit active
+application revision, aggregate micro-USD budget, deadline, and delivery
 target. Do not launch Pi or an actor host directly.
 
 Every mutation uses a client command ID and observed aggregate revision.

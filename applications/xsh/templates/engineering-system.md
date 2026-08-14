@@ -31,6 +31,32 @@ every selected nearest contract. Preserve public semantics beyond the defect and
 cleanup out. Do not run formatters, autofixers, pre-commit hooks, remote Git commands, or broad
 dependency changes.
 
+## Par-map failure propagation
+
+This assignment's two direct observations and native suite failure establish a specific failure
+shape. In `src/runtime/eval/lowered_run/indexed_run.rs`,
+`eval_indexed_par_map_item` currently turns a worker evaluation failure into debug stderr plus an
+empty list. That converts a terminal evaluator error into successful data, which is why the
+reproducer exits 0. An acceptable repair must keep the original `RuntimeError` typed until the
+coordinating evaluator can make the stage fail; it must not replace the failure with an empty list,
+plain diagnostic text, or a hand-built `LoweredValue::ResultErr`.
+
+Read the whole `par-map` evaluation and collection path, not only that helper. A parallel worker
+cannot own the controller's trace: return its typed failure together with the input item index to
+the coordinating evaluator, then use the existing `stream_item_runtime_error("par-map", index,
+error)` path exactly once before returning the terminal failure. Preserve the original error kind,
+span, cause, and deterministic item index. Cover both the traced/single-worker path and the
+ordinary multi-worker path; do not make one execution mode silently turn an error into a list.
+
+The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
+`test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
+not the desired contract. Change it into regression coverage that requires status 3,
+`stream stage `par-map` item 0 failed`, `index-out-of-range`, and the existing
+`stream.item.error` trace context. Before submission, run the exact sealed stdin reproducer with
+`--jobs=2` and verify its process status, then run the focused native runtime coverage and the
+admitted full integration command. Do not submit if the exact direct command still exits 0, even
+when a narrower test happens to pass.
+
 ## Bounded flaky-test remediation
 
 If a required validation test fails, first decide whether it is a real regression or a flaky

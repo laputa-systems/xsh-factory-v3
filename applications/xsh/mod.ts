@@ -159,7 +159,7 @@ export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplication
   // This policy revision succeeds the active registered revision. Pinning
   // that exact bundle makes the model-policy change append-only rather than
   // an accidental application fork.
-  predecessor_bundle: "8252112e1068ea068aa5e807316a27a0f45fbca561a68768f94ee826388934a7",
+  predecessor_bundle: "4621be39e92cd9338dacb40f207e374bb66dfac1cd8713b85454e0e9beb074d4",
   repository: {
     repository_key: "xsh-product",
     canonical_local_path: "/Users/josh/d/laputa-systems/xsh",
