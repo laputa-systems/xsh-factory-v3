@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "ce969a831f49ab66f652e11541136323c734243382b94124d76b02ba2aaffab4"
+      "34f37dc81adcbf4f1b1c38bae21e6e3bd8506211b24428096291afe6a9736ce1"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
@@ -204,6 +204,18 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       [
         "collect-all regression gate",
         /`tests\/xsh\/par-map-result\.xsh::test_par_map_collect_all` is the canonical guard/u,
+      ],
+      [
+        "serial collector must not raw-propagate",
+        /do not write\s+`results\.push\(result\?\)`/u,
+      ],
+      [
+        "serial collector exact wrapper",
+        /Err\(error\) => return Err\(self\.stream_item_runtime_error\("par-map", item_index, error\)\)/u,
+      ],
+      [
+        "native runtime gate before submission",
+        /`cargo test --locked --test integration runtime::coverage::xsh_native_tests -- --exact` passes/u,
       ],
     ] as const
   ) {

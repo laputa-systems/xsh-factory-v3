@@ -59,6 +59,23 @@ indexing reproducer is a Rust evaluator failure, so it must still terminate with
 collect-all test through the native runtime gate as well as the exact reproducer and full suite;
 do not submit while either contract fails.
 
+In the ordinary `FullStageTag::ParMapBlock` serial/traced branch, do not write
+`results.push(result?)`: that raw `?` returns the evaluator error before the coordinator can add
+the required context. Preserve the existing `parallel.job.end` trace emission, then use this exact
+control shape for every item:
+
+```rust
+match result {
+    Ok(value) => results.push(value),
+    Err(error) => return Err(self.stream_item_runtime_error("par-map", item_index, error)),
+}
+```
+
+The parallel collector follows the same rule after results arrive in deterministic item-index
+order. Do not report success or submit until
+`cargo test --locked --test integration runtime::coverage::xsh_native_tests -- --exact` passes;
+it catches the serial trace contract and `par-map-result` together.
+
 The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
 `test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
 not the desired contract. Change it into regression coverage that requires status 3,
