@@ -79,10 +79,10 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!/desired\s+direct XSH exit status `3`/u.test(productSystem)) {
     throw new Error("Product must hand off the direct structured-error expectation");
   }
-  if (!productSystem.includes("ordinary expression `1 % 0`")) {
-    throw new Error("Product must reproduce the ordinary-expression remainder-by-zero defect");
+  if (!productSystem.includes("ordinary expression\n`9223372036854775807 + 1`")) {
+    throw new Error("Product must reproduce the ordinary-expression integer-overflow defect");
   }
-  if (!productSystem.includes("put only `1 % 0` in the sealed stdin")) {
+  if (!/put only `9223372036854775807 \+ 1` in the\s+sealed\s+stdin/u.test(productSystem)) {
     throw new Error("Product's sealed reproducer must match its investigated expression");
   }
   if (!productSystem.includes("Do not search the host or switch to another")) {
