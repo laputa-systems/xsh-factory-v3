@@ -537,7 +537,7 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
     };
   }
   if (name === "product_submit_ticket") {
-    return withoutCommandEnvelope(PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1);
+    return productSubmitToolInputSchema();
   }
   if (name === "candidate_checkpoint_regression") {
     return withoutCommandEnvelope(CANDIDATE_CHECKPOINT_REGRESSION_INPUT_SCHEMA_V1);
@@ -642,6 +642,35 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
     };
   }
   return EMPTY_INPUT_SCHEMA;
+}
+
+/**
+ * The kernel's Product DTO retains both observations so a sealed proposal is
+ * self-contained. At the worker boundary, though, the second observation is
+ * a required duplicate of the first and `modelToolWireInput` derives it
+ * before framing the strict DTO. Leave only that redundant object open in
+ * Pi's pre-invocation schema: otherwise Pi rejects a hand-copied digest
+ * before the host can replace it, while widening any authoritative field
+ * would weaken the model-to-kernel contract.
+ */
+function productSubmitToolInputSchema(): Readonly<Record<string, unknown>> {
+  const schema = withoutCommandEnvelope(PRODUCT_SUBMIT_TICKET_INPUT_SCHEMA_V1);
+  const properties = schema.properties as Readonly<Record<string, unknown>>;
+  const reproducer = properties.reproducer as Readonly<Record<string, unknown>>;
+  const reproducerProperties = reproducer.properties as Readonly<Record<string, unknown>>;
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      reproducer: {
+        ...reproducer,
+        properties: {
+          ...reproducerProperties,
+          second_observation: { type: "object" },
+        },
+      },
+    },
+  };
 }
 
 function forumListSchema(): Readonly<Record<string, unknown>> {

@@ -35,7 +35,7 @@ import {
   validateToolAllowlist,
   verifyModelDescriptor,
 } from "./mod.ts";
-import { canonicalJson } from "../factory-sdk/protocol.ts";
+import { canonicalJson, decodeJsonFrame, encodeJsonFrame } from "../factory-sdk/protocol.ts";
 import { ForumAdapter } from "../factory-sdk/forum.ts";
 
 class FakeSession implements PiSessionLike {
@@ -872,6 +872,102 @@ Deno.test("local Pi-headless faux provider prompts, invokes a bound tool, and em
     assertEquals(invoked, [{ repository_relative_path: "AGENTS.md" }]);
     assert(events.some((event) => JSON.stringify(event).includes("usage")));
     assertEquals(providerTimeouts, [90_000, 90_000]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("Pi validates a redundant Product observation only after host canonicalization", async () => {
+  const root = await Deno.makeTempDir({ prefix: "pi-host-product-duplicate-" });
+  try {
+    const faux = fauxProvider();
+    const firstObservation = {
+      exit_status: 0,
+      stdout: { artifact_id: 1, digest: "a".repeat(64), byte_length: 0 },
+      stderr: { artifact_id: 2, digest: "b".repeat(64), byte_length: 10 },
+    };
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("product_submit_ticket", {
+        title: "parallel worker failure is hidden",
+        mission_value: "surface the runtime failure",
+        scope: "a deterministic worker failure exits successfully",
+        contract_owner: "docs/TEST-MAP.md",
+        risk: "automation treats the failed work as successful",
+        narrative: { artifact_id: 3, digest: "c".repeat(64), byte_length: 10 },
+        evidence: { artifact_id: 4, digest: "d".repeat(64), byte_length: 10 },
+        acceptance_criteria: ["the direct run exits with status 3"],
+        contract_reads: [{ path: "docs/TEST-MAP.md", reason: "runtime contract" }],
+        duplicate_search: { query: "parallel worker exits successfully", limit: 1 },
+        reproducer_profile: "reproducer",
+        reproducer: {
+          comparison_rule_version: 1,
+          command: { artifact_id: 5, digest: "e".repeat(64), byte_length: 10 },
+          stdin: { artifact_id: 6, digest: "f".repeat(64), byte_length: 10 },
+          expected_observation: {
+            exit_status: 3,
+            stdout: { artifact_id: 7, digest: "0".repeat(64), byte_length: 0 },
+            stderr: { artifact_id: 8, digest: "1".repeat(64), byte_length: 10 },
+          },
+          first_observation: firstObservation,
+          // The model has transcribed a malformed duplicate. Pi must let the
+          // host derive this required duplicate from first_observation before
+          // the strict wire DTO reaches the kernel.
+          second_observation: {
+            exit_status: 99,
+            stdout: { artifact_id: 99, digest: "x", byte_length: 99 },
+            stderr: { artifact_id: 98, digest: "y", byte_length: 98 },
+          },
+        },
+      })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxText("proposal submitted")]),
+    ]);
+    const runtime = await ModelRuntime.create({
+      credentials: createEphemeralCredentialStore(),
+      authPath: undefined,
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    runtime.registerNativeProvider(faux.provider);
+    const model = faux.models[0];
+    let request: Record<string, unknown> | undefined;
+    const client = new FramedActorClient({
+      exchange: (frame) => {
+        request = decodeJsonFrame<Record<string, unknown>>(frame, "product.submit_ticket");
+        return Promise.resolve(encodeJsonFrame({
+          protocol_version: 1,
+          request_id: request.request_id,
+          operation: "product.submit_ticket",
+          audit_id: 7,
+          aggregate_revision: 4,
+        }));
+      },
+    });
+    const [productTool] = createFramedToolAdapters(client, ["product_submit_ticket"]);
+    const source = packet(root, false, false);
+    const session = await createSdkSessionWithRuntimeForTest({
+      ...source,
+      assignment_role: "product_research",
+      model: {
+        ...source.model,
+        provider: model.provider,
+        model_id: model.id,
+        thinking_level: "none",
+        context_token_limit: model.contextWindow,
+        output_token_limit: model.maxTokens,
+        price_input_micro_usd_per_million_tokens: 0,
+        price_output_micro_usd_per_million_tokens: 0,
+        price_cache_read_micro_usd_per_million_tokens: 0,
+        price_cache_write_micro_usd_per_million_tokens: 0,
+      },
+      tools: ["product_submit_ticket"],
+      legal_terminal_operations: [],
+    }, { custom_tools: [productTool!] }, runtime);
+    await session.prompt("submit the sealed Product proposal");
+    session.dispose();
+
+    const submitted = request?.reproducer as Record<string, unknown>;
+    assertEquals(submitted.second_observation, firstObservation);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

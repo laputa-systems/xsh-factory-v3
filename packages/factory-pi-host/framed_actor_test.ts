@@ -269,6 +269,7 @@ Deno.test("Product submission custom tool exposes the closed proposal schema", (
   };
   assert(reproducer.required?.includes("second_observation"));
   assert("second_observation" in (reproducer.properties ?? {}));
+  assertEquals(reproducer.properties?.second_observation, { type: "object" });
 });
 
 Deno.test("Product submission derives the required duplicate observation from the first", async () => {
