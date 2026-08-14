@@ -1,9 +1,9 @@
 import {
   type ActorToolV1,
-  type ApplicationDefinitionV1,
+  type ApplicationSourceDefinitionV1,
   type CandidateSubmissionV1,
   compileApplicationV1,
-  defineApplicationV1,
+  defineApplicationSourceV1,
   type ProductTicketProposalV1,
   type QualityFullSuiteInvocationV1,
   type QualityReviewSubmissionV1,
@@ -14,9 +14,8 @@ import {
   validateQualityReviewSubmissionV1,
 } from "@factory/sdk";
 
-const template = (source_path: string, digest: string, placeholders: readonly string[]) => ({
+const template = (source_path: string, placeholders: readonly string[]) => ({
   source_path,
-  digest,
   placeholders,
   rendered_byte_limit: 32_768,
 });
@@ -154,7 +153,7 @@ export function validateXshCandidateSubmissionV1(input: CandidateSubmissionV1): 
   validateCandidateSubmissionV1(input);
 }
 
-export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
+export const xshApplicationV1: ApplicationSourceDefinitionV1 = defineApplicationSourceV1({
   format_version: 1,
   application_key: "xsh",
   // The installed V1 bundle is the explicit lineage parent for this
@@ -169,7 +168,6 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
   },
   mission_template: template(
     "templates/mission.md",
-    "238e6ad15801eba875197f4a96aed1345efab91df5728b35864d9ab7c2769bbb",
     [],
   ),
   office_profiles: [
@@ -177,12 +175,10 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "product_research",
       system_template: template(
         "templates/product-system.md",
-        "cbd4124015d8a62cd8cc3e0340b8d2cfd507e186097fa67cd872acb53f1b5edb",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/product-assignment.md",
-        "45af90aff658aaa330ee42e8fc54f7d2507eb2050d663facc1ffb13a1f7a5122",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
       tools: productActorTools,
@@ -193,12 +189,10 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "engineering",
       system_template: template(
         "templates/engineering-system.md",
-        "7e96b5c147fee2da3163087eb6c1c3e361425859372bdd4b387467d6f827adda",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/engineering-assignment.md",
-        "dd247f1695771d16d869bf126cf1121086b976eb91ea48b039b5a91a500d86c0",
         [
           "ASSIGNMENT_ID",
           "TARGET",
@@ -219,12 +213,10 @@ export const xshApplicationV1: ApplicationDefinitionV1 = defineApplicationV1({
       office: "quality",
       system_template: template(
         "templates/quality-system.md",
-        "de14293ac66d6496c73649f2fe9feea886e8a31caf81c6a98eb920b10e442a29",
         ["ASSIGNMENT_ID", "MISSION"],
       ),
       assignment_template: template(
         "templates/quality-assignment.md",
-        "be05a0a0d56c8dca558d51b955324a52b0f02f5fab0c419dce74cc73f467965e",
         ["ASSIGNMENT_ID", "TARGET"],
       ),
       tools: [

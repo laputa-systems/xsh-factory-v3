@@ -318,7 +318,7 @@ impl SessionLaunchRequest {
             ),
         ] {
             let relative = path
-                .strip_prefix(&self.staging_root())
+                .strip_prefix(self.staging_root())
                 .map_err(|_| SessionRuntimeError::CapturePathOutsideStaging { stream: name })?;
             RuntimeRelativePath::parse(relative.to_string_lossy().to_string())
                 .map_err(|_| SessionRuntimeError::CapturePathOutsideStaging { stream: name })?;
@@ -462,6 +462,7 @@ struct RegisteredSessionArtifact {
     artifact_id: ArtifactId,
 }
 
+#[derive(Default)]
 struct SessionRpcState {
     packet_verified: bool,
     transcript: Option<RegisteredSessionArtifact>,
@@ -486,18 +487,6 @@ struct QualitySessionState {
     review_submitted: bool,
     authority: Option<ResolvedQualityCandidateAuthority>,
     full_suite: Option<QualityFullSuiteOutcome>,
-}
-
-impl Default for SessionRpcState {
-    fn default() -> Self {
-        Self {
-            packet_verified: false,
-            transcript: None,
-            terminal_request: None,
-            engineering: EngineeringSessionState::default(),
-            quality: QualitySessionState::default(),
-        }
-    }
 }
 
 impl EngineeringSessionState {
@@ -2576,11 +2565,11 @@ fn proposal_artifact_references(
 }
 
 fn decode_base64(value: &str) -> Result<Vec<u8>, &'static str> {
-    if value.is_empty() || value.len() % 4 != 0 {
+    if value.is_empty() || !value.len().is_multiple_of(4) {
         return Err("base64 value is empty or has invalid length");
     }
     let mut output = Vec::with_capacity(value.len() / 4 * 3);
-    for (chunk_index, chunk) in value.as_bytes().chunks_exact(4).enumerate() {
+    for (chunk_index, chunk) in value.as_bytes().as_chunks::<4>().0.iter().enumerate() {
         let final_chunk = chunk_index + 1 == value.len() / 4;
         let padding = chunk.iter().rev().take_while(|byte| **byte == b'=').count();
         if padding > 2 || (!final_chunk && padding != 0) || chunk[..4 - padding].contains(&b'=') {

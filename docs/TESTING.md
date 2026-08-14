@@ -1,11 +1,13 @@
 # Testing and qualification
 
-## Ordinary provider-free checks
+## Grand Architect qualification
 
-`make check` is the normal source qualification. It builds the local Pi
-headless artifacts, checks Rust and Deno source, and runs their unit/integration
-tests without provider calls or remote Git. Use focused `cargo test` or `deno test`
-while changing one boundary, then broaden as warranted.
+`make lint` is the single aggressive source qualification before the Grand
+Architect commits factory changes. It builds the local Pi headless artifacts,
+formats Rust and Deno source, applies Rust clippy fixes, checks Rust and Deno
+source, and runs their unit/integration tests without provider calls or remote
+Git. Use focused `cargo test` or `deno test` while changing one boundary; do
+not use `make lint` as the ordinary inner-loop command.
 
 The local Pi audit projector has focused Deno coverage in
 `vendor/pi-headless/packages/coding-agent/test/headless-audit.test.ts`; the

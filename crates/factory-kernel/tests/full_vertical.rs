@@ -1220,9 +1220,10 @@ async fn install_build(
     )
     .expect("qualify synthetic kernel source");
     let binary = qualify_kernel_binary_v1(&deno()).expect("qualify installed kernel binary");
-    let cargo = std::env::var_os("CARGO")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/opt/homebrew/opt/rustup/bin/cargo"));
+    let cargo = std::env::var_os("CARGO").map_or_else(
+        || PathBuf::from("/opt/homebrew/opt/rustup/bin/cargo"),
+        PathBuf::from,
+    );
     let approved_tools = InstalledApprovedToolsQualificationV1::qualify(&cargo, &system_git())
         .expect("qualify installed deterministic tools");
     let installed = InstalledKernelBuildReceiptV1::from_qualifications(
@@ -1412,7 +1413,7 @@ fn git(cwd: &Path, git: &Path, args: &[&str]) {
         .current_dir(cwd)
         .status()
         .unwrap();
-    assert!(status.success(), "git {:?}", args)
+    assert!(status.success(), "git {args:?}");
 }
 fn git_stdout(cwd: &Path, git: &Path, args: &[&str]) -> String {
     let out = Command::new(git)
@@ -1420,7 +1421,7 @@ fn git_stdout(cwd: &Path, git: &Path, args: &[&str]) -> String {
         .current_dir(cwd)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {:?}", args);
+    assert!(out.status.success(), "git {args:?}");
     String::from_utf8(out.stdout).unwrap()
 }
 fn write_script(path: &Path, contents: &str) {
@@ -1434,7 +1435,7 @@ fn write_script(path: &Path, contents: &str) {
     }
 }
 fn js_string(value: &str) -> String {
-    format!("{:?}", value)
+    format!("{value:?}")
 }
 fn unique(prefix: &str) -> String {
     format!("{prefix}-{}", unique_number())

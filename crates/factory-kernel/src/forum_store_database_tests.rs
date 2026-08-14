@@ -678,7 +678,7 @@ fn unique_number() -> u64 {
 
 fn digest(serial: u64) -> ContentDigest {
     let mut bytes = [0; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&serial.to_be_bytes());
     }
     ContentDigest::from_bytes(bytes)

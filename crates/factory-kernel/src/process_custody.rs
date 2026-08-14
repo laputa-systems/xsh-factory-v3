@@ -835,7 +835,7 @@ mod tests {
         assert!(matches!(
             replaced,
             Err(ProcessCustodyError::DuplicateEnvironmentName { name })
-                if name == OsString::from("DENO_NO_UPDATE_CHECK")
+                if name == "DENO_NO_UPDATE_CHECK"
         ));
 
         let ambient_cache = PiHostSpawnSpec::new(
@@ -850,7 +850,7 @@ mod tests {
         assert!(matches!(
             ambient_cache,
             Err(ProcessCustodyError::DuplicateEnvironmentName { name })
-                if name == OsString::from("DENO_DIR")
+                if name == "DENO_DIR"
         ));
     }
 

@@ -356,8 +356,10 @@ fn real_deno_fake_actor_unknown_cost_fails_closed_without_a_resume() {
         assert!(
             matches!(
                 &second,
-                Err(factory_kernel::storage::StoreError::AssignmentStateConflict { .. })
-                    | Err(factory_kernel::storage::StoreError::CampaignCostFrozen { .. })
+                Err(
+                    factory_kernel::storage::StoreError::AssignmentStateConflict { .. }
+                        | factory_kernel::storage::StoreError::CampaignCostFrozen { .. }
+                )
             ),
             "unexpected second-session result: {second:?}"
         );
@@ -488,11 +490,10 @@ impl RuntimeFixture {
         let tickets = store.ticket_store();
         let command_runner = CommandRunner::new(
             ApprovedToolExecutables::new(
-                ExactExecutable::discover(
-                    std::env::var_os("CARGO")
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| PathBuf::from("/opt/homebrew/opt/rustup/bin/cargo")),
-                )
+                ExactExecutable::discover(std::env::var_os("CARGO").map_or_else(
+                    || PathBuf::from("/opt/homebrew/opt/rustup/bin/cargo"),
+                    PathBuf::from,
+                ))
                 .expect("exact Cargo executable"),
                 ExactExecutable::discover("/usr/bin/git").expect("exact Git executable"),
                 ExactExecutable::discover(deno_executable()).expect("exact Deno executable"),
@@ -548,7 +549,7 @@ impl RuntimeFixture {
             &store,
             &build,
             "runtime-required-manifest",
-            &canonical_manifest(&[observed.clone()]),
+            &canonical_manifest(std::slice::from_ref(&observed)),
         )
         .await;
         let system_prompt =
@@ -1076,8 +1077,10 @@ fn wire_packet(
         target: packet.target.clone(),
         repository_base_identity: digest(8_100).to_hex(),
         factory_base_identity: digest(8_101).to_hex(),
-        ticket_attempt_id: packet.ticket_attempt_id.map(|id| id.get()),
-        candidate_id: packet.candidate_id.map(|id| id.get()),
+        ticket_attempt_id: packet
+            .ticket_attempt_id
+            .map(factory_protocol::TicketAttemptId::get),
+        candidate_id: packet.candidate_id.map(factory_protocol::CandidateId::get),
         system_prompt_artifact_id: packet.system_prompt_artifact_id.get(),
         assignment_prompt_artifact_id: packet.assignment_prompt_artifact_id.get(),
         required_read_manifest_artifact_id: packet.required_read_manifest_artifact_id.get(),
@@ -1210,7 +1213,7 @@ fn unique_number() -> u64 {
 
 fn digest(value: u64) -> ContentDigest {
     let mut bytes = [0_u8; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&value.to_be_bytes());
     }
     ContentDigest::from_bytes(bytes)

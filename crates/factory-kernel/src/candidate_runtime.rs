@@ -1138,12 +1138,12 @@ fn validate_packet_office(
             "assignment office is not authorized for this operation".to_owned(),
         ));
     }
-    if let Some(operation) = terminal {
-        if !actor.packet.terminal_operations.contains(&operation) {
-            return Err(CandidateRuntimeError::PacketBinding(
-                "assignment terminal operation is not authorized".to_owned(),
-            ));
-        }
+    if let Some(operation) = terminal
+        && !actor.packet.terminal_operations.contains(&operation)
+    {
+        return Err(CandidateRuntimeError::PacketBinding(
+            "assignment terminal operation is not authorized".to_owned(),
+        ));
     }
     Ok(())
 }

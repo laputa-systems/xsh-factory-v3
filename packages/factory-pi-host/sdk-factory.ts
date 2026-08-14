@@ -250,7 +250,8 @@ function sealedAssignmentResourceLoader(
   systemPrompt: string,
   cwd: string,
 ): ResourceLoader {
-  const prompt = `${systemPrompt}\n\nYour shell starts in this assigned workspace: ${cwd}\nRun assignment commands there. Do not search for or switch to another checkout.`;
+  const prompt =
+    `${systemPrompt}\n\nYour shell starts in this assigned workspace: ${cwd}\nRun assignment commands there. Do not search for or switch to another checkout.`;
   const runtime = createExtensionRuntime();
   // `createAgentSession` consumes an already-loaded extension collection.
   // Construct exactly one closed handler in memory rather than invoking Pi's

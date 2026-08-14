@@ -8,7 +8,7 @@ fn print_fixture_unsigned_digest() {
     let raw = include_str!("../../../tests/protocol-fixtures/assignment-packet-v1.json").trim_end();
     let packet: AssignmentPacketWireV1 = miniserde::json::from_str(raw).expect("fixture DTO");
     let digest = unsigned_assignment_packet_digest_v1(&packet).expect("unsigned digest");
-    println!("{}", digest);
+    println!("{digest}");
     assert_eq!(
         canonical_assignment_packet_json_v1(&packet).expect("canonical fixture"),
         raw
@@ -23,7 +23,7 @@ fn sealed_fixture_round_trips_and_rejects_noncanonical_bytes() {
         packet.packet_digest,
         "87a859846dfcc3954b62c042d6c5a6b4d71e0816e044b5b337da7fd7dd5cfbe2"
     );
-    assert!(parse_assignment_packet_v1(format!(" {}", raw).as_bytes()).is_err());
+    assert!(parse_assignment_packet_v1(format!(" {raw}").as_bytes()).is_err());
     assert!(
         parse_assignment_packet_v1(
             raw.replace(

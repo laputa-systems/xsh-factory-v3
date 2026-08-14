@@ -6,15 +6,25 @@ PI_HEADLESS_SDK := $(PI_HEADLESS_RUNTIME)/headless-sdk.mjs
 PI_HEADLESS_AI := $(PI_HEADLESS_RUNTIME)/headless-ai.mjs
 FACTORY_OPERATION_DEADLINE_MS ?= 900000
 
-.PHONY: cache check rust-check deno-check deno-version pi-headless-cache pi-headless-build factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
+# The factory keeps Clippy's correctness and default quality groups strict.
+# Pedantic documentation/style heuristics and these boundary-shape
+# warnings are reviewed policy, not pre-commit failures for this codebase.
+CLIPPY_GATE_FLAGS := --deny warnings \
+	--allow clippy::pedantic \
+	--allow clippy::large_enum_variant \
+	--allow clippy::result_large_err \
+	--allow clippy::type_complexity \
+	--allow clippy::too_many_arguments
+
+.PHONY: cache lint deno-version pi-headless-cache pi-headless-build factoryd-serve postgres-test ticket-test decision-test xsh-bundle-test provider-free-vertical backup-restore-test provider-free-acceptance sqlx-check
 
 pi-headless-cache:
 	test -f "$(PI_HEADLESS_ROOT)/package-lock.json"
 	cd "$(PI_HEADLESS_ROOT)" && npm ci --ignore-scripts
 
 # The local Pi fork owns its frozen provider catalog as source. `cache` may
-# install its locked Node build dependencies, while ordinary checks only use
-# this offline build and never contact a provider or the npm registry.
+# install its locked Node build dependencies, while the lint gate only uses
+# this offline build and never contacts a provider or the npm registry.
 pi-headless-build:
 	test -d "$(PI_HEADLESS_ROOT)/node_modules"
 	test -d "$(PI_HEADLESS_ROOT)/packages/ai/src/providers/data"
@@ -30,21 +40,19 @@ pi-headless-build:
 cache: pi-headless-cache pi-headless-build
 	deno task cache
 
-rust-check:
-	cargo fmt --check
-	cargo check --workspace --all-targets
-	cargo test --workspace
-
 deno-version:
 	test "$$(deno --version | sed -n '1s/^deno \([0-9.]*\).*/\1/p')" = "$(DENO_VERSION)"
 
-deno-check: deno-version pi-headless-build
-	deno fmt --check
+lint: deno-version pi-headless-build
+	cargo fmt --all
+	cargo clippy --fix --allow-dirty --all-targets --all-features -- $(CLIPPY_GATE_FLAGS)
+	cargo clippy --all-targets --all-features -- $(CLIPPY_GATE_FLAGS)
+	cargo check --workspace --all-targets
+	cargo test --workspace
+	deno fmt
 	deno lint
 	deno task check
 	deno task test
-
-check: rust-check deno-check
 
 # The credential is introduced only at the daemon process boundary. Callers
 # must choose the dedicated database and runtime root explicitly; this target
@@ -142,7 +150,7 @@ provider-free-acceptance:
 	test "$$acceptance_decision_name" != "$$acceptance_xsh_bundle_name"; \
 	test "$$acceptance_decision_name" != "$$acceptance_vertical_name"; \
 	test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
-	$(MAKE) check
+	$(MAKE) lint
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) postgres-test
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_DECISION_URL" $(MAKE) decision-test
 	DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) sqlx-check
@@ -152,7 +160,7 @@ provider-free-acceptance:
 
 # Requires a disposable PostgreSQL 18 database and an externally installed
 # sqlx-cli matching the pinned project crate. It verifies committed `.sqlx`
-# query metadata; ordinary `make check` compiles from that metadata offline.
+# query metadata; `make lint` compiles from that metadata offline.
 sqlx-check:
 	test -n "$$DATABASE_URL"
 	cargo sqlx prepare --workspace --check -- --all-targets

@@ -181,7 +181,7 @@ fn require_deno_2_9_4(deno: &Path) -> String {
         .split_whitespace()
         .collect::<Vec<_>>();
     assert_eq!(
-        version_fields.get(0),
+        version_fields.first(),
         Some(&"deno"),
         "Deno version output must begin with its executable name"
     );

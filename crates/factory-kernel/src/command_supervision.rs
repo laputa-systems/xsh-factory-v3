@@ -141,11 +141,9 @@ impl ApprovedToolExecutables {
     fn cargo_toolchain_environment(
         &self,
     ) -> Result<Vec<(&'static str, OsString)>, CommandSupervisionError> {
-        let cargo_directory = self
-            .cargo
-            .path()
-            .parent()
-            .ok_or_else(|| CommandSupervisionError::ExecutableNotAbsolute(self.cargo.path().into()))?;
+        let cargo_directory = self.cargo.path().parent().ok_or_else(|| {
+            CommandSupervisionError::ExecutableNotAbsolute(self.cargo.path().into())
+        })?;
         // Cargo-driven integration suites can deliberately invoke `cargo`
         // again from their own test binary. That child must resolve the
         // already-qualified Cargo executable, never an ambient operator path.
@@ -497,10 +495,10 @@ impl CommandRunner {
             command.profile.stderr_byte_limit as u64,
             Arc::clone(&stderr_limit_exceeded),
         );
-        let stdin_writer = match child.stdin.take() {
-            Some(stdin) => Some(write_stdin(stdin, command.stdin.bytes().to_vec())),
-            None => None,
-        };
+        let stdin_writer = child
+            .stdin
+            .take()
+            .map(|stdin| write_stdin(stdin, command.stdin.bytes().to_vec()));
 
         let (terminal, exit_status) = wait_for_terminal(
             &mut child,
@@ -1717,12 +1715,7 @@ printf '%s' "$1"
             &["check", "--offline", "--quiet"],
         );
         cargo_profile.timeout = DurationMillis::new(5_000);
-        let exact = command(
-            cargo_profile,
-            CommandStdin::Empty,
-            None,
-            None,
-        );
+        let exact = command(cargo_profile, CommandStdin::Empty, None, None);
 
         let receipt = CommandRunner::new(
             ApprovedToolExecutables::new(cargo, echo.clone(), echo),
@@ -1976,7 +1969,7 @@ printf broken; exit 23
         let hard = runner_with_git()
             .run_candidate_validation(
                 &PristineWorkspace::new(workspace(&candidate_root), probe(expected_tree.clone())),
-                &[validation_command.clone()],
+                std::slice::from_ref(&validation_command),
             )
             .expect("candidate validation");
         let quality = runner_with_git()

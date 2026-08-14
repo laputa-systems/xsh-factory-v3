@@ -1159,8 +1159,10 @@ fn wire_packet(
         target: packet.target.clone(),
         repository_base_identity: digest(900).to_hex(),
         factory_base_identity: digest(901).to_hex(),
-        ticket_attempt_id: packet.ticket_attempt_id.map(|id| id.get()),
-        candidate_id: packet.candidate_id.map(|id| id.get()),
+        ticket_attempt_id: packet
+            .ticket_attempt_id
+            .map(factory_protocol::TicketAttemptId::get),
+        candidate_id: packet.candidate_id.map(factory_protocol::CandidateId::get),
         assignment_evidence: Vec::new(),
         system_prompt_artifact_id: packet.system_prompt_artifact_id.get(),
         assignment_prompt_artifact_id: packet.assignment_prompt_artifact_id.get(),
@@ -1408,7 +1410,7 @@ fn unique_number() -> u64 {
 
 fn digest(value: u64) -> ContentDigest {
     let mut bytes = [0_u8; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&value.to_be_bytes());
     }
     ContentDigest::from_bytes(bytes)

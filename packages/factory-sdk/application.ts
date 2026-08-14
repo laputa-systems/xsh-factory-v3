@@ -33,11 +33,15 @@ export type ModelCapabilityV1 = "reasoning";
 export type ApprovedToolV1 = "cargo" | "git" | "deno";
 export type DeliveryModeV1 = "local_fast_forward_only";
 
-export interface TemplateArtifactV1 {
+export interface TemplateDeclarationV1 {
   readonly source_path: string;
-  readonly digest: string;
   readonly placeholders: readonly string[];
   readonly rendered_byte_limit: number;
+}
+
+/** A template declaration after the compiler binds it to exact source bytes. */
+export interface TemplateArtifactV1 extends TemplateDeclarationV1 {
+  readonly digest: string;
 }
 
 export interface ModelProfileV1 {
@@ -145,12 +149,32 @@ export interface ApplicationBundleV1 {
   readonly commit_message_policy: CommitMessagePolicyV1;
 }
 
-/**
- * A validated, immutable V1 authoring declaration. It is not a kernel-admitted
- * application revision: Tranche 3 will compile it twice, seal templates, and
- * submit canonical bytes to the Rust admission path.
- */
+/** Application authoring data before source templates are hashed. */
+export type ApplicationSourceOfficeProfileV1 =
+  & Omit<
+    OfficeProfileV1,
+    "system_template" | "assignment_template"
+  >
+  & {
+    readonly system_template: TemplateDeclarationV1;
+    readonly assignment_template: TemplateDeclarationV1;
+  };
+
+/** Application source data is completed into an admitted bundle by the compiler. */
+export type ApplicationSourceBundleV1 =
+  & Omit<
+    ApplicationBundleV1,
+    "mission_template" | "office_profiles"
+  >
+  & {
+    readonly mission_template: TemplateDeclarationV1;
+    readonly office_profiles: readonly ApplicationSourceOfficeProfileV1[];
+  };
+
+/** A validated, immutable V1 bundle with digests bound to exact source bytes. */
 export type ApplicationDefinitionV1 = Readonly<ApplicationBundleV1>;
+/** A validated, immutable application source declaration for the compiler. */
+export type ApplicationSourceDefinitionV1 = Readonly<ApplicationSourceBundleV1>;
 
 const byteLength = new TextEncoder();
 const offices: readonly OfficeV1[] = ["product_research", "engineering", "quality"];
@@ -184,11 +208,25 @@ const tools: readonly ActorToolV1[] = [
  * cannot mutate policy after validation.
  */
 export function defineApplicationV1(input: ApplicationBundleV1): ApplicationDefinitionV1 {
-  validateApplication(input);
+  validateApplication(input, true);
   return deepFreeze(input) as ApplicationDefinitionV1;
 }
 
-function validateApplication(input: ApplicationBundleV1): void {
+/**
+ * Defines application source data whose template digests are supplied by the
+ * concrete compiler after it reads the declared files.
+ */
+export function defineApplicationSourceV1(
+  input: ApplicationSourceBundleV1,
+): ApplicationSourceDefinitionV1 {
+  validateApplication(input, false);
+  return deepFreeze(input) as ApplicationSourceDefinitionV1;
+}
+
+function validateApplication(
+  input: ApplicationBundleV1 | ApplicationSourceBundleV1,
+  requireTemplateDigests: boolean,
+): void {
   exactObject(input, "application", [
     "format_version",
     "application_key",
@@ -209,8 +247,8 @@ function validateApplication(input: ApplicationBundleV1): void {
     digest(input.predecessor_bundle, "application.predecessor_bundle");
   }
   repository(input.repository);
-  template(input.mission_template, "application.mission_template");
-  officeProfiles(input.office_profiles);
+  template(input.mission_template, "application.mission_template", requireTemplateDigests);
+  officeProfiles(input.office_profiles, requireTemplateDigests);
   ticketPolicy(input.ticket_policy);
   requiredReads(input.required_reads);
   commands(input.reproducer_profiles, "application.reproducer_profiles", false);
@@ -235,10 +273,23 @@ function repository(value: RepositoryBindingV1): void {
   }
 }
 
-function template(value: TemplateArtifactV1, location: string): void {
-  exactObject(value, location, ["source_path", "digest", "placeholders", "rendered_byte_limit"]);
+function template(
+  value: TemplateDeclarationV1 | TemplateArtifactV1,
+  location: string,
+  requireDigest: boolean,
+): void {
+  exactObject(
+    value,
+    location,
+    requireDigest
+      ? ["source_path", "digest", "placeholders", "rendered_byte_limit"]
+      : ["source_path", "placeholders", "rendered_byte_limit"],
+  );
   relativePath(value.source_path, `${location}.source_path`);
-  digest(value.digest, `${location}.digest`);
+  if (requireDigest) {
+    if (!("digest" in value)) fail(`${location}.digest is required`);
+    digest(value.digest, `${location}.digest`);
+  }
   positiveInteger(value.rendered_byte_limit, `${location}.rendered_byte_limit`);
   const known = new Set<string>();
   for (const placeholder of value.placeholders) {
@@ -248,7 +299,10 @@ function template(value: TemplateArtifactV1, location: string): void {
   }
 }
 
-function officeProfiles(profiles: readonly OfficeProfileV1[]): void {
+function officeProfiles(
+  profiles: readonly (OfficeProfileV1 | ApplicationSourceOfficeProfileV1)[],
+  requireTemplateDigests: boolean,
+): void {
   if (profiles.length !== offices.length) {
     fail("application.office_profiles must have every fixed office");
   }
@@ -266,8 +320,12 @@ function officeProfiles(profiles: readonly OfficeProfileV1[]): void {
       fail("application.office_profiles must have one of each fixed office");
     }
     known.add(profile.office);
-    template(profile.system_template, "office profile.system_template");
-    template(profile.assignment_template, "office profile.assignment_template");
+    template(profile.system_template, "office profile.system_template", requireTemplateDigests);
+    template(
+      profile.assignment_template,
+      "office profile.assignment_template",
+      requireTemplateDigests,
+    );
     officeTools(profile.office, profile.tools);
     model(profile.model);
     sessionLimits(profile.limits);

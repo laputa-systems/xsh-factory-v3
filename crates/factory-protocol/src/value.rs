@@ -102,7 +102,7 @@ impl FromStr for ContentDigest {
         }
 
         let mut bytes = [0_u8; 32];
-        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let high = hex_nibble(pair[0]).ok_or(ContractError::InvalidValue {
                 field: "blake3 digest",
                 reason: "must use lower-case hexadecimal characters",

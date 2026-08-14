@@ -1531,12 +1531,9 @@ impl TicketStore {
             TICKET_SPONSORED,
         )
         .await?;
-        let proposed = application_revision_ticket_count(
-            &self.pool,
-            application_revision_id,
-            TICKET_PROPOSED,
-        )
-        .await?;
+        let proposed =
+            application_revision_ticket_count(&self.pool, application_revision_id, TICKET_PROPOSED)
+                .await?;
         let in_flight = application_revision_ticket_count(
             &self.pool,
             application_revision_id,

@@ -104,9 +104,9 @@ pub async fn execute_product_proposal(
     }
 
     let command_stdin = match &proposal.reproducer.stdin {
-        Some(stdin) => {
-            CommandStdin::Artifact(exact_reference_bytes(process, cas, input.principal, stdin).await?)
-        }
+        Some(stdin) => CommandStdin::Artifact(
+            exact_reference_bytes(process, cas, input.principal, stdin).await?,
+        ),
         None => CommandStdin::Empty,
     };
     let mut profile = sealed_profile;
@@ -160,10 +160,7 @@ pub async fn execute_product_proposal(
     // canonical observation for both replay slots so the persisted ticket
     // expresses the admitted comparison rule rather than accidental bytes.
     let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
-        persisted_discovery_observations(
-            first.manifest_artifact_id,
-            second.manifest_artifact_id,
-        );
+        persisted_discovery_observations(first.manifest_artifact_id, second.manifest_artifact_id);
     let proposal_bytes = canonical_product_ticket_proposal_json_v1(input.request);
     execute_duplicate_query(
         process,

@@ -1106,8 +1106,7 @@ impl DurableAuthorityResolver {
                 // exit status. Raw expected stream artifacts remain durable
                 // diagnostic evidence, but cannot be used for exact replay
                 // when a pre-fix host panic embeds a process-local id.
-                ComparisonRevision::parse("status-only-v1")
-                    .map_err(|error| error.to_string())?,
+                ComparisonRevision::parse("status-only-v1").map_err(|error| error.to_string())?,
                 None,
                 None,
             ),

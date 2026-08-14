@@ -218,6 +218,7 @@ pub fn decode_operation_request<T: Deserialize>(
     decode_json_frame(frame, maximum, expected)
 }
 
+#[must_use]
 pub fn is_known_operation(operation: &str) -> bool {
     matches!(
         operation,
@@ -437,6 +438,7 @@ pub fn decode_product_submit_ticket_request_v1(
 /// Canonical proposal-only bytes used for immutable ticket custody. Routing,
 /// retry, and session revision fields are intentionally excluded: they prove
 /// transport authority but are not part of the Product problem contract.
+#[must_use]
 pub fn canonical_product_ticket_proposal_json_v1(request: &ProductSubmitTicketRequest) -> Vec<u8> {
     canonical_product_ticket_proposal_wire_json_v1(&request.proposal_wire())
 }
@@ -1337,7 +1339,7 @@ pub struct ErrorResponse {
 // -------------------------------------------------------------------------
 
 /// Returns the recursively key-sorted JSON spelling shared with the Deno
-/// `canonicalJson` helper. `miniserde::json::Value` uses BTreeMap objects, so
+/// `canonicalJson` helper. `miniserde::json::Value` uses `BTreeMap` objects, so
 /// this remains a closed, dependency-free canonicalizer rather than an
 /// untyped value crossing into the kernel domain.
 pub fn canonical_assignment_packet_json_v1(
@@ -1497,9 +1499,7 @@ fn validate_assignment_packet_wire_v1(
     ] {
         validate_digest(field, value)?;
     }
-    if !allow_empty_digest {
-        validate_digest("packet_digest", &packet.packet_digest)?;
-    } else if !packet.packet_digest.is_empty() {
+    if !allow_empty_digest || !packet.packet_digest.is_empty() {
         validate_digest("packet_digest", &packet.packet_digest)?;
     }
     if !matches!(
@@ -1724,7 +1724,7 @@ fn validate_digest(field: &'static str, value: &str) -> Result<(), FrameError> {
 }
 
 fn validate_base64(field: &'static str, value: &str) -> Result<(), FrameError> {
-    if value.is_empty() || value.len() % 4 != 0 {
+    if value.is_empty() || !value.len().is_multiple_of(4) {
         return packet_error(field, "must be nonempty canonical base64");
     }
     let bytes = value.as_bytes();
@@ -2275,7 +2275,7 @@ fn canonical_validation(value: &ValidationWireV1) -> Result<String, FrameError> 
         .map(canonical_command)
         .collect::<Result<Vec<_>, _>>()?
         .join(",");
-    Ok(format!("{{\"focused\":[{}],\"full\":[{}]}}", focused, full))
+    Ok(format!("{{\"focused\":[{focused}],\"full\":[{full}]}}"))
 }
 
 fn canonical_git_policy(value: &GitWireV1) -> String {
@@ -2509,7 +2509,7 @@ impl CommandWireV1 {
             environment: self
                 .environment
                 .into_iter()
-                .map(|value| value.into_domain())
+                .map(EnvironmentWireV1::into_domain)
                 .collect::<Result<_, _>>()?,
             timeout: DurationMillis::new(self.timeout_millis),
             stdout_byte_limit: self.stdout_byte_limit,

@@ -663,6 +663,7 @@ pub struct ForumSearchInput {
 }
 
 impl ForumSearchInput {
+    #[must_use]
     pub fn new(query: ForumSearchQuery) -> Self {
         Self {
             query,
@@ -704,6 +705,7 @@ pub struct ForumThreadPage {
 }
 
 impl ForumThreadPage {
+    #[must_use]
     pub fn new(
         thread_id: ForumThreadId,
         after_post_id: Option<ForumPostId>,

@@ -1112,9 +1112,6 @@ impl GitCustody {
             None,
             None,
         )?)?;
-        if worktree.path.exists() {
-            return Err(GitCustodyError::WorktreeCleanupIncomplete);
-        }
         let registrations = require_success(self.run(
             "verify owned worktree cleanup",
             &worktree.repository_root,
@@ -1131,6 +1128,20 @@ impl GitCustody {
         {
             return Err(GitCustodyError::WorktreeCleanupIncomplete);
         }
+        // Git unregisters the worktree but may leave ignored build output
+        // such as `target/` behind.  The path has already passed the exact
+        // runtime-root boundary check above and is no longer registered, so
+        // remove that residual directory explicitly.
+        if worktree.path.exists() {
+            fs::remove_dir_all(&worktree.path).map_err(|source| GitCustodyError::Io {
+                operation: "remove residual owned worktree files",
+                path: worktree.path.clone(),
+                source,
+            })?;
+        }
+        if worktree.path.exists() {
+            return Err(GitCustodyError::WorktreeCleanupIncomplete);
+        }
         Ok(())
     }
 
@@ -1145,7 +1156,10 @@ impl GitCustody {
             );
         }
         if path.is_dir() {
-            let _ = fs::remove_dir(path);
+            // A failed checkout can leave ignored build output behind just
+            // like a normal worktree removal. The path was allocated by this
+            // custody instance, so remove the exact failed workspace tree.
+            let _ = fs::remove_dir_all(path);
         }
     }
 

@@ -1261,8 +1261,10 @@ fn packet_wire(
         target: packet.target.clone(),
         repository_base_identity: digest(5).to_hex(),
         factory_base_identity: digest(6).to_hex(),
-        ticket_attempt_id: packet.ticket_attempt_id.map(|id| id.get()),
-        candidate_id: packet.candidate_id.map(|id| id.get()),
+        ticket_attempt_id: packet
+            .ticket_attempt_id
+            .map(factory_protocol::TicketAttemptId::get),
+        candidate_id: packet.candidate_id.map(factory_protocol::CandidateId::get),
         assignment_evidence: packet
             .assignment_evidence
             .iter()
@@ -1493,7 +1495,7 @@ fn unique_number() -> u64 {
 
 fn digest(serial: u64) -> ContentDigest {
     let mut bytes = [0; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&serial.to_be_bytes());
     }
     ContentDigest::from_bytes(bytes)

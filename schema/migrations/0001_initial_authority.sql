@@ -1,10 +1,10 @@
--- Factory V3's canonical fresh-schema authority.  This pre-release schema has
+-- Factory V3's canonical fresh-schema authority. This pre-release schema has
 -- one migration: every durable relation, constraint, index, and trigger below
 -- is the current MVP contract. No historical V3 database shape is supported.
 
 CREATE SCHEMA factory;
 
-COMMENT ON SCHEMA factory IS 'factory-v3-schema:initial-authority-v1';
+COMMENT ON SCHEMA factory IS 'factory-v3-schema:authority-v3';
 
 CREATE TABLE factory.kernel_builds (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -466,7 +466,6 @@ CREATE TABLE factory.ticket_revisions (
     revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (ticket_id, revision_ordinal),
-    UNIQUE (application_revision_id, reproducer_artifact_id),
     CHECK (
         (sponsored_at IS NULL AND sponsorship_reason IS NULL)
         OR (sponsored_at IS NOT NULL AND sponsorship_reason IS NOT NULL)
@@ -486,6 +485,12 @@ CREATE TABLE factory.ticket_revisions (
             AND last_requalified_at IS NOT NULL)
     )
 );
+
+-- Blocked revisions retain their diagnosis but must not reserve a reproducer
+-- forever after a later kernel correction changes the observation identity.
+CREATE UNIQUE INDEX ticket_revisions_live_reproducer_identity
+    ON factory.ticket_revisions (application_revision_id, reproducer_artifact_id)
+    WHERE lifecycle <> 4;
 
 ALTER TABLE factory.tickets
     ADD CONSTRAINT tickets_current_ticket_revision_id_fkey
@@ -623,7 +628,7 @@ CREATE TABLE factory.candidates (
     CHECK (candidate_commit IS NULL OR candidate_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'),
     CHECK ((candidate_commit IS NULL AND candidate_ref IS NULL)
         OR (candidate_commit IS NOT NULL AND candidate_ref IS NOT NULL)),
-    CHECK (base_tree <> regression_tree AND base_tree <> candidate_tree AND regression_tree <> candidate_tree)
+    CHECK (base_tree <> candidate_tree AND regression_tree <> candidate_tree)
 );
 
 CREATE INDEX candidates_attempt_lifecycle_index

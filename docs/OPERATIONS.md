@@ -8,13 +8,14 @@ system Pi binary or resolves Pi through Deno/NPM at runtime.
 
 ```sh
 make cache
-make check
+make lint
 ```
 
 `make cache` runs the submodule's locked dependency installation with lifecycle
 scripts disabled, builds local headless artifacts, and populates Deno's frozen
-cache. `make check` rebuilds the local artifacts then runs Rust and Deno
-qualification. Neither starts a provider-backed actor or uses remote Git.
+cache. `make lint` is the Grand Architect's pre-commit gate: it rebuilds the
+local artifacts, formats and fixes Rust/Deno source, runs Rust and Deno checks,
+and runs their tests. Neither starts a provider-backed actor or uses remote Git.
 
 ## Initialize and serve
 

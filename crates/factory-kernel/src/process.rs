@@ -2257,10 +2257,10 @@ async fn require_artifact(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(StoreError::UnknownArtifact { artifact_id: id })?;
-    if let Some(expected) = digest {
-        if row.digest.as_slice() != expected.as_bytes() {
-            return Err(StoreError::PacketArtifactDigestMismatch);
-        }
+    if let Some(expected) = digest
+        && row.digest.as_slice() != expected.as_bytes()
+    {
+        return Err(StoreError::PacketArtifactDigestMismatch);
     }
     Ok(())
 }
@@ -2632,12 +2632,12 @@ fn assignment_packet_from_wire(
 }
 
 fn decode_base64(value: &str) -> Option<Vec<u8>> {
-    if value.len() % 4 != 0 {
+    if !value.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::with_capacity(value.len() / 4 * 3);
     let bytes = value.as_bytes();
-    for chunk in bytes.chunks_exact(4) {
+    for chunk in bytes.as_chunks::<4>().0 {
         let a = base64_value(chunk[0])?;
         let b = base64_value(chunk[1])?;
         let c = if chunk[2] == b'=' {

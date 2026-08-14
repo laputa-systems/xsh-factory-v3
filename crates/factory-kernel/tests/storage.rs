@@ -44,8 +44,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             .await
             .expect("canonical migration count");
         assert_eq!(
-            migration_count, 3,
-            "fresh V3 applies all canonical migrations"
+            migration_count, 1,
+            "fresh V3 applies one canonical migration"
         );
         let table_count: i64 = sqlx::query_scalar(
             "SELECT count(*)
@@ -1120,7 +1120,7 @@ fn unique_number() -> u64 {
 
 fn digest(serial: u64) -> ContentDigest {
     let mut bytes = [0; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&serial.to_be_bytes());
     }
     ContentDigest::from_bytes(bytes)

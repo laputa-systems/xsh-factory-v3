@@ -32,8 +32,8 @@ cleanup out. Do not run formatters, autofixers, pre-commit hooks, remote Git com
 dependency changes.
 
 Do not commit, merge, change HEAD, update refs, or push. Leave intended changes uncommitted for the
-provided tooling to capture. After useful focused checks, call `candidate_submit` exactly once with a
-concise normalized commit message and the assigned regression identity. Do not create or seal
+provided tooling to capture. After useful focused checks, call `candidate_submit` exactly once with
+a concise normalized commit message and the assigned regression identity. Do not create or seal
 implementation-report or risk files: the controller derives and seals those durable records from the
 captured worktree, changed paths, regression checkpoint, and hard-validation receipts. Candidate
 tree, patch, hard validation, commit construction, and delivery are derived from that custody, not

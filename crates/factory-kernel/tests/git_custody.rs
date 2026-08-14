@@ -233,6 +233,45 @@ fn detached_owned_worktree_rejects_actor_head_change_and_cleans_exactly() {
 }
 
 #[test]
+fn cleanup_removes_ignored_build_residue_after_git_unregisters_worktree() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repository.join(".gitignore"), b"target/\n").unwrap();
+    run_in(&fixture.repository, &fixture.git, &["add", ".gitignore"]);
+    run_in(
+        &fixture.repository,
+        &fixture.git,
+        &["commit", "-m", "ignore build output"],
+    );
+    let repository = fixture.qualify();
+    let worktree = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("ignored-residue").unwrap(),
+        )
+        .unwrap();
+    let path = worktree.path().to_owned();
+    fs::create_dir_all(path.join("target/debug")).unwrap();
+    fs::write(path.join("target/debug/generated"), b"ignored build output").unwrap();
+
+    fixture.custody.cleanup_worktree(worktree).unwrap();
+
+    assert!(
+        !path.exists(),
+        "ignored build output must not orphan the worktree"
+    );
+    assert!(
+        !git_stdout(
+            &fixture.repository,
+            &fixture.git,
+            &["worktree", "list", "--porcelain"]
+        )
+        .contains(path.to_str().unwrap())
+    );
+}
+
+#[test]
 fn temporary_index_capture_preserves_binary_symlink_and_exact_tree() {
     let fixture = Fixture::new();
     let repository = fixture.qualify();
@@ -563,14 +602,23 @@ fn guarded_fast_forward_ignores_unrelated_detached_worktrees() {
     run_in(
         &fixture.repository,
         &fixture.git,
-        &["worktree", "add", "--detach", unrelated.to_str().unwrap(), "HEAD"],
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            unrelated.to_str().unwrap(),
+            "HEAD",
+        ],
     );
     let receipt = fixture
         .custody
         .guarded_local_fast_forward(&repository, &candidate)
         .expect("an unrelated detached worktree does not mutate the default checkout");
     assert_eq!(receipt.delivered_commit, *candidate.commit());
-    assert!(unrelated.exists(), "delivery does not clean unowned worktrees");
+    assert!(
+        unrelated.exists(),
+        "delivery does not clean unowned worktrees"
+    );
 }
 
 #[test]

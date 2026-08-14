@@ -388,7 +388,7 @@ function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
     return new Error(
       "Before retrying the checkpoint, use `workspace_read` (not shell commands) on every path " +
         "listed in the assignment's `Exact workspace reads required before any mutating tool` " +
-      "section. Then retry the same checkpoint before editing the implementation.",
+        "section. Then retry the same checkpoint before editing the implementation.",
     );
   }
   if (name === "candidate_checkpoint_regression") {
@@ -482,7 +482,7 @@ function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
     return new Error(
       "Each `contract_reads` reason must be nonempty, contain no NUL, and fit within 240 UTF-8 " +
         "bytes so downstream implementation can read the same exact contract. Tighten the reason " +
-      "without changing its path, then submit again.",
+        "without changing its path, then submit again.",
     );
   }
   if (name === "product_submit_ticket") {
@@ -495,7 +495,9 @@ function taskLevelToolFailure(name: HostToolName, error: unknown): Error {
       .replace(/[\r\n\t]+/gu, " ")
       .slice(0, 480);
     if (taskDetail.length > 0) {
-      return new Error(`Ticket submission did not pass: ${taskDetail}. Correct the stated field and submit again.`);
+      return new Error(
+        `Ticket submission did not pass: ${taskDetail}. Correct the stated field and submit again.`,
+      );
     }
   }
   return new Error(`The assigned ${name} operation failed.`);

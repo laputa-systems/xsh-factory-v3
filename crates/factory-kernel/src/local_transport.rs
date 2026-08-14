@@ -1531,7 +1531,7 @@ impl Drop for RuntimeSocket {
                 })
         {
             let _ = fs::remove_file(&self.lease.socket_path);
-            let _ = sync_runtime_directory(&self.lease.configured_root());
+            let _ = sync_runtime_directory(self.lease.configured_root());
         }
     }
 }

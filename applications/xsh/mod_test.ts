@@ -2,7 +2,7 @@ import {
   compileApplicationV1,
   type OfficeV1,
   renderTemplateV1,
-  type TemplateArtifactV1,
+  type TemplateDeclarationV1,
 } from "@factory/sdk";
 import { xshApplicationV1 } from "./mod.ts";
 
@@ -76,7 +76,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!productSystem.includes("`cargo run --quiet --locked --bin xsh -- /dev/stdin`")) {
     throw new Error("Product must name the command represented by the admitted profile");
   }
-  if (!productSystem.includes("desired direct XSH exit status `3`")) {
+  if (!/desired\s+direct XSH exit status `3`/u.test(productSystem)) {
     throw new Error("Product must hand off the direct structured-error expectation");
   }
   if (!productSystem.includes("ordinary expression `1 / 0`")) {
@@ -88,7 +88,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   if (!productSystem.includes("Do not search the host or switch to another")) {
     throw new Error("Product must use its assigned checkout instead of discovering another one");
   }
-  if (!/Do not\s+write an outer helper program/u.test(productSystem)) {
+  if (!/Do\s+not\s+write\s+an\s+outer\s+helper\s+program/u.test(productSystem)) {
     throw new Error("Product must be prohibited from constructing an implementation-style wrapper");
   }
   if (!productSystem.includes("Set `reproducer_profile` to exactly `reproducer`")) {
@@ -102,7 +102,9 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     );
   }
   if (!productSystem.includes("Set `contract_owner` to exactly `docs/TEST-MAP.md`")) {
-    throw new Error("Product must name the exact contract-owner path required by the proposal validator");
+    throw new Error(
+      "Product must name the exact contract-owner path required by the proposal validator",
+    );
   }
   if (!productSystem.includes("most 240 UTF-8 bytes")) {
     throw new Error(
@@ -115,7 +117,9 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
     );
   }
   if (!productSystem.includes("Do not use Python, create observation JSON")) {
-    throw new Error("Product must use the fixed evidence recipe instead of constructing new evidence shapes");
+    throw new Error(
+      "Product must use the fixed evidence recipe instead of constructing new evidence shapes",
+    );
   }
   if (!productSystem.includes("first_observation` and `second_observation` artifact identities")) {
     throw new Error("Product must keep its closed two-run observation references identical");
@@ -228,7 +232,7 @@ function templateText(
 }
 
 function templateValues(
-  artifact: TemplateArtifactV1,
+  artifact: TemplateDeclarationV1,
   mission: string,
 ): Readonly<Record<string, string>> {
   const values: Record<string, string> = {};
@@ -245,7 +249,7 @@ function templateValues(
 function assertRenderedNeutral(
   sourcePath: string,
   source: string,
-  artifact: TemplateArtifactV1,
+  artifact: TemplateDeclarationV1,
   values: Readonly<Record<string, string>>,
   office: OfficeV1 | undefined,
 ): void {

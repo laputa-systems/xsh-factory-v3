@@ -12,10 +12,10 @@ Before any other action, call `workspace_read` once for each exact required path
 
 Reading through `bash` does not satisfy this proof. Your job is to establish one bounded public
 behavior defect, not to construct its eventual regression test or diagnose its implementation.
-Investigate only integer division or remainder by zero. Use the ordinary expression `1 / 0`.
-The public contract requires a structured runtime failure with exit status 3; an unchecked host
-panic with exit status 101 is the defect to report. In one shell command, run that exact expression
-twice and write the fixed evidence files. Run no other exploration.
+Investigate only integer division or remainder by zero. Use the ordinary expression `1 / 0`. The
+public contract requires a structured runtime failure with exit status 3; an unchecked host panic
+with exit status 101 is the defect to report. In one shell command, run that exact expression twice
+and write the fixed evidence files. Run no other exploration.
 
 Your shell already starts in the assigned checkout. Do not search the host or switch to another
 checkout; the one allowed shell command runs at that starting location.
@@ -29,14 +29,14 @@ surrounding whitespace or newline:
 {"argv":["run","--quiet","--locked","--bin","xsh","--","/dev/stdin"],"environment":[],"executable":{"approved_tool":"cargo"},"expected_exit_status":3,"name":"reproducer","stderr_byte_limit":4194304,"stdout_byte_limit":4194304,"timeout_millis":300000,"working_directory":"."}
 ```
 
-Set `reproducer_profile` to exactly `reproducer`; put only `1 / 0` in the sealed stdin
-artifact. That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin` and expects the
-desired direct XSH exit status `3`. The expected observation is the exact replay expectation. Do not
-write an outer helper program, inspect process-status syntax, invoke `target/debug/xsh`, or design a
+Set `reproducer_profile` to exactly `reproducer`; put only `1 / 0` in the sealed stdin artifact.
+That profile runs `cargo run --quiet --locked --bin xsh -- /dev/stdin` and expects the desired
+direct XSH exit status `3`. The expected observation is the exact replay expectation. Do not write
+an outer helper program, inspect process-status syntax, invoke `target/debug/xsh`, or design a
 regression test. Engineering owns that detail. Each `contract_reads` path must be unique and each
 reason at most 240 UTF-8 bytes. Set `contract_owner` to exactly `docs/TEST-MAP.md`; it must be one
-of the `contract_reads` paths, not a prose description. Submit only a complete proposal through `product_submit_ticket`,
-including an exact duplicate search.
+of the `contract_reads` paths, not a prose description. Submit only a complete proposal through
+`product_submit_ticket`, including an exact duplicate search.
 
 There is one fixed evidence set: narrative, evidence, command, stdin, expected stdout, expected
 stderr, first stdout, first stderr, second stdout, and second stderr. After the one shell command
@@ -46,13 +46,13 @@ the workspace or explore after the defect is reproduced. Then invoke the visible
 tool directly. Do not write a `functions.work_complete` name or try to discover another tool
 interface.
 
-The closed proposal requires its `first_observation` and `second_observation` artifact identities
-to match. Use the first run's stdout and stderr artifact references in both of those proposal
-fields. The separately sealed second-run files remain diagnostic evidence of the second execution;
-do not substitute them into `second_observation`.
+The closed proposal requires its `first_observation` and `second_observation` artifact identities to
+match. Use the first run's stdout and stderr artifact references in both of those proposal fields.
+The separately sealed second-run files remain diagnostic evidence of the second execution; do not
+substitute them into `second_observation`.
 
-Use this exact shell body in the assigned checkout. Do not use Python, create observation JSON,
-or seal any file outside this ten-file set:
+Use this exact shell body in the assigned checkout. Do not use Python, create observation JSON, or
+seal any file outside this ten-file set:
 
 ```sh
 set +e

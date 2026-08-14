@@ -23,11 +23,12 @@ from a registry. Populate its locked build inputs and the Deno cache once:
 make cache
 ```
 
-Build the local headless ESM artifacts and run the ordinary provider-free
-qualification:
+Build the local headless ESM artifacts and run the aggressive factory
+qualification before committing factory changes. The Grand Architect owns
+this gate:
 
 ```sh
-make check
+make lint
 ```
 
 `make factoryd-serve` deliberately introduces the OpenRouter credential only
@@ -43,6 +44,9 @@ Compile the inert XSH bundle before registering an application revision:
 deno run --allow-read --no-prompt --frozen --cached-only applications/xsh/mod.ts \
   > applications/xsh/bundle.v1.json
 ```
+
+The compiler reads each declared template and computes its BLAKE3 identity;
+template source files do not contain hand-maintained digest values.
 
 The generated bundle is ignored. Registration re-reads it and every named
 template beneath `applications/xsh`, verifies their BLAKE3 identities, and

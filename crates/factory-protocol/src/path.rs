@@ -115,7 +115,7 @@ fn validate_safe_relative(
             reason: "backslash is not a canonical separator",
         });
     }
-    if value.split('/').any(|segment| segment.is_empty()) {
+    if value.split('/').any(str::is_empty) {
         return Err(ContractError::UnsafeRelativePath {
             field,
             reason: "path contains an empty segment",

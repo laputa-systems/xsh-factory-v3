@@ -318,7 +318,7 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
     let json::Value::Array(operations) = root_object.get("operations").expect("operations") else {
         panic!("operations is not an array")
     };
-    for operation in operations.iter() {
+    for operation in operations {
         let json::Value::String(operation) = operation else {
             panic!("operation is not a string")
         };
@@ -326,22 +326,22 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
         match operation.as_str() {
             OP_WORKSPACE_READ => round_trip::<WorkspaceReadRequest>(request),
             OP_ARTIFACT_SEAL_WORKSPACE_FILE => {
-                round_trip::<ArtifactSealWorkspaceFileRequest>(request)
+                round_trip::<ArtifactSealWorkspaceFileRequest>(request);
             }
             OP_ARTIFACT_READ => round_trip::<ArtifactReadRequest>(request),
             OP_PRODUCT_SUBMIT_TICKET => round_trip::<ProductSubmitTicketRequest>(request),
             OP_CANDIDATE_CHECKPOINT_REGRESSION => {
-                round_trip::<CandidateCheckpointRegressionRequest>(request)
+                round_trip::<CandidateCheckpointRegressionRequest>(request);
             }
             OP_CANDIDATE_SUBMIT => round_trip::<CandidateSubmitRequest>(request),
             OP_QUALITY_RUN_FULL_SUITE => round_trip::<QualityRunFullSuiteRequest>(request),
             OP_QUALITY_SUBMIT_REVIEW => round_trip::<QualitySubmitReviewRequest>(request),
             OP_WORK_COMPLETE => round_trip::<WorkCompleteRequest>(request),
             OP_ARCHITECT_SPONSOR_TICKET_REVISION => {
-                round_trip::<ArchitectSponsorTicketRevisionRequest>(request)
+                round_trip::<ArchitectSponsorTicketRevisionRequest>(request);
             }
             OP_ARCHITECT_RELEASE_TICKET_ATTEMPT => {
-                round_trip::<ArchitectReleaseTicketAttemptRequest>(request)
+                round_trip::<ArchitectReleaseTicketAttemptRequest>(request);
             }
             OP_ARCHITECT_DECIDE_CANDIDATE => round_trip::<ArchitectDecideCandidateRequest>(request),
             OP_FACTORYD_STATUS => round_trip::<OperatorStatusRequest>(request),
@@ -350,10 +350,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_OPERATOR_CANCEL_CAMPAIGN => round_trip::<OperatorCancelCampaignRequest>(request),
             OP_OPERATOR_SHOW_APPLICATION => round_trip::<OperatorApplicationShowRequest>(request),
             OP_OPERATOR_REGISTER_APPLICATION => {
-                round_trip::<OperatorApplicationRegisterRequest>(request)
+                round_trip::<OperatorApplicationRegisterRequest>(request);
             }
             OP_OPERATOR_ACTIVATE_APPLICATION => {
-                round_trip::<OperatorApplicationActivateRequest>(request)
+                round_trip::<OperatorApplicationActivateRequest>(request);
             }
             OP_OPERATOR_SEAL_ARTIFACT => round_trip::<OperatorArtifactSealRequest>(request),
             OP_OPERATOR_LIST_TICKETS => round_trip::<OperatorTicketListRequest>(request),
@@ -384,16 +384,16 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_ARCHITECT_SPONSOR_TICKET_REVISION
             | OP_ARCHITECT_RELEASE_TICKET_ATTEMPT
             | OP_ARCHITECT_DECIDE_CANDIDATE => {
-                round_trip::<ArchitectDecisionReceiptResponse>(success)
+                round_trip::<ArchitectDecisionReceiptResponse>(success);
             }
             OP_FACTORYD_STATUS => round_trip::<OperatorStatusResponse>(success),
             OP_OPERATOR_START_CAMPAIGN | OP_OPERATOR_CANCEL_CAMPAIGN => {
-                round_trip::<CampaignReceiptResponse>(success)
+                round_trip::<CampaignReceiptResponse>(success);
             }
             OP_OPERATOR_CAMPAIGN_STATUS => round_trip::<CampaignStatusResponse>(success),
             OP_OPERATOR_SHOW_APPLICATION => round_trip::<ApplicationShowResponse>(success),
             OP_OPERATOR_REGISTER_APPLICATION | OP_OPERATOR_ACTIVATE_APPLICATION => {
-                round_trip::<ApplicationRevisionReceiptResponse>(success)
+                round_trip::<ApplicationRevisionReceiptResponse>(success);
             }
             OP_OPERATOR_SEAL_ARTIFACT => round_trip::<OperatorArtifactSealReceiptResponse>(success),
             OP_OPERATOR_LIST_TICKETS => round_trip::<TicketListResponse>(success),

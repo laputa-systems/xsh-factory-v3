@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import { xshApplicationV1 } from "../applications/xsh/mod.ts";
 import {
-  compileApplicationBytesV1,
+  canonicalizeApplicationSourceV1,
   compileApplicationWithTemplatesV1,
   renderTemplateV1,
   validateTemplateForOfficeV1,
@@ -238,9 +238,9 @@ Deno.test("dropped response retry preserves command identity and payload exactly
   assertEquals(transport.requests[1].request_id, "request-2");
 });
 
-Deno.test("XSH application compilation is byte-identical across two runs", () => {
-  const first = compileApplicationBytesV1(xshApplicationV1);
-  const second = compileApplicationBytesV1(xshApplicationV1);
+Deno.test("XSH application source canonicalization is byte-identical across two runs", () => {
+  const first = canonicalizeApplicationSourceV1(xshApplicationV1);
+  const second = canonicalizeApplicationSourceV1(xshApplicationV1);
   assertEquals(first, second);
   assert(new TextDecoder().decode(first).startsWith('{"application_key":"xsh"'));
 });

@@ -2144,7 +2144,7 @@ fn qualify_deno_module_graph(
         })?;
         let relative = relative
             .to_str()
-            .ok_or_else(|| InstalledRuntimeError::DenoModuleGraphInvalid)?;
+            .ok_or(InstalledRuntimeError::DenoModuleGraphInvalid)?;
         let relative = RuntimeRelativePath::parse(relative.to_owned())
             .map_err(|_| InstalledRuntimeError::DenoModuleGraphInvalid)?;
         if !declared.contains(relative.as_str()) {

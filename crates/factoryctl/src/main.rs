@@ -736,10 +736,8 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             row.cost_state,
             row.cost_micro_usd
                 .map_or_else(|| "unknown".to_owned(), |cost| format!("{cost} μUSD")),
-            row.elapsed_millis.map_or_else(
-                || String::new(),
-                |elapsed| format!("; elapsed {elapsed} ms")
-            ),
+            row.elapsed_millis
+                .map_or_else(String::new, |elapsed| format!("; elapsed {elapsed} ms")),
         ));
     }
     output
@@ -1595,7 +1593,7 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         let value = next_value(&mut values, &flag)?;
         match flag.as_str() {
             "--installation-root" => {
-                set_absolute_path(&mut installation_root, value, "--installation-root")?
+                set_absolute_path(&mut installation_root, value, "--installation-root")?;
             }
             "--factoryd" => set_absolute_path(&mut factoryd, value, "--factoryd")?,
             "--database-url" => set_once(&mut database_url, value, "--database-url")?,
@@ -1659,10 +1657,10 @@ fn discover_installation_root() -> Result<PathBuf, String> {
     candidates.push(
         env::current_dir().map_err(|error| format!("cannot read current directory: {error}"))?,
     );
-    if let Ok(executable) = env::current_exe() {
-        if let Some(parent) = executable.parent() {
-            candidates.push(parent.to_owned());
-        }
+    if let Ok(executable) = env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        candidates.push(parent.to_owned());
     }
     for candidate in candidates {
         for ancestor in candidate.ancestors() {
@@ -2018,7 +2016,7 @@ fn parse_forum_connection(arguments: Vec<String>) -> Result<ForumConnectionArgs,
                     .parse::<u8>()
                     .ok()
                     .filter(|value| (1..=20).contains(value))
-                    .ok_or_else(|| "--limit must be 1 through 20".to_owned())?
+                    .ok_or_else(|| "--limit must be 1 through 20".to_owned())?;
             }
             "--format" => {
                 let format = next_value(&mut values, "--format")?;
@@ -2980,7 +2978,7 @@ mod tests {
                 pi_version,
                 openrouter_credential_environment,
                 ..
-            }) if factoryd == PathBuf::from("/opt/factory/bin/factoryd")
+            }) if factoryd == *"/opt/factory/bin/factoryd"
                 && kernel_source_root == fs::canonicalize(installation_root()).expect("canonical installation")
                 && kernel_source_files.contains(&"Cargo.lock".to_owned())
                 && kernel_source_files.contains(&"schema/migrations/0001_initial_authority.sql".to_owned())
@@ -2991,7 +2989,7 @@ mod tests {
                 && pi_host_entrypoint == installation_root().join("packages/factory-pi-host/main.ts")
                 && deno_config == installation_root().join("deno.json")
                 && deno_lock == installation_root().join("deno.lock")
-                && deno_dir == PathBuf::from("/tmp/factory-runtime/deno")
+                && deno_dir == *"/tmp/factory-runtime/deno"
                 && pi_host_cache_probe == "factory-pi-host/cache-probe.ts"
                 && pi_version == "0.84.1"
                 && openrouter_credential_environment == "OPENROUTER_API_KEY"

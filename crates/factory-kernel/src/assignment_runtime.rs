@@ -931,9 +931,7 @@ async fn current_campaign_material(
 /// The packet is a campaign-lineage record. A recovered controller can be a
 /// newer installed build, but it must not silently rewrite the identity that
 /// was admitted with the campaign while materializing a fresh assignment.
-fn assignment_packet_kernel_build(
-    campaign: &CampaignMaterial,
-) -> factory_protocol::KernelBuildId {
+fn assignment_packet_kernel_build(campaign: &CampaignMaterial) -> factory_protocol::KernelBuildId {
     campaign.kernel_build_id
 }
 
@@ -1414,7 +1412,8 @@ fn append_target_required_reads(
     }
     if rendered.len() > 4_096 {
         Err(AssignmentRuntimeError::Application(
-            "target plus closed assignment evidence and required reads exceeds the packet bound".to_owned(),
+            "target plus closed assignment evidence and required reads exceeds the packet bound"
+                .to_owned(),
         ))
     } else {
         Ok(())

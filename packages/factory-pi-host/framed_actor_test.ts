@@ -310,10 +310,11 @@ Deno.test("Engineering checkpoint names the exact-read recovery before mutation"
   const [tool] = createFramedToolAdapters(client, ["candidate_checkpoint_regression"]);
 
   await assertRejects(
-    () => tool.sdk_definition.invoke({
-      regression_command: "reproducer",
-      expected_failure: "ticket-attempt-1-reproducer",
-    }),
+    () =>
+      tool.sdk_definition.invoke({
+        regression_command: "reproducer",
+        expected_failure: "ticket-attempt-1-reproducer",
+      }),
     Error,
     "use `workspace_read` (not shell commands) on every path listed in the assignment",
   );
@@ -329,10 +330,11 @@ Deno.test("Engineering checkpoint preserves a bounded task diagnostic before edi
   const [tool] = createFramedToolAdapters(client, ["candidate_checkpoint_regression"]);
 
   await assertRejects(
-    () => tool.sdk_definition.invoke({
-      regression_command: "reproducer",
-      expected_failure: "ticket-attempt-1-reproducer",
-    }),
+    () =>
+      tool.sdk_definition.invoke({
+        regression_command: "reproducer",
+        expected_failure: "ticket-attempt-1-reproducer",
+      }),
     Error,
     "The regression checkpoint was rejected: the regression checkpoint unexpectedly passed",
   );
@@ -358,7 +360,8 @@ Deno.test("Quality full-suite execution preserves a bounded task diagnostic", as
   const client = new FramedActorClient({
     exchange: () =>
       Promise.reject(
-        new Error("invalid_json: Quality assignment target is not an exact validated candidate")),
+        new Error("invalid_json: Quality assignment target is not an exact validated candidate"),
+      ),
   });
   const [tool] = createFramedToolAdapters(client, ["quality_run_full_suite"]);
 

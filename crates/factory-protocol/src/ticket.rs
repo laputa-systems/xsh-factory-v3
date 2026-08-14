@@ -311,7 +311,7 @@ pub fn sealed_artifact_reference_v1(
 }
 
 fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(), ContractError> {
-    if value.is_empty() || value.as_bytes().len() > maximum || value.contains('\0') {
+    if value.is_empty() || value.len() > maximum || value.contains('\0') {
         return Err(ContractError::InvalidValue {
             field,
             reason: "must be nonempty, bounded UTF-8 without NUL",

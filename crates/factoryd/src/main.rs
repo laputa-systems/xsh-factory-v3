@@ -39,7 +39,7 @@ fn main() -> ExitCode {
             }
         },
         Err(error) => {
-            eprintln!("factoryd: {error}\n{}", usage(),);
+            eprintln!("factoryd: {error}\n{}", usage());
             ExitCode::FAILURE
         }
     }
@@ -378,7 +378,7 @@ fn parse_serve_args(arguments: Vec<String>) -> Result<DaemonArgs, String> {
         match flag.as_str() {
             "--database-url" => set_once(&mut database_url, value, "--database-url")?,
             "--runtime-root" => {
-                set_once(&mut runtime_root, PathBuf::from(value), "--runtime-root")?
+                set_once(&mut runtime_root, PathBuf::from(value), "--runtime-root")?;
             }
             "--read-deadline-ms" => {
                 set_once(
@@ -457,29 +457,29 @@ fn parse_init_args(arguments: Vec<String>) -> Result<InitArgs, String> {
             "--database-url" => set_once(&mut database_url, value, "--database-url")?,
             "--runtime-root" => set_absolute_path(&mut runtime_root, value, "--runtime-root")?,
             "--kernel-source-root" => {
-                set_absolute_path(&mut kernel_source_root, value, "--kernel-source-root")?
+                set_absolute_path(&mut kernel_source_root, value, "--kernel-source-root")?;
             }
             "--kernel-source-file" => {
-                kernel_source_files.push(parse_relative_path(value, "--kernel-source-file")?)
+                kernel_source_files.push(parse_relative_path(value, "--kernel-source-file")?);
             }
             "--kernel-binary" => set_absolute_path(&mut kernel_binary, value, "--kernel-binary")?,
             "--cargo-executable" => {
-                set_absolute_path(&mut cargo_executable, value, "--cargo-executable")?
+                set_absolute_path(&mut cargo_executable, value, "--cargo-executable")?;
             }
             "--git-executable" => {
-                set_absolute_path(&mut git_executable, value, "--git-executable")?
+                set_absolute_path(&mut git_executable, value, "--git-executable")?;
             }
             "--deno-executable" => {
-                set_absolute_path(&mut deno_executable, value, "--deno-executable")?
+                set_absolute_path(&mut deno_executable, value, "--deno-executable")?;
             }
             "--pi-host-source-root" => {
-                set_absolute_path(&mut pi_host_source_root, value, "--pi-host-source-root")?
+                set_absolute_path(&mut pi_host_source_root, value, "--pi-host-source-root")?;
             }
             "--pi-host-source-file" => {
-                pi_host_source_files.push(parse_relative_path(value, "--pi-host-source-file")?)
+                pi_host_source_files.push(parse_relative_path(value, "--pi-host-source-file")?);
             }
             "--pi-host-entrypoint" => {
-                set_absolute_path(&mut pi_host_entrypoint, value, "--pi-host-entrypoint")?
+                set_absolute_path(&mut pi_host_entrypoint, value, "--pi-host-entrypoint")?;
             }
             "--deno-config" => set_absolute_path(&mut deno_config, value, "--deno-config")?,
             "--deno-lock" => set_absolute_path(&mut deno_lock, value, "--deno-lock")?,
@@ -763,7 +763,7 @@ mod tests {
         assert!(matches!(
             parsed,
             DaemonCommand::Serve(DaemonArgs { runtime_root, .. })
-                if runtime_root == PathBuf::from("/tmp/factory")
+                if runtime_root == *"/tmp/factory"
         ));
     }
 
@@ -816,9 +816,9 @@ mod tests {
                 ..
             }) if kernel_source_files == vec![RuntimeRelativePath::parse("crates/factoryd/src/main.rs").unwrap()]
                 && pi_host_source_files == vec![RuntimeRelativePath::parse("factory-pi-host/main.ts").unwrap()]
-                && kernel_binary == PathBuf::from("/opt/factory/bin/factoryd")
-                && cargo_executable == PathBuf::from("/opt/rust/bin/cargo")
-                && git_executable == PathBuf::from("/opt/git/bin/git")
+                && kernel_binary == *"/opt/factory/bin/factoryd"
+                && cargo_executable == *"/opt/rust/bin/cargo"
+                && git_executable == *"/opt/git/bin/git"
         ));
 
         let mut missing_host_graph = init_arguments();

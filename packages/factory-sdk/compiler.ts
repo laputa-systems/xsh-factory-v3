@@ -1,9 +1,12 @@
+import { defineApplicationV1 } from "./application.ts";
 import type {
-  ApplicationBundleV1,
   ApplicationDefinitionV1,
+  ApplicationSourceDefinitionV1,
   OfficeV1,
   TemplateArtifactV1,
+  TemplateDeclarationV1,
 } from "./application.ts";
+import { blake3Hex } from "./blake3.ts";
 import { canonicalJson } from "./protocol.ts";
 
 /** A canonical bundle and its separately materialized Markdown inputs. */
@@ -48,12 +51,20 @@ export function canonicalizeApplicationV1(definition: ApplicationDefinitionV1): 
   return bytes.slice();
 }
 
+/** Canonicalizes source policy before the compiler binds template bytes. */
+export function canonicalizeApplicationSourceV1(
+  definition: ApplicationSourceDefinitionV1,
+): Uint8Array {
+  const bytes = new TextEncoder().encode(canonicalJson(definition));
+  return bytes.slice();
+}
+
 /** Explicit compatibility name for callers that only need canonical bytes. */
 export const compileApplicationBytesV1 = canonicalizeApplicationV1;
 
 /** Concrete compiler entry: template reads and placeholder validation are mandatory. */
 export function compileApplicationV1(
-  definition: ApplicationDefinitionV1,
+  definition: ApplicationSourceDefinitionV1,
   sourceRoot: string,
 ): Promise<CompiledApplicationV1> {
   return compileApplicationWithTemplatesV1(definition, { source_root: sourceRoot });
@@ -65,7 +76,7 @@ export function compileApplicationV1(
  * are separate CAS inputs and never become an opaque bundle field.
  */
 export async function compileApplicationWithTemplatesV1(
-  definition: ApplicationDefinitionV1,
+  definition: ApplicationSourceDefinitionV1,
   options: CompileApplicationOptionsV1 = {},
 ): Promise<CompiledApplicationV1> {
   if (options.source_root === undefined) {
@@ -74,6 +85,7 @@ export async function compileApplicationWithTemplatesV1(
     );
   }
   const templates: CompiledTemplateV1[] = [];
+  const templateDigests = new Map<string, string>();
   const artifacts = templateArtifacts(definition);
   for (const [artifact, office] of artifacts) {
     const path = resolveTemplatePath(options.source_root, artifact.source_path);
@@ -89,16 +101,25 @@ export async function compileApplicationWithTemplatesV1(
     }
     const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     validateTemplateForOfficeV1(source, artifact, office);
+    const digest = blake3Hex(bytes);
+    const previousDigest = templateDigests.get(artifact.source_path);
+    if (previousDigest !== undefined && previousDigest !== digest) {
+      throw new ApplicationCompileError(
+        `template path ${artifact.source_path} resolved to different bytes`,
+      );
+    }
+    templateDigests.set(artifact.source_path, digest);
     templates.push({
       source_path: artifact.source_path,
       bytes: bytes.slice(),
       placeholders: [...artifact.placeholders],
     });
   }
+  const bundle = materializeApplicationDefinition(definition, templateDigests);
   return {
     format_version: 1,
-    bundle: definition,
-    canonical_bytes: canonicalizeApplicationV1(definition),
+    bundle,
+    canonical_bytes: canonicalizeApplicationV1(bundle),
     templates,
   };
 }
@@ -110,7 +131,7 @@ export async function compileApplicationWithTemplatesV1(
  */
 export function validateTemplateForOfficeV1(
   source: string,
-  artifact: TemplateArtifactV1,
+  artifact: TemplateDeclarationV1,
   office?: OfficeV1 | "mission",
 ): readonly string[] {
   const declared = new Set(artifact.placeholders);
@@ -146,7 +167,7 @@ export function validateTemplateForOfficeV1(
 /** Performs one substitution pass and enforces the final UTF-8 byte ceiling. */
 export function renderTemplateV1(
   source: string,
-  artifact: TemplateArtifactV1,
+  artifact: TemplateDeclarationV1,
   values: Readonly<Record<string, string>>,
   office?: OfficeV1,
 ): Uint8Array {
@@ -194,9 +215,9 @@ function allowedPlaceholders(office: OfficeV1 | "mission"): ReadonlySet<string> 
 }
 
 function templateArtifacts(
-  definition: ApplicationBundleV1,
-): readonly [TemplateArtifactV1, OfficeV1 | "mission"][] {
-  const artifacts: [TemplateArtifactV1, OfficeV1 | "mission"][] = [
+  definition: ApplicationSourceDefinitionV1,
+): readonly [TemplateDeclarationV1, OfficeV1 | "mission"][] {
+  const artifacts: [TemplateDeclarationV1, OfficeV1 | "mission"][] = [
     [definition.mission_template, "mission"],
   ];
   for (const profile of definition.office_profiles) {
@@ -204,6 +225,32 @@ function templateArtifacts(
     artifacts.push([profile.assignment_template, profile.office]);
   }
   return artifacts;
+}
+
+function materializeApplicationDefinition(
+  source: ApplicationSourceDefinitionV1,
+  templateDigests: ReadonlyMap<string, string>,
+): ApplicationDefinitionV1 {
+  return defineApplicationV1({
+    ...source,
+    mission_template: materializeTemplate(source.mission_template, templateDigests),
+    office_profiles: source.office_profiles.map((profile) => ({
+      ...profile,
+      system_template: materializeTemplate(profile.system_template, templateDigests),
+      assignment_template: materializeTemplate(profile.assignment_template, templateDigests),
+    })),
+  });
+}
+
+function materializeTemplate(
+  source: TemplateDeclarationV1,
+  templateDigests: ReadonlyMap<string, string>,
+): TemplateArtifactV1 {
+  const digest = templateDigests.get(source.source_path);
+  if (digest === undefined) {
+    throw new ApplicationCompileError(`template ${source.source_path} was not materialized`);
+  }
+  return { ...source, digest };
 }
 
 function resolveTemplatePath(root: string, relative: string): string {
