@@ -341,9 +341,10 @@ pub enum ActorToolV1 {
     ForumListTopics,
     ForumListThreads,
     ForumReadThread,
-    ForumCreateTopic,
-    ForumCreateThread,
-    ForumPost,
+    /// Creates one immutable, typed publication attributed by the bound
+    /// office/session. Legacy Forum writes are deliberately not an actor
+    /// capability.
+    PublicationCreate,
     ArtifactSeal,
     /// Reads only a daemon-derived sealed evidence closure for this exact
     /// assignment target; the actor cannot name arbitrary CAS objects.
@@ -376,9 +377,7 @@ impl ActorToolV1 {
             | Self::ForumListTopics
             | Self::ForumListThreads
             | Self::ForumReadThread
-            | Self::ForumCreateTopic
-            | Self::ForumCreateThread
-            | Self::ForumPost
+            | Self::PublicationCreate
             | Self::ArtifactSeal
             | Self::ArtifactRead
             | Self::WorkComplete => true,

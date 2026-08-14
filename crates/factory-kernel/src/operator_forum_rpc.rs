@@ -1,42 +1,33 @@
-//! Grand Architect adapter for the permanent Forum authority.
+//! Read-only adapter for legacy Forum navigation on the operator socket.
 //!
-//! The same closed Forum DTOs serve actor and operator paths, but this route
-//! mints `OperatorForumCapability` after authenticating the mode-0600 socket.
-//! Thus the persisted author is always `GrandArchitect`; no JSON field can
-//! claim a session, office, or principal.
+//! New durable discussion facts must be anchored through the institutional
+//! publication boundary. This route intentionally retains only bounded reads;
+//! the direct Forum store remains available for historical compatibility tests
+//! and migration work, not as a public mutation surface.
 
 use factory_protocol::{
-    AggregateRevision, ArtifactId, AssignmentRole, ErrorResponse, ForumAttachmentInput,
-    ForumAttachmentLabel, ForumAttachmentViewV1, ForumAuthor, ForumCreateThreadCommand,
-    ForumCreateThreadInput, ForumCreateThreadRequestV1, ForumCreateTopicCommand,
-    ForumCreateTopicInput, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
-    ForumListTopicsRequestV1, ForumMutationIdentity, ForumPageLimit, ForumPostBody,
-    ForumPostCommand, ForumPostId, ForumPostInput, ForumPostKind, ForumPostRequestV1,
-    ForumPostViewV1, ForumPostsResponseV1, ForumReadThreadRequestV1, ForumSearchCursor,
-    ForumSearchHitV1, ForumSearchInput, ForumSearchQuery, ForumSearchRequestV1,
-    ForumSearchResponseV1, ForumThreadId, ForumThreadPage, ForumThreadTitle, ForumThreadViewV1,
-    ForumThreadsResponseV1, ForumTopicDescription, ForumTopicId, ForumTopicName, ForumTopicViewV1,
-    ForumTopicsResponseV1, OperationReceiptResponse, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES,
-    decode_operation_request, decode_routing_envelope,
+    AssignmentRole, ErrorResponse, ForumAttachmentViewV1, ForumAuthor, ForumListThreadsRequestV1,
+    ForumListTopicsRequestV1, ForumPageLimit, ForumPostId, ForumPostKind, ForumPostViewV1,
+    ForumPostsResponseV1, ForumReadThreadRequestV1, ForumSearchCursor, ForumSearchHitV1,
+    ForumSearchInput, ForumSearchQuery, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadId,
+    ForumThreadPage, ForumThreadViewV1, ForumThreadsResponseV1, ForumTopicId, ForumTopicViewV1,
+    ForumTopicsResponseV1, PROTOCOL_VERSION_V1, REQUEST_FRAME_MAX_BYTES, decode_operation_request,
+    decode_routing_envelope,
 };
 use miniserde::json;
 use thiserror::Error;
 
-use crate::forum_store::{ForumAuthority, ForumStore, ForumStoreError, OperatorForumCapability};
+use crate::forum_store::{ForumStore, ForumStoreError};
 
 /// Socket-only Forum router. It owns no pool and has no actor binding.
 #[derive(Clone, Debug)]
 pub(crate) struct OperatorForumRpc {
     store: ForumStore,
-    capability: OperatorForumCapability,
 }
 
 impl OperatorForumRpc {
     pub(crate) fn from_operator_transport(store: ForumStore) -> Self {
-        Self {
-            store,
-            capability: ForumStore::operator_capability(),
-        }
+        Self { store }
     }
 
     pub(crate) async fn dispatch(&self, frame: &[u8]) -> Result<Vec<u8>, OperatorForumRpcError> {
@@ -169,97 +160,6 @@ impl OperatorForumRpc {
                 })
                 .into_bytes()
             }
-            factory_protocol::OP_FORUM_CREATE_TOPIC => {
-                let request: ForumCreateTopicRequestV1 =
-                    decode(frame, factory_protocol::OP_FORUM_CREATE_TOPIC)?;
-                let accepted = self
-                    .store
-                    .create_topic_with_authority(
-                        ForumAuthority::GrandArchitect(self.capability),
-                        &ForumCreateTopicCommand {
-                            identity: identity(
-                                request.client_command_id,
-                                request.expected_revision,
-                            )?,
-                            input: ForumCreateTopicInput {
-                                name: ForumTopicName::new(request.name)?,
-                                description: ForumTopicDescription::new(request.description)?,
-                            },
-                        },
-                    )
-                    .await?;
-                receipt(
-                    request.request_id,
-                    operation,
-                    accepted.audit_log_id.get(),
-                    accepted.resulting_revision,
-                )
-            }
-            factory_protocol::OP_FORUM_CREATE_THREAD => {
-                let request: ForumCreateThreadRequestV1 =
-                    decode(frame, factory_protocol::OP_FORUM_CREATE_THREAD)?;
-                let accepted = self
-                    .store
-                    .create_thread_with_authority(
-                        ForumAuthority::GrandArchitect(self.capability),
-                        &ForumCreateThreadCommand {
-                            identity: identity(
-                                request.client_command_id,
-                                request.expected_revision,
-                            )?,
-                            input: ForumCreateThreadInput {
-                                topic_id: ForumTopicId::new(request.topic_id)?,
-                                title: ForumThreadTitle::new(request.title)?,
-                            },
-                        },
-                    )
-                    .await?;
-                receipt(
-                    request.request_id,
-                    operation,
-                    accepted.audit_log_id.get(),
-                    accepted.resulting_revision,
-                )
-            }
-            factory_protocol::OP_FORUM_POST => {
-                let request: ForumPostRequestV1 = decode(frame, factory_protocol::OP_FORUM_POST)?;
-                let attachments = request
-                    .attachments
-                    .into_iter()
-                    .map(|item| {
-                        Ok(ForumAttachmentInput {
-                            artifact_id: ArtifactId::new(item.artifact_id)?,
-                            label: ForumAttachmentLabel::new(item.label)?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, OperatorForumRpcError>>()?;
-                let accepted = self
-                    .store
-                    .append_post_with_authority(
-                        ForumAuthority::GrandArchitect(self.capability),
-                        &ForumPostCommand {
-                            identity: identity(
-                                request.client_command_id,
-                                request.expected_revision,
-                            )?,
-                            thread_id: ForumThreadId::new(request.thread_id)?,
-                            input: ForumPostInput {
-                                kind: post_kind(request.kind)?,
-                                body: ForumPostBody::new(request.body)?,
-                                reply_to: request.reply_to.map(ForumPostId::new).transpose()?,
-                                supersedes: request.supersedes.map(ForumPostId::new).transpose()?,
-                                attachments,
-                            },
-                        },
-                    )
-                    .await?;
-                receipt(
-                    request.request_id,
-                    operation,
-                    accepted.audit_log_id.get(),
-                    accepted.resulting_revision,
-                )
-            }
             _ => return Err(OperatorForumRpcError::OperationNotForum { operation }),
         })
     }
@@ -292,30 +192,6 @@ fn decode<T: miniserde::Deserialize>(
         REQUEST_FRAME_MAX_BYTES,
         operation,
     )?)
-}
-fn identity(
-    command_id: String,
-    revision: u64,
-) -> Result<ForumMutationIdentity, OperatorForumRpcError> {
-    Ok(ForumMutationIdentity::new(
-        command_id,
-        AggregateRevision::from_persisted(revision),
-    )?)
-}
-fn receipt(
-    request_id: String,
-    operation: String,
-    audit_id: i64,
-    aggregate_revision: AggregateRevision,
-) -> Vec<u8> {
-    json::to_string(&OperationReceiptResponse {
-        protocol_version: PROTOCOL_VERSION_V1,
-        request_id,
-        operation,
-        audit_id,
-        aggregate_revision: aggregate_revision.get(),
-    })
-    .into_bytes()
 }
 fn page_cursor(length: usize, limit: ForumPageLimit, last: Option<i64>) -> String {
     if length == usize::from(limit.get()) {

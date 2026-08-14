@@ -246,6 +246,17 @@ function validateFramedSuccess(response: Record<string, unknown>, operation: str
         "quality.submit_review response has invalid verdict",
       );
     }
+  } else if (operation === "publication.create") {
+    requireFields(["audit_id", "aggregate_revision", "publication_id", "was_idempotent_retry"]);
+    requireInteger("audit_id");
+    requireInteger("aggregate_revision");
+    requireInteger("publication_id");
+    if (typeof response.was_idempotent_retry !== "boolean") {
+      throw new FrameProtocolError(
+        "invalid_json",
+        "publication.create response requires an idempotency replay flag",
+      );
+    }
   }
 }
 
@@ -259,15 +270,11 @@ const TOOL_OPERATIONS: Readonly<Partial<Record<HostToolName, string>>> = {
   quality_run_full_suite: "quality.run_full_suite",
   quality_submit_review: "quality.submit_review",
   work_complete: "work.complete",
-  forum_read: "forum.read",
-  forum_write: "forum.write",
   forum_search: "forum.search",
   forum_list_topics: "forum.list_topics",
   forum_list_threads: "forum.list_threads",
   forum_read_thread: "forum.read_thread",
-  forum_create_topic: "forum.create_topic",
-  forum_create_thread: "forum.create_thread",
-  forum_post: "forum.post",
+  publication_create: "publication.create",
 };
 
 const TOOL_DESCRIPTIONS: Readonly<Partial<Record<HostToolName, string>>> = {
@@ -280,15 +287,12 @@ const TOOL_DESCRIPTIONS: Readonly<Partial<Record<HostToolName, string>>> = {
   quality_run_full_suite: "Run the assigned full validation suite on the exact candidate.",
   quality_submit_review: "Submit the independent review of the exact candidate.",
   work_complete: "Complete this assignment without another proposal.",
-  forum_read: "Read assigned discussion material.",
-  forum_write: "Write assigned discussion material.",
   forum_search: "Search discussion history with bounded filters and continuation.",
   forum_list_topics: "List discussion topics by recent activity.",
   forum_list_threads: "List threads in one discussion topic by recent activity.",
   forum_read_thread: "Read a bounded chronological page of discussion posts.",
-  forum_create_topic: "Create one persistent discussion topic.",
-  forum_create_thread: "Create one persistent thread beneath a discussion topic.",
-  forum_post: "Append an immutable discussion post, reply, correction, or supersession.",
+  publication_create:
+    "Publish one immutable, anchored finding, question, challenge, correction, decision link, or note.",
 };
 
 const FORUM_POST_KINDS = [
@@ -328,9 +332,7 @@ const SESSION_MUTATING_TOOLS = new Set<HostToolName>([
   "candidate_submit",
   "quality_run_full_suite",
   "quality_submit_review",
-  "forum_create_topic",
-  "forum_create_thread",
-  "forum_post",
+  "publication_create",
 ]);
 
 /** Converts admitted tool names into assigned operation-specific wrappers. */
@@ -547,6 +549,56 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
   if (name === "quality_submit_review") {
     return withoutCommandEnvelope(QUALITY_SUBMIT_REVIEW_INPUT_SCHEMA_V1);
   }
+  if (name === "publication_create") {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: ["anchor", "kind", "summary", "body_artifact_id"],
+      properties: {
+        anchor: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "id"],
+          properties: {
+            kind: {
+              enum: [
+                "project",
+                "rfc",
+                "rfc_revision",
+                "ticket",
+                "ticket_revision",
+                "experiment",
+                "claim",
+                "decision",
+                "office",
+              ],
+            },
+            id: { type: "integer", minimum: 1 },
+          },
+        },
+        kind: {
+          enum: ["finding", "question", "challenge", "correction", "decision_link", "note"],
+        },
+        summary: { type: "string", minLength: 1, maxLength: 4096 },
+        body_artifact_id: { type: "integer", minimum: 1 },
+        attachments: {
+          type: "array",
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["artifact_id", "label"],
+            properties: {
+              artifact_id: { type: "integer", minimum: 1 },
+              label: { type: "string", minLength: 1, maxLength: 160 },
+            },
+          },
+        },
+        reply_to: { type: ["integer", "null"], minimum: 1 },
+        supersedes: { type: ["integer", "null"], minimum: 1 },
+      },
+    };
+  }
   if (name === "forum_list_topics") return forumListSchema();
   if (name === "forum_list_threads") {
     return {
@@ -589,40 +641,6 @@ function modelToolInputSchema(name: HostToolName): Readonly<Record<string, unkno
       },
     };
   }
-  if (name === "forum_create_topic") {
-    return forumMutationSchema({
-      name: { type: "string", minLength: 1, maxLength: 160 },
-      description: { type: "string", maxLength: 4096 },
-    }, ["name", "description"]);
-  }
-  if (name === "forum_create_thread") {
-    return forumMutationSchema({
-      topic_id: { type: "integer", minimum: 1 },
-      title: { type: "string", minLength: 1, maxLength: 240 },
-    }, ["topic_id", "title"]);
-  }
-  if (name === "forum_post") {
-    return forumMutationSchema({
-      thread_id: { type: "integer", minimum: 1 },
-      kind: { enum: FORUM_POST_KINDS },
-      body: { type: "string", maxLength: 16_384 },
-      reply_to: { type: ["integer", "null"], minimum: 1 },
-      supersedes: { type: ["integer", "null"], minimum: 1 },
-      attachments: {
-        type: "array",
-        maxItems: 8,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["artifact_id", "label"],
-          properties: {
-            artifact_id: { type: "integer", minimum: 1 },
-            label: { type: "string", maxLength: 160 },
-          },
-        },
-      },
-    }, ["thread_id", "kind", "body"]);
-  }
   return EMPTY_INPUT_SCHEMA;
 }
 
@@ -635,18 +653,6 @@ function forumListSchema(): Readonly<Record<string, unknown>> {
       cursor: { type: ["string", "null"], maxLength: 512 },
       limit: { type: "integer", minimum: 1, maximum: 20 },
     },
-  };
-}
-
-function forumMutationSchema(
-  properties: Readonly<Record<string, unknown>>,
-  required: readonly string[],
-): Readonly<Record<string, unknown>> {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required,
-    properties,
   };
 }
 
@@ -692,25 +698,18 @@ function modelToolWireInput(
       after_post_id: value.after_post_id ?? 0,
       limit: value.limit,
     };
-  } else if (name === "forum_post") {
-    semantic = {
-      ...value,
-      kind: FORUM_POST_KINDS.indexOf(value.kind as never),
-      reply_to: value.reply_to ?? null,
-      supersedes: value.supersedes ?? null,
-      attachments: value.attachments ?? [],
-    };
   } else {
     semantic = input;
   }
   if (!SESSION_MUTATING_TOOLS.has(name)) return semantic;
   const fields = object(semantic);
   if (fields === undefined) return semantic;
-  return {
+  const command = {
     ...fields,
     client_command_id: `actor-${name}-${commandContext.next_command_id()}`,
-    expected_revision: commandContext.session_revision,
   };
+  if (name === "publication_create") return command;
+  return { ...command, expected_revision: commandContext.session_revision };
 }
 
 const HIDDEN_MODEL_RESULT_FIELDS = new Set([
@@ -729,15 +728,9 @@ const HIDDEN_MODEL_RESULT_FIELD_VOCABULARY =
  * contents remain byte-for-byte evidence and are never rewritten here. */
 export function modelVisibleToolResult(name: HostToolName, value: unknown): unknown {
   const visible = stripHiddenModelResultFields(value);
-  if (
-    [
-      "product_submit_ticket",
-      "work_complete",
-      "forum_create_topic",
-      "forum_create_thread",
-      "forum_post",
-    ].includes(name) && isEmptyRecord(visible)
-  ) return { accepted: true };
+  if (["product_submit_ticket", "work_complete"].includes(name) && isEmptyRecord(visible)) {
+    return { accepted: true };
+  }
   if (
     (name === "forum_search" || name === "forum_read_thread") &&
     visible !== null && typeof visible === "object" && !Array.isArray(visible)

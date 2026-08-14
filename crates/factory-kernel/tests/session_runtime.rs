@@ -21,6 +21,7 @@ use factory_kernel::{
     local_transport::{LocalDaemon, LocalTransportConfig, OperatorClient},
     process::{CancelCampaign, CreateAssignment, ProcessStore, StartCampaign},
     process_custody::{PiHostSpawnSpec, ProcessSupervisionSpec},
+    publication_store::PublicationStore,
     session_runtime::{
         SessionLaunchRequest, SessionRuntimeError, SessionRuntimeVerifier, launch_session,
     },
@@ -470,6 +471,7 @@ struct RuntimeFixture {
     build: InstalledBuild,
     process: ProcessStore,
     forum: ForumStore,
+    publications: PublicationStore,
     tickets: TicketStore,
     command_runner: CommandRunner,
     daemon: LocalDaemon,
@@ -490,6 +492,7 @@ impl RuntimeFixture {
         let build = install_build(&store).await;
         let process = store.process_store();
         let forum = store.forum_store();
+        let publications = store.publication_store();
         let tickets = store.ticket_store();
         let command_runner = CommandRunner::new(
             ApprovedToolExecutables::new(
@@ -729,6 +732,7 @@ impl RuntimeFixture {
             build,
             process,
             forum,
+            publications,
             tickets,
             command_runner,
             daemon,
@@ -754,6 +758,7 @@ impl RuntimeFixture {
         launch_session(
             &self.process,
             &self.forum,
+            &self.publications,
             &self.tickets,
             &self.command_runner,
             &self.daemon,
@@ -1161,7 +1166,6 @@ fn wire_packet(
         tools: vec![
             "workspace_read".to_owned(),
             "forum_list_topics".to_owned(),
-            "forum_create_topic".to_owned(),
             "artifact_seal".to_owned(),
             "product_submit_ticket".to_owned(),
             "work_complete".to_owned(),
@@ -1462,16 +1466,21 @@ if (completed) {
   }
 }
 if (FAKE_TERMINAL_MODE === "completed") {
-  const created = await call("forum.create_topic", {
-    client_command_id: "fake-forum-topic",
-    expected_revision: 0,
-    name: "Provider-free actor topic",
-    description: "Created through the inherited actor binding.",
-  });
-  if (created.aggregate_revision !== 1) throw new Error("Forum mutation was not durably accepted");
+  let rejected = false;
+  try {
+    await call("forum.create_topic", {
+      client_command_id: "fake-forum-topic",
+      expected_revision: 0,
+      name: "Provider-free actor topic",
+      description: "This unanchored Forum write must be retired.",
+    });
+  } catch (_) {
+    rejected = true;
+  }
+  if (!rejected) throw new Error("retired unanchored Forum mutation was accepted");
   const topics = await call("forum.list_topics", { cursor: "", limit: 20 });
-  if (!Array.isArray(topics.items) || !topics.items.some((item) => item.name === "Provider-free actor topic")) {
-    throw new Error("Forum topic was not visible through the actor read adapter");
+  if (!Array.isArray(topics.items) || topics.items.some((item) => item.name === "Provider-free actor topic")) {
+    throw new Error("retired Forum mutation changed legacy Forum state");
   }
 }
 const transcriptEventCount = FAKE_TERMINAL_MODE === "completed_thousand_events" ? 1000 : 1;

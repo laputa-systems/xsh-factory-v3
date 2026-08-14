@@ -49,9 +49,7 @@ const commonActorTools: readonly ActorToolV1[] = [
   "forum_list_topics",
   "forum_list_threads",
   "forum_read_thread",
-  "forum_create_topic",
-  "forum_create_thread",
-  "forum_post",
+  "publication_create",
 ];
 
 // Product is deliberately a narrow evidence collector.  It can read the

@@ -30,12 +30,15 @@ pub mod operator_forum_rpc;
 /// Fixed, bounded ticket/candidate/audit navigation on the local operator
 /// socket. This is not a generic query surface.
 pub mod operator_navigation;
+mod operator_publication_rpc;
 /// Trusted socket-only Grand Architect command routing and the narrow daemon
 /// composition seam for exact transition context.
 pub mod operator_rpc;
 pub mod process;
 pub mod process_custody;
 pub mod product_runtime;
+mod publication_rpc;
+pub mod publication_store;
 pub mod restart_recovery;
 pub mod scheduler;
 pub mod session_runtime;

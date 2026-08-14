@@ -21,16 +21,10 @@ import {
 } from "./protocol.ts";
 
 export const FORUM_QUOTAS = {
-  topicNameMaxBytes: 160,
-  topicDescriptionMaxBytes: 4 * 1024,
-  threadTitleMaxBytes: 240,
-  postBodyMaxBytes: 16 * 1024,
-  attachmentLabelMaxBytes: 160,
   searchQueryMaxBytes: 4 * 1024,
   searchCursorMaxBytes: 512,
   snippetMaxBytes: 1024,
   pageMax: 20,
-  maxAttachmentsPerPost: 8,
 } as const;
 
 export type ForumPostKind =
@@ -70,35 +64,6 @@ export interface ForumThreadPageInput {
 export interface ForumListInput {
   readonly after_id?: number | null;
   readonly limit: number;
-}
-
-export interface ForumMutationIdentity {
-  readonly client_command_id: string;
-  readonly expected_revision: number;
-}
-
-export interface ForumCreateTopicInput extends ForumMutationIdentity {
-  readonly name: string;
-  readonly description: string;
-}
-
-export interface ForumCreateThreadInput extends ForumMutationIdentity {
-  readonly topic_id: number;
-  readonly title: string;
-}
-
-export interface ForumAttachmentInput {
-  readonly artifact_id: number;
-  readonly label: string;
-}
-
-export interface ForumPostInput extends ForumMutationIdentity {
-  readonly thread_id: number;
-  readonly kind: ForumPostKind;
-  readonly body: string;
-  readonly reply_to?: number | null;
-  readonly supersedes?: number | null;
-  readonly attachments?: readonly ForumAttachmentInput[];
 }
 
 export interface ForumTopic {
@@ -151,14 +116,6 @@ export interface ForumPage<T> {
   readonly next_cursor: string | null;
 }
 
-export interface ForumOperationReceipt {
-  readonly protocol_version: number;
-  readonly request_id: string;
-  readonly operation: string;
-  readonly audit_id: number;
-  readonly aggregate_revision: number;
-}
-
 interface ForumErrorResponse {
   readonly protocol_version: number;
   readonly request_id: string;
@@ -173,19 +130,14 @@ interface ForumPageWire {
   readonly next_cursor: string;
 }
 
-interface ForumOperationReceiptWire extends Record<string, unknown> {
-  readonly audit_id: number;
-  readonly aggregate_revision: number;
-}
-
 export interface ForumAdapterOptions {
   readonly requestId?: () => string;
 }
 
 /**
- * SDK methods for the permanent Forum.  Read methods only send one bounded
- * request and never manufacture a read receipt; mutations carry the caller's
- * retry identity and expected revision exactly once.
+ * SDK methods for legacy Forum navigation. Reads only send one bounded request
+ * and never manufacture a write receipt. New discussion writes belong to the
+ * anchored institutional publication API, not this compatibility adapter.
  */
 export class ForumAdapter {
   readonly #transport: FrameTransport;
@@ -244,64 +196,6 @@ export class ForumAdapter {
     });
   }
 
-  async createTopic(input: ForumCreateTopicInput): Promise<ForumOperationReceipt> {
-    validateMutationIdentity(input);
-    boundedText(input.name, "topic name", FORUM_QUOTAS.topicNameMaxBytes, true);
-    boundedText(
-      input.description,
-      "topic description",
-      FORUM_QUOTAS.topicDescriptionMaxBytes,
-      false,
-    );
-    return await this.#mutate(OPERATION.forumCreateTopic, input);
-  }
-
-  async createThread(input: ForumCreateThreadInput): Promise<ForumOperationReceipt> {
-    validateMutationIdentity(input);
-    positiveInteger(input.topic_id, "topic_id");
-    boundedText(input.title, "thread title", FORUM_QUOTAS.threadTitleMaxBytes, true);
-    return await this.#mutate(OPERATION.forumCreateThread, input);
-  }
-
-  async post(input: ForumPostInput): Promise<ForumOperationReceipt> {
-    validateMutationIdentity(input);
-    positiveInteger(input.thread_id, "thread_id");
-    if (!POST_KINDS.includes(input.kind)) throw new TypeError("forum post kind is invalid");
-    boundedText(input.body, "post body", FORUM_QUOTAS.postBodyMaxBytes, false);
-    if (input.reply_to != null) positiveInteger(input.reply_to, "reply_to");
-    if (input.supersedes != null) positiveInteger(input.supersedes, "supersedes");
-    if (input.reply_to != null && input.reply_to === input.supersedes) {
-      throw new TypeError("forum post cannot reply to and supersede the same post");
-    }
-    const attachments = input.attachments ?? [];
-    if (attachments.length > FORUM_QUOTAS.maxAttachmentsPerPost) {
-      throw new TypeError("forum post exceeds its attachment count quota");
-    }
-    const seen = new Set<number>();
-    for (const attachment of attachments) {
-      positiveInteger(attachment.artifact_id, "attachment artifact_id");
-      boundedText(
-        attachment.label,
-        "attachment label",
-        FORUM_QUOTAS.attachmentLabelMaxBytes,
-        false,
-      );
-      if (seen.has(attachment.artifact_id)) {
-        throw new TypeError("forum post repeats an attachment artifact");
-      }
-      seen.add(attachment.artifact_id);
-    }
-    return await this.#mutate(OPERATION.forumPost, {
-      ...input,
-      kind: encodePostKind(input.kind),
-      attachments,
-    });
-  }
-
-  async #mutate(operation: string, payload: unknown): Promise<ForumOperationReceipt> {
-    return await this.#exchange(operation, payload, "receipt") as ForumOperationReceipt;
-  }
-
   async #read<Item>(operation: string, payload: unknown): Promise<ForumPage<Item>> {
     const response = await this.#exchange(operation, payload, "page") as ForumPageWire;
     const items = response.items.map((item) => decodeForumItem(operation, item) as Item);
@@ -323,7 +217,7 @@ export class ForumAdapter {
     const responseFrame = await this.#transport.exchange(
       encodeJsonFrame(request, REQUEST_FRAME_MAX_BYTES),
     );
-    const response = decodeJsonFrame<ForumOperationReceipt | ForumErrorResponse | ForumPageWire>(
+    const response = decodeJsonFrame<ForumErrorResponse | ForumPageWire>(
       responseFrame,
       operation,
       RESPONSE_FRAME_MAX_BYTES,
@@ -551,11 +445,6 @@ export function validateSearchInput(input: ForumSearchInput): void {
 function validateListInput(input: ForumListInput, operation: string): void {
   validatePageLimit(input.limit, operation);
   if (input.after_id != null) positiveInteger(input.after_id, "after_id");
-}
-
-function validateMutationIdentity(input: ForumMutationIdentity): void {
-  boundedText(input.client_command_id, "client command ID", 160, true);
-  nonnegativeInteger(input.expected_revision, "expected_revision");
 }
 
 function validatePageLimit(value: number, operation: string): void {

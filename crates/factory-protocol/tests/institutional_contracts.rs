@@ -2,9 +2,9 @@ use factory_protocol::{
     AggregateRevision, ApplicationRevisionId, ArtifactId, Claim, ClaimId, ClaimState,
     ContentDigest, ContractError, Decision, DecisionId, DecisionKind, DecisionState, Experiment,
     ExperimentId, ExperimentRun, ExperimentRunId, ExperimentRunState, ExperimentState,
-    InstitutionalReference, OfficeId, Project, ProjectId, ProjectState, Publication, PublicationId,
-    PublicationKind, RepositoryObjectIdV1, Rfc, RfcId, RfcRevision, RfcRevisionId, RfcState,
-    SealedArtifactReferenceV1, SessionId,
+    InstitutionalReference, OfficeId, Project, ProjectId, ProjectState, Publication,
+    PublicationAttachment, PublicationId, PublicationKind, RepositoryObjectIdV1, Rfc, RfcId,
+    RfcRevision, RfcRevisionId, RfcState, SealedArtifactReferenceV1, SessionId,
 };
 
 fn artifact(id: i64, bytes: u64) -> SealedArtifactReferenceV1 {
@@ -131,17 +131,36 @@ fn references_are_closed_and_publications_must_be_anchored_to_institutional_work
         originating_session_id: Some(SessionId::new(13).expect("session ID")),
         anchor: project,
         kind: PublicationKind::Finding,
+        summary: "A durable finding tied to a project".to_owned(),
         body: artifact(14, 15),
+        attachments: vec![PublicationAttachment {
+            artifact: artifact(16, 5),
+            label: "supporting evidence".to_owned(),
+        }],
         reply_to: None,
         supersedes: None,
         aggregate_revision: AggregateRevision::initial(),
     };
     assert_eq!(publication.validate(), Ok(()));
 
-    let mut unanchored = publication;
+    let mut unanchored = publication.clone();
     unanchored.anchor =
         InstitutionalReference::Publication(PublicationId::new(15).expect("publication ID"));
     assert!(unanchored.validate().is_err());
+
+    assert_eq!(
+        PublicationKind::parse("finding"),
+        Ok(PublicationKind::Finding)
+    );
+    assert!(PublicationKind::parse("chat").is_err());
+    let duplicate_attachment = Publication {
+        attachments: vec![PublicationAttachment {
+            artifact: artifact(14, 15),
+            label: "duplicate body".to_owned(),
+        }],
+        ..publication
+    };
+    assert!(duplicate_attachment.validate().is_err());
 }
 
 #[test]

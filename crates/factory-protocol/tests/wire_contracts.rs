@@ -164,6 +164,7 @@ fn institutional_navigation_has_one_closed_kind_and_a_kind_matched_cursor() {
         kind: "rfc".to_owned(),
         project_id: Some(7),
         owner_office_id: Some(3),
+        anchor: None,
         limit: 20,
         cursor: Some(wire::InstitutionalReferenceWireV1 {
             kind: "rfc".to_owned(),
@@ -412,6 +413,10 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_OPERATOR_INSTITUTIONAL_SHOW => {
                 round_trip::<OperatorInstitutionalShowRequest>(request);
             }
+            OP_OPERATOR_PUBLICATION_CREATE => {
+                round_trip::<OperatorPublicationCreateRequest>(request);
+            }
+            OP_PUBLICATION_CREATE => round_trip::<PublicationCreateRequest>(request),
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionVerifyPacketRequest>(request),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<SessionSealArtifactRequest>(request),
             OP_SESSION_SUBMIT_TERMINAL => round_trip::<SessionSubmitTerminalRequest>(request),
@@ -419,9 +424,6 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
             OP_FORUM_LIST_THREADS => round_trip::<ForumListThreadsRequestV1>(request),
             OP_FORUM_SEARCH => round_trip::<ForumSearchRequestV1>(request),
             OP_FORUM_READ_THREAD => round_trip::<ForumReadThreadRequestV1>(request),
-            OP_FORUM_CREATE_TOPIC => round_trip::<ForumCreateTopicRequestV1>(request),
-            OP_FORUM_CREATE_THREAD => round_trip::<ForumCreateThreadRequestV1>(request),
-            OP_FORUM_POST => round_trip::<ForumPostRequestV1>(request),
             other => panic!("unknown fixture operation {other}"),
         }
 
@@ -456,6 +458,9 @@ fn every_operation_golden_is_typed_parsed_and_serialized() {
                 round_trip::<InstitutionalSearchResponse>(success);
             }
             OP_OPERATOR_INSTITUTIONAL_SHOW => round_trip::<InstitutionalShowResponse>(success),
+            OP_OPERATOR_PUBLICATION_CREATE | OP_PUBLICATION_CREATE => {
+                round_trip::<PublicationReceiptResponse>(success);
+            }
             OP_SESSION_VERIFY_PACKET => round_trip::<SessionPacketVerificationResponse>(success),
             OP_SESSION_SEAL_ARTIFACT => round_trip::<ArtifactReceiptResponse>(success),
             OP_FORUM_LIST_TOPICS => round_trip::<ForumTopicsResponseV1>(success),

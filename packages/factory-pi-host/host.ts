@@ -37,15 +37,11 @@ const KNOWN_TOOL_NAMES = new Set([
   "workspace_search",
   "workspace_list",
   "shell",
-  "forum_read",
-  "forum_write",
   "forum_search",
   "forum_list_topics",
   "forum_list_threads",
   "forum_read_thread",
-  "forum_create_topic",
-  "forum_create_thread",
-  "forum_post",
+  "publication_create",
   "artifact_seal",
   "artifact_read",
   "product_submit_ticket",
@@ -437,7 +433,10 @@ export function validateToolAllowlist(
       // report sealing. Completion evidence is now kernel-owned, so omit this
       // strictly less-powerful legacy tool rather than making a changed
       // worktree depend on an optional workspace prose file.
-      if (adapter === undefined && name === "artifact_seal" && packet.assignment_role === "engineering") {
+      if (
+        adapter === undefined && name === "artifact_seal" &&
+        packet.assignment_role === "engineering"
+      ) {
         continue;
       }
       if (adapter === undefined) throw new Error(`assignment tool ${name} has no bound adapter`);

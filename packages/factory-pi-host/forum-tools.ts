@@ -8,10 +8,7 @@
 
 import type {
   ForumAdapter,
-  ForumCreateThreadInput,
-  ForumCreateTopicInput,
   ForumListInput,
-  ForumPostInput,
   ForumSearchInput,
   ForumThreadPageInput,
 } from "../factory-sdk/forum.ts";
@@ -20,10 +17,7 @@ export type ForumToolName =
   | "forum_search"
   | "forum_list_topics"
   | "forum_list_threads"
-  | "forum_read_thread"
-  | "forum_create_topic"
-  | "forum_create_thread"
-  | "forum_post";
+  | "forum_read_thread";
 
 export interface ForumToolDefinition {
   readonly name: ForumToolName;
@@ -36,7 +30,7 @@ export interface ForumToolDefinition {
 /** Actor-visible search intentionally omits the durable author-office filter. */
 type ActorForumSearchInput = Omit<ForumSearchInput, "author_office">;
 
-/** Returns one bounded, typed custom-tool definition for each Forum method. */
+/** Returns one bounded, typed custom-tool definition for each legacy Forum read. */
 export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefinition[] {
   return [
     {
@@ -111,77 +105,6 @@ export function createForumTools(adapter: ForumAdapter): readonly ForumToolDefin
       },
       invoke: async (input) =>
         stripAuthorOffice(await adapter.readThread(input as ForumThreadPageInput)),
-    },
-    {
-      name: "forum_create_topic",
-      description: "Create one persistent discussion topic.",
-      input_schema: {
-        type: "object",
-        required: ["client_command_id", "expected_revision", "name", "description"],
-        additionalProperties: false,
-        properties: {
-          client_command_id: { type: "string", maxLength: 160 },
-          expected_revision: { type: "integer", minimum: 0 },
-          name: { type: "string", maxLength: 160 },
-          description: { type: "string", maxLength: 4096 },
-        },
-      },
-      invoke: async (input) => {
-        await adapter.createTopic(input as ForumCreateTopicInput);
-        return { accepted: true };
-      },
-    },
-    {
-      name: "forum_create_thread",
-      description: "Create one persistent discussion thread beneath an existing topic.",
-      input_schema: {
-        type: "object",
-        required: ["client_command_id", "expected_revision", "topic_id", "title"],
-        additionalProperties: false,
-        properties: {
-          client_command_id: { type: "string", maxLength: 160 },
-          expected_revision: { type: "integer", minimum: 0 },
-          topic_id: { type: "integer", minimum: 1 },
-          title: { type: "string", maxLength: 240 },
-        },
-      },
-      invoke: async (input) => {
-        await adapter.createThread(input as ForumCreateThreadInput);
-        return { accepted: true };
-      },
-    },
-    {
-      name: "forum_post",
-      description: "Append an immutable discussion post, reply, correction, or supersession.",
-      input_schema: {
-        type: "object",
-        required: ["client_command_id", "expected_revision", "thread_id", "kind", "body"],
-        additionalProperties: false,
-        properties: {
-          client_command_id: { type: "string", maxLength: 160 },
-          expected_revision: { type: "integer", minimum: 0 },
-          thread_id: { type: "integer", minimum: 1 },
-          kind: {
-            enum: [
-              "Note",
-              "Question",
-              "Finding",
-              "Proposal",
-              "Challenge",
-              "Correction",
-              "DecisionLink",
-            ],
-          },
-          body: { type: "string", maxLength: 16384 },
-          reply_to: { type: ["integer", "null"], minimum: 1 },
-          supersedes: { type: ["integer", "null"], minimum: 1 },
-          attachments: { type: "array", maxItems: 8 },
-        },
-      },
-      invoke: async (input) => {
-        await adapter.post(input as ForumPostInput);
-        return { accepted: true };
-      },
     },
   ];
 }

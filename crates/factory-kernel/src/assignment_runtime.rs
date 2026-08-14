@@ -420,6 +420,7 @@ pub async fn materialize_and_launch_assignment(
         let session = launch_session(
             &process,
             &store.forum_store(),
+            &store.publication_store(),
             &store.ticket_store(),
             execution.command_runner(),
             daemon,
@@ -1477,9 +1478,7 @@ fn tool_name(value: factory_protocol::ActorToolV1) -> &'static str {
         factory_protocol::ActorToolV1::ForumListTopics => "forum_list_topics",
         factory_protocol::ActorToolV1::ForumListThreads => "forum_list_threads",
         factory_protocol::ActorToolV1::ForumReadThread => "forum_read_thread",
-        factory_protocol::ActorToolV1::ForumCreateTopic => "forum_create_topic",
-        factory_protocol::ActorToolV1::ForumCreateThread => "forum_create_thread",
-        factory_protocol::ActorToolV1::ForumPost => "forum_post",
+        factory_protocol::ActorToolV1::PublicationCreate => "publication_create",
         factory_protocol::ActorToolV1::ArtifactSeal => "artifact_seal",
         factory_protocol::ActorToolV1::ArtifactRead => "artifact_read",
         factory_protocol::ActorToolV1::ProductSubmitTicket => "product_submit_ticket",

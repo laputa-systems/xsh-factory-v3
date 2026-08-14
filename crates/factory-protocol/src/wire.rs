@@ -21,7 +21,7 @@ use crate::{
     InstitutionalReference, KernelBuildId, MicroUsd, ModelCapabilityV1, ModelProfileV1,
     OP_FORUM_CREATE_THREAD_V1, OP_FORUM_CREATE_TOPIC_V1, OP_FORUM_LIST_THREADS_V1,
     OP_FORUM_LIST_TOPICS_V1, OP_FORUM_POST_V1, OP_FORUM_READ_THREAD_V1, OP_FORUM_SEARCH_V1,
-    ProductTicketProposalV1, QualityFullSuiteRequestV1, QualityReviewSubmissionV1,
+    ProductTicketProposalV1, PublicationId, QualityFullSuiteRequestV1, QualityReviewSubmissionV1,
     ReleaseDecisionV1, RepositoryBindingV1, RepositoryRelativePath, RequiredReadV1, ReviewId,
     ReviewVerdict, RuntimeRelativePath, SealedArtifactReferenceV1, SessionLimitsV1,
     SponsorshipDecisionV1, TemplateArtifactV1, TemplatePlaceholderV1, ThinkingLevelV1,
@@ -85,6 +85,13 @@ pub const OP_OPERATOR_SHOW_AUDIT: &str = "operator.audit.show";
 /// object directory or query language.
 pub const OP_OPERATOR_INSTITUTIONAL_SEARCH: &str = "operator.institutional.search";
 pub const OP_OPERATOR_INSTITUTIONAL_SHOW: &str = "operator.institutional.show";
+/// One local-operator authored immutable publication. Actor publication
+/// creation never accepts office/session provenance; this separate command is
+/// intentionally limited to the daemon's authenticated operator socket.
+pub const OP_OPERATOR_PUBLICATION_CREATE: &str = "operator.publication.create";
+/// One actor- or operator-authorized immutable publication. The connection
+/// determines attribution; the wire may name only an anchor and sealed facts.
+pub const OP_PUBLICATION_CREATE: &str = "publication.create";
 pub const OP_SESSION_VERIFY_PACKET: &str = "session.verify_packet";
 pub const OP_SESSION_SEAL_ARTIFACT: &str = "session.seal_artifact";
 pub const OP_SESSION_SUBMIT_TERMINAL: &str = "session.submit_terminal";
@@ -92,9 +99,6 @@ pub const OP_FORUM_LIST_TOPICS: &str = OP_FORUM_LIST_TOPICS_V1;
 pub const OP_FORUM_LIST_THREADS: &str = OP_FORUM_LIST_THREADS_V1;
 pub const OP_FORUM_SEARCH: &str = OP_FORUM_SEARCH_V1;
 pub const OP_FORUM_READ_THREAD: &str = OP_FORUM_READ_THREAD_V1;
-pub const OP_FORUM_CREATE_TOPIC: &str = OP_FORUM_CREATE_TOPIC_V1;
-pub const OP_FORUM_CREATE_THREAD: &str = OP_FORUM_CREATE_THREAD_V1;
-pub const OP_FORUM_POST: &str = OP_FORUM_POST_V1;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FrameError {
@@ -255,6 +259,8 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_OPERATOR_SHOW_AUDIT
             | OP_OPERATOR_INSTITUTIONAL_SEARCH
             | OP_OPERATOR_INSTITUTIONAL_SHOW
+            | OP_OPERATOR_PUBLICATION_CREATE
+            | OP_PUBLICATION_CREATE
             | OP_SESSION_VERIFY_PACKET
             | OP_SESSION_SEAL_ARTIFACT
             | OP_SESSION_SUBMIT_TERMINAL
@@ -262,9 +268,13 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_FORUM_LIST_THREADS
             | OP_FORUM_SEARCH
             | OP_FORUM_READ_THREAD
-            | OP_FORUM_CREATE_TOPIC
-            | OP_FORUM_CREATE_THREAD
-            | OP_FORUM_POST
+            // Retired mutations remain parseable solely so an already-bound
+            // actor receives a typed rejection rather than losing its socket.
+            // They are absent from every SDK/host/application operation map
+            // and no actor or operator router dispatches them.
+            | OP_FORUM_CREATE_TOPIC_V1
+            | OP_FORUM_CREATE_THREAD_V1
+            | OP_FORUM_POST_V1
     )
 }
 
@@ -881,6 +891,7 @@ read_request!(OperatorInstitutionalSearchRequest {
     kind: String,
     project_id: Option<i64>,
     owner_office_id: Option<i64>,
+    anchor: Option<InstitutionalReferenceWireV1>,
     limit: u8,
     cursor: Option<InstitutionalReferenceWireV1>,
 });
@@ -898,6 +909,20 @@ impl OperatorInstitutionalSearchRequest {
         let kind = self.object_kind()?;
         let _ = self.project_id()?;
         let _ = self.owner_office_id()?;
+        if let Some(anchor) = self.anchor()? {
+            if kind != InstitutionalObjectKind::Publication {
+                return Err(ContractError::InvalidValue {
+                    field: "institutional search anchor",
+                    reason: "is available only when searching publications",
+                });
+            }
+            if !anchor.can_anchor_publication() {
+                return Err(ContractError::InvalidValue {
+                    field: "institutional search anchor",
+                    reason: "must name one publishable institutional object",
+                });
+            }
+        }
         if let Some(cursor) = self.cursor()? {
             if cursor.kind() != kind {
                 return Err(ContractError::InvalidValue {
@@ -921,6 +946,13 @@ impl OperatorInstitutionalSearchRequest {
         self.owner_office_id.map(crate::OfficeId::new).transpose()
     }
 
+    pub fn anchor(&self) -> Result<Option<InstitutionalReference>, ContractError> {
+        self.anchor
+            .as_ref()
+            .map(InstitutionalReferenceWireV1::reference)
+            .transpose()
+    }
+
     pub fn cursor(&self) -> Result<Option<InstitutionalReference>, ContractError> {
         self.cursor
             .as_ref()
@@ -936,6 +968,155 @@ read_request!(OperatorInstitutionalShowRequest {
 impl OperatorInstitutionalShowRequest {
     pub fn institutional_reference(&self) -> Result<InstitutionalReference, ContractError> {
         self.reference.reference()
+    }
+}
+
+/// One supporting sealed artifact selected for a publication. The kernel
+/// validates the artifact row and its bounded label before persistence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationAttachmentWireV1 {
+    pub artifact_id: i64,
+    pub label: String,
+}
+
+// Creates one immutable anchored publication. `authoring_office_id` and
+// `originating_session_id` are intentionally absent: an actor obtains them
+// from its bound connection, while an operator route has a separate typed
+// authority adapter.
+read_request!(PublicationCreateRequest {
+    client_command_id: String,
+    anchor: InstitutionalReferenceWireV1,
+    kind: String,
+    summary: String,
+    body_artifact_id: i64,
+    attachments: Vec<PublicationAttachmentWireV1>,
+    reply_to: Option<i64>,
+    supersedes: Option<i64>,
+});
+
+impl PublicationCreateRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.client_command_id.is_empty()
+            || self.client_command_id.len() > 160
+            || !self.client_command_id.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'_' | b'-')
+            })
+        {
+            return Err(ContractError::InvalidValue {
+                field: "publication client command ID",
+                reason: "must be a bounded closed command component",
+            });
+        }
+        let anchor = self.anchor.reference()?;
+        if !anchor.can_anchor_publication() {
+            return Err(ContractError::InvalidValue {
+                field: "publication anchor",
+                reason: "must be an institutional object, not a run or publication",
+            });
+        }
+        crate::PublicationKind::parse(&self.kind)?;
+        validate_bounded_wire_text(
+            &self.summary,
+            "publication summary",
+            crate::INSTITUTIONAL_SUMMARY_MAX_BYTES,
+        )?;
+        crate::ArtifactId::new(self.body_artifact_id)?;
+        if self.attachments.len() > crate::PUBLICATION_MAX_ATTACHMENTS {
+            return Err(ContractError::InvalidValue {
+                field: "publication attachments",
+                reason: "exceeds the closed attachment limit",
+            });
+        }
+        let mut artifact_ids = std::collections::BTreeSet::new();
+        artifact_ids.insert(self.body_artifact_id);
+        for attachment in &self.attachments {
+            let artifact_id = crate::ArtifactId::new(attachment.artifact_id)?;
+            validate_bounded_wire_text(
+                &attachment.label,
+                "publication attachment label",
+                crate::PUBLICATION_ATTACHMENT_LABEL_MAX_BYTES,
+            )?;
+            if !artifact_ids.insert(artifact_id.get()) {
+                return Err(ContractError::InvalidValue {
+                    field: "publication attachments",
+                    reason: "must not repeat the body or another attachment",
+                });
+            }
+        }
+        self.reply_to.map(PublicationId::new).transpose()?;
+        self.supersedes.map(PublicationId::new).transpose()?;
+        Ok(())
+    }
+
+    pub fn anchor_reference(&self) -> Result<InstitutionalReference, ContractError> {
+        self.anchor.reference()
+    }
+
+    pub fn publication_kind(&self) -> Result<crate::PublicationKind, ContractError> {
+        crate::PublicationKind::parse(&self.kind)
+    }
+}
+
+// Grand Architect publication command. The explicit office is meaningful
+// operator intent, not an actor assertion; the local-only router validates it
+// against the selected application revision before storage.
+read_request!(OperatorPublicationCreateRequest {
+    client_command_id: String,
+    application_revision_id: i64,
+    authoring_office_id: i64,
+    anchor: InstitutionalReferenceWireV1,
+    kind: String,
+    summary: String,
+    body_artifact_id: i64,
+    attachments: Vec<PublicationAttachmentWireV1>,
+    reply_to: Option<i64>,
+    supersedes: Option<i64>,
+});
+
+impl OperatorPublicationCreateRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        let shared = PublicationCreateRequest {
+            protocol_version: self.protocol_version,
+            request_id: self.request_id.clone(),
+            operation: self.operation.clone(),
+            client_command_id: self.client_command_id.clone(),
+            anchor: self.anchor.clone(),
+            kind: self.kind.clone(),
+            summary: self.summary.clone(),
+            body_artifact_id: self.body_artifact_id,
+            attachments: self.attachments.clone(),
+            reply_to: self.reply_to,
+            supersedes: self.supersedes,
+        };
+        shared.validate()?;
+        crate::ApplicationRevisionId::new(self.application_revision_id)?;
+        crate::OfficeId::new(self.authoring_office_id)?;
+        Ok(())
+    }
+
+    pub fn publication_command(&self) -> Result<PublicationCreateRequest, ContractError> {
+        self.validate()?;
+        Ok(PublicationCreateRequest {
+            protocol_version: self.protocol_version,
+            request_id: self.request_id.clone(),
+            operation: self.operation.clone(),
+            client_command_id: self.client_command_id.clone(),
+            anchor: self.anchor.clone(),
+            kind: self.kind.clone(),
+            summary: self.summary.clone(),
+            body_artifact_id: self.body_artifact_id,
+            attachments: self.attachments.clone(),
+            reply_to: self.reply_to,
+            supersedes: self.supersedes,
+        })
+    }
+
+    pub fn application_revision_id(&self) -> Result<crate::ApplicationRevisionId, ContractError> {
+        crate::ApplicationRevisionId::new(self.application_revision_id)
+    }
+
+    pub fn authoring_office_id(&self) -> Result<crate::OfficeId, ContractError> {
+        crate::OfficeId::new(self.authoring_office_id)
     }
 }
 read_request!(SessionVerifyPacketRequest {
@@ -1031,6 +1212,20 @@ pub struct OperationReceiptResponse {
     pub operation: String,
     pub audit_id: i64,
     pub aggregate_revision: u64,
+}
+
+/// Receipt for an immutable institutional publication. The ID is returned so
+/// an actor can cite the durable record without guessing a database sequence
+/// or inventing a Forum path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationReceiptResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub audit_id: i64,
+    pub aggregate_revision: u64,
+    pub publication_id: i64,
+    pub was_idempotent_retry: bool,
 }
 
 /// Receipt for a kernel-captured Engineering candidate. The actor never
@@ -1928,9 +2123,7 @@ fn is_known_assignment_tool(value: &str) -> bool {
             | "forum_list_topics"
             | "forum_list_threads"
             | "forum_read_thread"
-            | "forum_create_topic"
-            | "forum_create_thread"
-            | "forum_post"
+            | "publication_create"
             | "artifact_seal"
             | "artifact_read"
             | "product_submit_ticket"
@@ -2737,6 +2930,20 @@ fn contract_detail(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+fn validate_bounded_wire_text(
+    value: &str,
+    field: &'static str,
+    maximum: usize,
+) -> Result<(), ContractError> {
+    if value.is_empty() || value.len() > maximum || value.contains('\0') {
+        return Err(ContractError::InvalidValue {
+            field,
+            reason: "must be nonempty, bounded UTF-8 without NUL",
+        });
+    }
+    Ok(())
+}
+
 fn parse_delivery_mode(value: &str) -> Result<DeliveryModeV1, String> {
     if value == "local_fast_forward_only" {
         Ok(DeliveryModeV1::LocalFastForwardOnly)
@@ -2793,9 +3000,7 @@ fn parse_tool(value: &str) -> Result<ActorToolV1, String> {
         "forum_list_topics" => Ok(ActorToolV1::ForumListTopics),
         "forum_list_threads" => Ok(ActorToolV1::ForumListThreads),
         "forum_read_thread" => Ok(ActorToolV1::ForumReadThread),
-        "forum_create_topic" => Ok(ActorToolV1::ForumCreateTopic),
-        "forum_create_thread" => Ok(ActorToolV1::ForumCreateThread),
-        "forum_post" => Ok(ActorToolV1::ForumPost),
+        "publication_create" => Ok(ActorToolV1::PublicationCreate),
         "artifact_seal" => Ok(ActorToolV1::ArtifactSeal),
         "artifact_read" => Ok(ActorToolV1::ArtifactRead),
         "product_submit_ticket" => Ok(ActorToolV1::ProductSubmitTicket),

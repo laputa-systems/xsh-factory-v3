@@ -36,31 +36,12 @@ pub struct ForumStore {
     pool: PgPool,
 }
 
-/// Capability minted only by the kernel's operator transport. The private
-/// marker prevents an actor payload or an application crate from constructing
-/// Grand Architect authority by value. The operator socket adapter should
-/// obtain this token from its kernel-owned dispatch path, then pass it to the
-/// `*_with_authority` methods below.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OperatorForumCapability {
-    _private: (),
-}
-
-impl OperatorForumCapability {
-    /// This constructor is crate-visible by design. A transport adapter in the
-    /// kernel crate may mint the capability after authenticating the operator
-    /// socket; actor/session bindings cannot call it.
-    pub(crate) const fn from_operator_transport() -> Self {
-        Self { _private: () }
-    }
-}
-
-/// Forum mutation authority is either the inherited actor socket binding or a
-/// kernel-minted operator capability. No JSON field can select either branch.
+/// Legacy Forum mutation authority is only an inherited actor binding. The
+/// public actor route no longer exposes these mutations; this internal value
+/// remains for historical store/database compatibility tests only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForumAuthority {
     Actor(ActorConnectionBinding),
-    GrandArchitect(OperatorForumCapability),
 }
 
 /// Store-owned topic supersession command. The protocol may add a richer wire
@@ -89,14 +70,6 @@ impl ForumStore {
     /// database URL; Forum callers never receive a second pool or URL surface.
     pub(crate) fn from_kernel_pool(pool: PgPool) -> Self {
         Self { pool }
-    }
-
-    /// Kernel transport hook for the external Grand Architect. The returned
-    /// capability is intentionally not constructible by actor/application
-    /// crates. Parent daemon wiring should call this only for the operator
-    /// socket, never for an actor descriptor.
-    pub(crate) const fn operator_capability() -> OperatorForumCapability {
-        OperatorForumCapability::from_operator_transport()
     }
 
     /// Returns the aggregate revision implied by accepted Forum audit receipts.
@@ -1109,7 +1082,6 @@ fn authority_author_columns(authority: ForumAuthority) -> (i16, Option<i64>, Opt
             Some(binding.session_id().get()),
             Some(office_number(binding.assignment_role())),
         ),
-        ForumAuthority::GrandArchitect(_) => (1, None, None),
     }
 }
 
@@ -1145,7 +1117,6 @@ fn actor_principal(binding: ActorConnectionBinding) -> String {
 fn authority_principal(authority: ForumAuthority) -> String {
     match authority {
         ForumAuthority::Actor(binding) => actor_principal(binding),
-        ForumAuthority::GrandArchitect(_) => "grand-architect".to_owned(),
     }
 }
 

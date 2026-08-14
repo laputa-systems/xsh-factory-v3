@@ -50,6 +50,7 @@ use crate::{
         ProcessSupervisionSpec, SupervisedProcessOutcome,
     },
     product_runtime::{ExecuteProductProposal, execute_product_proposal},
+    publication_store::PublicationStore,
     storage::StoreError,
     ticket_store::TicketStore,
     workspace_read::{WorkspaceReadAuthority, WorkspaceReadError},
@@ -618,6 +619,7 @@ struct TerminalProposal {
 struct KernelSessionRpc {
     process: ProcessStore,
     forum: ForumStore,
+    publications: PublicationStore,
     tickets: TicketStore,
     command_runner: CommandRunner,
     candidate_quality_runtime: Option<CandidateQualitySessionRuntime>,
@@ -729,6 +731,16 @@ impl KernelSessionRpc {
             }
             factory_protocol::OP_SESSION_SUBMIT_TERMINAL => {
                 self.submit_terminal(frame.frame()).await
+            }
+            factory_protocol::OP_PUBLICATION_CREATE => {
+                if !self.allowed_tools.contains("publication_create") {
+                    return Err(invalid_rpc(
+                        "publication.create",
+                        "publication creation is not assigned",
+                    ));
+                }
+                self.require_packet_verified()?;
+                crate::publication_rpc::dispatch_actor_publication(&self.publications, &frame).await
             }
             operation if forum_tool_name(operation).is_some() => {
                 let tool = forum_tool_name(operation).expect("guard proved Forum operation");
@@ -1781,6 +1793,7 @@ impl KernelSessionRpc {
 pub async fn launch_session<V>(
     process: &ProcessStore,
     forum: &ForumStore,
+    publications: &PublicationStore,
     tickets: &TicketStore,
     command_runner: &CommandRunner,
     daemon: &LocalDaemon,
@@ -1889,6 +1902,7 @@ where
     let rpc = KernelSessionRpc {
         process: process.clone(),
         forum: forum.clone(),
+        publications: publications.clone(),
         tickets: tickets.clone(),
         command_runner: command_runner.clone(),
         candidate_quality_runtime: request.candidate_quality_runtime.clone(),
@@ -2428,9 +2442,6 @@ fn forum_tool_name(operation: &str) -> Option<&'static str> {
         factory_protocol::OP_FORUM_LIST_TOPICS => "forum_list_topics",
         factory_protocol::OP_FORUM_LIST_THREADS => "forum_list_threads",
         factory_protocol::OP_FORUM_READ_THREAD => "forum_read_thread",
-        factory_protocol::OP_FORUM_CREATE_TOPIC => "forum_create_topic",
-        factory_protocol::OP_FORUM_CREATE_THREAD => "forum_create_thread",
-        factory_protocol::OP_FORUM_POST => "forum_post",
         _ => return None,
     })
 }

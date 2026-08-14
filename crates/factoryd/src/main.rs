@@ -107,6 +107,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .with_campaign_control(store.process_store(), store.ticket_store())
         .with_navigation_control(store.clone())
         .with_forum_control(store.forum_store())
+        .with_publication_control(store.publication_store())
         // Application source paths cross only this authenticated Unix socket;
         // daemon-side Rust/CAS re-reads every byte under the source root.
         .with_application_control(store.clone(), Arc::clone(&cas))

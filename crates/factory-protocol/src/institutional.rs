@@ -26,6 +26,8 @@ pub const INSTITUTIONAL_BODY_MAX_BYTES: u64 = 1024 * 1024;
 pub const INSTITUTIONAL_EVALUATION_PLAN_MAX_BYTES: u64 = 256 * 1024;
 pub const INSTITUTIONAL_INVOCATION_MAX_BYTES: u64 = 256 * 1024;
 pub const INSTITUTIONAL_RECEIPT_MAX_BYTES: u64 = 256 * 1024;
+pub const PUBLICATION_ATTACHMENT_LABEL_MAX_BYTES: usize = 160;
+pub const PUBLICATION_MAX_ATTACHMENTS: usize = 8;
 
 /// A project is a bounded area of institutional responsibility.  Its body is
 /// immutable evidence; changing the searchable fields is an aggregate
@@ -370,9 +372,58 @@ pub enum PublicationKind {
     Note,
 }
 
-/// The protocol shape needed by the publication phase is defined here so
-/// callers already use an anchored reference.  Storage and wire adapters are
-/// intentionally deferred to the later publication phase.
+impl PublicationKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Finding => "finding",
+            Self::Question => "question",
+            Self::Challenge => "challenge",
+            Self::Correction => "correction",
+            Self::DecisionLink => "decision_link",
+            Self::Note => "note",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, ContractError> {
+        match value {
+            "finding" => Ok(Self::Finding),
+            "question" => Ok(Self::Question),
+            "challenge" => Ok(Self::Challenge),
+            "correction" => Ok(Self::Correction),
+            "decision_link" => Ok(Self::DecisionLink),
+            "note" => Ok(Self::Note),
+            _ => Err(ContractError::InvalidValue {
+                field: "publication kind",
+                reason: "is not a closed publication kind",
+            }),
+        }
+    }
+}
+
+/// A supporting sealed artifact with a bounded display label. Attachments are
+/// explicit evidence links, not a generic metadata bag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicationAttachment {
+    pub artifact: SealedArtifactReferenceV1,
+    pub label: String,
+}
+
+impl PublicationAttachment {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        validate_text(
+            "publication attachment label",
+            &self.label,
+            PUBLICATION_ATTACHMENT_LABEL_MAX_BYTES,
+            false,
+        )?;
+        self.artifact
+            .validate("publication attachment", INSTITUTIONAL_BODY_MAX_BYTES, true)
+    }
+}
+
+/// Anchored durable discourse. Its summary is the bounded database-side
+/// search projection; the full immutable body remains a sealed artifact.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Publication {
     pub id: PublicationId,
@@ -381,7 +432,9 @@ pub struct Publication {
     pub originating_session_id: Option<SessionId>,
     pub anchor: InstitutionalReference,
     pub kind: PublicationKind,
+    pub summary: String,
     pub body: SealedArtifactReferenceV1,
+    pub attachments: Vec<PublicationAttachment>,
     pub reply_to: Option<PublicationId>,
     pub supersedes: Option<PublicationId>,
     pub aggregate_revision: AggregateRevision,
@@ -395,7 +448,31 @@ impl Publication {
                 reason: "must be an institutional object, not a publication or run",
             });
         }
-        validate_body(&self.body, "publication body")
+        validate_text(
+            "publication summary",
+            &self.summary,
+            INSTITUTIONAL_SUMMARY_MAX_BYTES,
+            false,
+        )?;
+        validate_body(&self.body, "publication body")?;
+        if self.attachments.len() > PUBLICATION_MAX_ATTACHMENTS {
+            return Err(ContractError::InvalidValue {
+                field: "publication attachments",
+                reason: "exceeds the closed attachment limit",
+            });
+        }
+        let mut artifact_ids = std::collections::BTreeSet::new();
+        artifact_ids.insert(self.body.artifact_id);
+        for attachment in &self.attachments {
+            attachment.validate()?;
+            if !artifact_ids.insert(attachment.artifact.artifact_id) {
+                return Err(ContractError::InvalidValue {
+                    field: "publication attachments",
+                    reason: "repeats an artifact",
+                });
+            }
+        }
+        Ok(())
     }
 }
 

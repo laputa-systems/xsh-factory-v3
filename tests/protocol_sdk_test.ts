@@ -19,8 +19,8 @@ import {
   LocalProtocolClient,
   OPERATION,
   RESPONSE_FRAME_MAX_BYTES,
-  validateInstitutionalSearchInputV1,
   validateInstitutionalReference,
+  validateInstitutionalSearchInputV1,
   validateProtocolResponse,
 } from "../packages/factory-sdk/protocol.ts";
 import { decodeAssignmentPacketV1 } from "../packages/factory-pi-host/entrypoint.ts";
@@ -105,6 +105,9 @@ Deno.test("every closed operation has request, success, conflict, and error gold
       ? "institutional_search"
       : operation === OPERATION.operatorInstitutionalShow
       ? "institutional_show"
+      : operation === OPERATION.publicationCreate ||
+          operation === OPERATION.operatorPublicationCreate
+      ? "publication"
       : operation.startsWith("forum.") &&
           (operation === OPERATION.forumListTopics ||
             operation === OPERATION.forumListThreads ||
@@ -213,11 +216,12 @@ Deno.test("institutional navigation requires one closed kind and a matching curs
   };
   validateInstitutionalSearchInputV1(search);
   validateInstitutionalReference(search.cursor);
-  assertThrows(
-    () => validateInstitutionalSearchInputV1({ ...search, kind: "publication" }),
-    TypeError,
-    "kind",
-  );
+  validateInstitutionalSearchInputV1({
+    ...search,
+    kind: "publication",
+    cursor: { kind: "publication", id: 9 },
+    anchor: { kind: "rfc", id: 9 },
+  });
   assertThrows(
     () => validateInstitutionalSearchInputV1({ ...search, cursor: { kind: "experiment", id: 9 } }),
     TypeError,

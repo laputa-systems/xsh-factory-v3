@@ -444,20 +444,19 @@ Deno.test("Forum custom tools expose bounded actor schemas without author-office
     "forum_list_topics",
     "forum_list_threads",
     "forum_read_thread",
-    "forum_create_topic",
-    "forum_create_thread",
-    "forum_post",
   ]);
-  assertEquals(tools.length, 7);
+  assertEquals(tools.length, 4);
   const search = tools.find((tool) => tool.name === "forum_search")!.sdk_definition
     .input_schema as { properties: Record<string, unknown>; additionalProperties: boolean };
   assertEquals(search.additionalProperties, false);
   assertEquals("author_office" in search.properties, false);
   assertEquals("query" in search.properties, true);
-  const post = tools.find((tool) => tool.name === "forum_post")!.sdk_definition
-    .input_schema as { required: readonly string[]; additionalProperties: boolean };
-  assertEquals(post.additionalProperties, false);
-  assert(post.required.includes("body"));
+  assertEquals(tools.map((tool) => tool.name), [
+    "forum_search",
+    "forum_list_topics",
+    "forum_list_threads",
+    "forum_read_thread",
+  ]);
 });
 
 Deno.test("custom-tool results omit transport and organizational metadata", () => {

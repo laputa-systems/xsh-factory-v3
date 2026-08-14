@@ -25,6 +25,43 @@ use thiserror::Error;
 
 use crate::storage::KernelStore;
 
+macro_rules! publication_search_sql {
+    ($column:literal) => {
+        concat!(
+            "SELECT id,\n",
+            "       CASE publication_kind\n",
+            "           WHEN 0 THEN 'Finding'\n",
+            "           WHEN 1 THEN 'Question'\n",
+            "           WHEN 2 THEN 'Challenge'\n",
+            "           WHEN 3 THEN 'Correction'\n",
+            "           WHEN 4 THEN 'Decision link'\n",
+            "           WHEN 5 THEN 'Note'\n",
+            "       END AS title,\n",
+            "       summary,\n",
+            "       floor(extract(epoch FROM created_at) * 1000000)::BIGINT\n",
+            "           AS created_at_micros\n",
+            "  FROM factory.publications\n",
+            " WHERE ($1 = '' OR search_vector @@ websearch_to_tsquery('simple', $1))\n",
+            "   AND ($2::BIGINT IS NULL OR id < $2)\n",
+            "   AND ($3::BIGINT IS NULL OR ",
+            $column,
+            " = $3)\n",
+            "   AND ($4::BIGINT IS NULL OR authoring_office_id = $4)\n",
+            " ORDER BY id DESC LIMIT $5"
+        )
+    };
+}
+
+const PUBLICATION_SEARCH_BY_PROJECT: &str = publication_search_sql!("project_id");
+const PUBLICATION_SEARCH_BY_RFC: &str = publication_search_sql!("rfc_id");
+const PUBLICATION_SEARCH_BY_RFC_REVISION: &str = publication_search_sql!("rfc_revision_id");
+const PUBLICATION_SEARCH_BY_TICKET: &str = publication_search_sql!("ticket_id");
+const PUBLICATION_SEARCH_BY_TICKET_REVISION: &str = publication_search_sql!("ticket_revision_id");
+const PUBLICATION_SEARCH_BY_EXPERIMENT: &str = publication_search_sql!("experiment_id");
+const PUBLICATION_SEARCH_BY_CLAIM: &str = publication_search_sql!("claim_id");
+const PUBLICATION_SEARCH_BY_DECISION: &str = publication_search_sql!("decision_id");
+const PUBLICATION_SEARCH_BY_OFFICE: &str = publication_search_sql!("office_id");
+
 macro_rules! audit_entry_from {
     ($row:expr) => {
         AuditEntryResponse {
@@ -116,13 +153,7 @@ impl OperatorNavigationRpc {
             .owner_office_id()
             .map_err(NavigationRejection::Contract)?
             .map(|id| id.get());
-        if matches!(kind, InstitutionalObjectKind::Publication) {
-            return Err(NavigationRejection::Navigation(
-                NavigationError::UnsupportedInstitutionalKind {
-                    kind: InstitutionalObjectKind::Publication,
-                },
-            ));
-        }
+        let anchor = request.anchor().map_err(NavigationRejection::Contract)?;
         let limit =
             i64::from(request.limit)
                 .checked_add(1)
@@ -136,6 +167,7 @@ impl OperatorNavigationRpc {
                 cursor.map(InstitutionalReference::id),
                 project_id,
                 owner_office_id,
+                anchor,
                 limit,
             )
             .await
@@ -162,8 +194,14 @@ impl OperatorNavigationRpc {
         cursor_id: Option<i64>,
         project_id: Option<i64>,
         owner_office_id: Option<i64>,
+        anchor: Option<InstitutionalReference>,
         limit: i64,
     ) -> Result<Vec<InstitutionalSearchHitResponse>, NavigationError> {
+        if kind == InstitutionalObjectKind::Publication {
+            return self
+                .publication_search(query, cursor_id, project_id, owner_office_id, anchor, limit)
+                .await;
+        }
         // Every branch is a literal statement over one concrete relation. The
         // values are bound parameters, and the limit is applied by PostgreSQL
         // before rows cross the kernel boundary.
@@ -283,9 +321,7 @@ impl OperatorNavigationRpc {
                     AND ($4::BIGINT IS NULL OR id = $4)
                   ORDER BY id DESC LIMIT $5"
             }
-            InstitutionalObjectKind::Publication => {
-                return Err(NavigationError::UnsupportedInstitutionalKind { kind });
-            }
+            InstitutionalObjectKind::Publication => unreachable!("handled above"),
         };
         let rows = sqlx::query(sql)
             .bind(query)
@@ -307,6 +343,72 @@ impl OperatorNavigationRpc {
                     title: row.try_get("title")?,
                     summary: row.try_get("summary")?,
                     created_at_micros: micros(created_at_micros)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn publication_search(
+        &self,
+        query: &str,
+        cursor_id: Option<i64>,
+        project_id: Option<i64>,
+        owner_office_id: Option<i64>,
+        anchor: Option<InstitutionalReference>,
+        limit: i64,
+    ) -> Result<Vec<InstitutionalSearchHitResponse>, NavigationError> {
+        // The selected column comes only from the closed Rust reference enum;
+        // an operator never supplies SQL or a generic `kind + id` predicate.
+        let (anchor_column, anchor_id) = match anchor {
+            Some(InstitutionalReference::Project(id)) => ("project_id", Some(id.get())),
+            Some(InstitutionalReference::Rfc(id)) => ("rfc_id", Some(id.get())),
+            Some(InstitutionalReference::RfcRevision(id)) => ("rfc_revision_id", Some(id.get())),
+            Some(InstitutionalReference::Ticket(id)) => ("ticket_id", Some(id.get())),
+            Some(InstitutionalReference::TicketRevision(id)) => {
+                ("ticket_revision_id", Some(id.get()))
+            }
+            Some(InstitutionalReference::Experiment(id)) => ("experiment_id", Some(id.get())),
+            Some(InstitutionalReference::Claim(id)) => ("claim_id", Some(id.get())),
+            Some(InstitutionalReference::Decision(id)) => ("decision_id", Some(id.get())),
+            Some(InstitutionalReference::Office(id)) => ("office_id", Some(id.get())),
+            Some(InstitutionalReference::ExperimentRun(_))
+            | Some(InstitutionalReference::Publication(_)) => {
+                return Err(NavigationError::Corrupt {
+                    field: "publication anchor selection",
+                });
+            }
+            None => ("project_id", project_id),
+        };
+        let sql = match anchor_column {
+            "project_id" => PUBLICATION_SEARCH_BY_PROJECT,
+            "rfc_id" => PUBLICATION_SEARCH_BY_RFC,
+            "rfc_revision_id" => PUBLICATION_SEARCH_BY_RFC_REVISION,
+            "ticket_id" => PUBLICATION_SEARCH_BY_TICKET,
+            "ticket_revision_id" => PUBLICATION_SEARCH_BY_TICKET_REVISION,
+            "experiment_id" => PUBLICATION_SEARCH_BY_EXPERIMENT,
+            "claim_id" => PUBLICATION_SEARCH_BY_CLAIM,
+            "decision_id" => PUBLICATION_SEARCH_BY_DECISION,
+            "office_id" => PUBLICATION_SEARCH_BY_OFFICE,
+            _ => unreachable!("closed publication anchor columns"),
+        };
+        let rows = sqlx::query(sql)
+            .bind(query)
+            .bind(cursor_id)
+            .bind(anchor_id)
+            .bind(owner_office_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(InstitutionalSearchHitResponse {
+                    reference: factory_protocol::InstitutionalReferenceWireV1 {
+                        kind: InstitutionalObjectKind::Publication.as_str().to_owned(),
+                        id: positive(row.try_get("id")?, "publication ID")?,
+                    },
+                    title: row.try_get("title")?,
+                    summary: row.try_get("summary")?,
+                    created_at_micros: micros(row.try_get("created_at_micros")?)?,
                 })
             })
             .collect()
@@ -401,9 +503,19 @@ impl OperatorNavigationRpc {
                    FROM factory.offices WHERE id = $1"
             }
             InstitutionalObjectKind::Publication => {
-                return Err(NavigationRejection::Navigation(
-                    NavigationError::UnsupportedInstitutionalKind { kind },
-                ))
+                "SELECT application_revision_id, authoring_office_id AS owner_office_id,
+                        CASE publication_kind
+                            WHEN 0 THEN 'Finding'
+                            WHEN 1 THEN 'Question'
+                            WHEN 2 THEN 'Challenge'
+                            WHEN 3 THEN 'Correction'
+                            WHEN 4 THEN 'Decision link'
+                            WHEN 5 THEN 'Note'
+                        END AS title,
+                        summary, 0::SMALLINT AS lifecycle, 0::BIGINT AS revision,
+                        floor(extract(epoch FROM created_at) * 1000000)::BIGINT
+                            AS created_at_micros
+                   FROM factory.publications WHERE id = $1"
             }
         };
         let row = sqlx::query(sql)
@@ -1053,8 +1165,6 @@ enum NavigationError {
     InvalidSelector,
     #[error("stored {field} is outside its closed protocol range")]
     Corrupt { field: &'static str },
-    #[error("institutional kind {kind:?} is not available in the current schema")]
-    UnsupportedInstitutionalKind { kind: InstitutionalObjectKind },
     #[error("institutional search limit must be between 1 and 50")]
     InvalidInstitutionalLimit,
 }
@@ -1064,7 +1174,6 @@ impl NavigationError {
         match self {
             Self::NotFound { .. } => "navigation_not_found",
             Self::InvalidSelector => "invalid_audit_selector",
-            Self::UnsupportedInstitutionalKind { .. } => "institutional_kind_unavailable",
             Self::InvalidInstitutionalLimit => "invalid_institutional_navigation",
             Self::Database(_) | Self::Corrupt { .. } => "navigation_unavailable",
         }
@@ -1190,7 +1299,9 @@ fn institutional_lifecycle_name(
         InstitutionalObjectKind::Office => {
             ["active", "paused", "archived"].get(usize::try_from(value).unwrap_or(usize::MAX))
         }
-        InstitutionalObjectKind::Publication => None,
+        InstitutionalObjectKind::Publication => {
+            ["published"].get(usize::try_from(value).unwrap_or(usize::MAX))
+        }
     };
     name.copied().ok_or(NavigationError::Corrupt {
         field: "institutional lifecycle",

@@ -24,6 +24,7 @@ export const INSTITUTIONAL_OBJECT_KINDS = [
   "claim",
   "decision",
   "office",
+  "publication",
 ] as const;
 export type InstitutionalObjectKind = (typeof INSTITUTIONAL_OBJECT_KINDS)[number];
 export interface InstitutionalReferenceV1 {
@@ -35,6 +36,8 @@ export interface InstitutionalSearchInputV1 {
   readonly kind: InstitutionalObjectKind;
   readonly project_id?: number | null;
   readonly owner_office_id?: number | null;
+  /** Publication-only typed discussion projection for an exact object. */
+  readonly anchor?: InstitutionalReferenceV1 | null;
   readonly limit: number;
   readonly cursor?: InstitutionalReferenceV1 | null;
 }
@@ -47,6 +50,148 @@ export interface InstitutionalSearchHitV1 {
 export interface InstitutionalPageV1<T> {
   readonly items: readonly T[];
   readonly next_cursor: InstitutionalReferenceV1 | null;
+}
+
+/** Closed publication kinds are durable discourse semantics, not free-form
+ * Forum labels. */
+export const PUBLICATION_KINDS = [
+  "finding",
+  "question",
+  "challenge",
+  "correction",
+  "decision_link",
+  "note",
+] as const;
+export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
+export type PublicationAnchorKind = Exclude<
+  InstitutionalObjectKind,
+  "experiment_run" | "publication"
+>;
+export interface PublicationAnchorV1 {
+  readonly kind: PublicationAnchorKind;
+  readonly id: number;
+}
+export interface PublicationAttachmentCall {
+  readonly artifact_id: number;
+  readonly label: string;
+}
+export interface PublicationCreateCall {
+  readonly client_command_id: string;
+  readonly anchor: PublicationAnchorV1;
+  readonly kind: PublicationKind;
+  readonly summary: string;
+  readonly body_artifact_id: number;
+  readonly attachments?: readonly PublicationAttachmentCall[];
+  readonly reply_to?: number | null;
+  readonly supersedes?: number | null;
+}
+export interface PublicationReceiptResponse {
+  readonly protocol_version: number;
+  readonly request_id: string;
+  readonly operation: string;
+  readonly audit_id: number;
+  readonly aggregate_revision: number;
+  readonly publication_id: number;
+  readonly was_idempotent_retry: boolean;
+}
+export interface OperatorPublicationCreateCall extends PublicationCreateCall {
+  readonly application_revision_id: number;
+  readonly authoring_office_id: number;
+}
+
+export function validatePublicationCreateCall(
+  value: unknown,
+): asserts value is PublicationCreateCall {
+  validatePublicationCall(value, []);
+}
+
+function validatePublicationCall(value: unknown, additionalFields: readonly string[]): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("invalid publication create: input must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  const allowed = [
+    "client_command_id",
+    "anchor",
+    "kind",
+    "summary",
+    "body_artifact_id",
+    "attachments",
+    "reply_to",
+    "supersedes",
+    ...additionalFields,
+  ];
+  if (
+    Object.keys(input).some((key) => !allowed.includes(key)) ||
+    !["client_command_id", "anchor", "kind", "summary", "body_artifact_id"].every((key) =>
+      key in input
+    )
+  ) {
+    throw new TypeError("invalid publication create: fields are not closed");
+  }
+  if (
+    typeof input.client_command_id !== "string" ||
+    input.client_command_id.length === 0 ||
+    input.client_command_id.length > 160 ||
+    !/^[A-Za-z0-9._:-]+$/u.test(input.client_command_id)
+  ) throw new TypeError("invalid publication create: client command ID is invalid");
+  validateInstitutionalReference(input.anchor, "publication anchor");
+  if (
+    (input.anchor as InstitutionalReferenceV1).kind === "experiment_run" ||
+    (input.anchor as InstitutionalReferenceV1).kind === "publication"
+  ) throw new TypeError("invalid publication create: anchor kind is not publishable");
+  if (
+    typeof input.kind !== "string" || !(PUBLICATION_KINDS as readonly string[]).includes(input.kind)
+  ) {
+    throw new TypeError("invalid publication create: kind is not closed");
+  }
+  if (
+    typeof input.summary !== "string" || input.summary.length === 0 ||
+    new TextEncoder().encode(input.summary).byteLength > 4096 ||
+    /[\u0000\n\r]/u.test(input.summary)
+  ) throw new TypeError("invalid publication create: summary is invalid");
+  for (const field of ["body_artifact_id", "reply_to", "supersedes"] as const) {
+    const candidate = input[field];
+    if (
+      candidate !== undefined && candidate !== null &&
+      (!Number.isSafeInteger(candidate) || (candidate as number) < 1)
+    ) {
+      throw new TypeError(`invalid publication create: ${field} is invalid`);
+    }
+  }
+  const attachments = input.attachments ?? [];
+  if (!Array.isArray(attachments) || attachments.length > 8) {
+    throw new TypeError("invalid publication create: attachments exceed the fixed limit");
+  }
+  const artifacts = new Set<number>([input.body_artifact_id as number]);
+  for (const attachment of attachments) {
+    if (attachment === null || typeof attachment !== "object" || Array.isArray(attachment)) {
+      throw new TypeError("invalid publication create: attachment is invalid");
+    }
+    const record = attachment as Record<string, unknown>;
+    if (
+      Object.keys(record).sort().join(",") !== "artifact_id,label" ||
+      !Number.isSafeInteger(record.artifact_id) || (record.artifact_id as number) < 1 ||
+      typeof record.label !== "string" || record.label.length === 0 ||
+      new TextEncoder().encode(record.label).byteLength > 160 || record.label.includes("\0") ||
+      artifacts.has(record.artifact_id as number)
+    ) {
+      throw new TypeError("invalid publication create: attachment is invalid or repeated");
+    }
+    artifacts.add(record.artifact_id as number);
+  }
+}
+
+export function validateOperatorPublicationCreateCall(
+  value: unknown,
+): asserts value is OperatorPublicationCreateCall {
+  validatePublicationCall(value, ["application_revision_id", "authoring_office_id"]);
+  const input = value as Record<string, unknown>;
+  for (const field of ["application_revision_id", "authoring_office_id"] as const) {
+    if (!Number.isSafeInteger(input[field]) || (input[field] as number) < 1) {
+      throw new TypeError(`invalid operator publication create: ${field} is invalid`);
+    }
+  }
 }
 
 export function validateInstitutionalReference(
@@ -79,8 +224,11 @@ export function validateInstitutionalSearchInputV1(
   }
   const input = value as Record<string, unknown>;
   const keys = Object.keys(input).sort();
-  const allowed = ["cursor", "kind", "limit", "owner_office_id", "project_id", "query"];
-  if (keys.some((key) => !allowed.includes(key)) || !keys.includes("query") || !keys.includes("kind") || !keys.includes("limit")) {
+  const allowed = ["anchor", "cursor", "kind", "limit", "owner_office_id", "project_id", "query"];
+  if (
+    keys.some((key) => !allowed.includes(key)) || !keys.includes("query") ||
+    !keys.includes("kind") || !keys.includes("limit")
+  ) {
     throw new TypeError("invalid institutional search: fields are not closed");
   }
   if (
@@ -90,14 +238,24 @@ export function validateInstitutionalSearchInputV1(
   ) {
     throw new TypeError("invalid institutional search: query is not bounded text");
   }
-  if (!Number.isSafeInteger(input.limit) || (input.limit as number) < 1 || (input.limit as number) > 50) {
+  if (
+    !Number.isSafeInteger(input.limit) || (input.limit as number) < 1 ||
+    (input.limit as number) > 50
+  ) {
     throw new TypeError("invalid institutional search: limit must be between 1 and 50");
   }
-  if (typeof input.kind !== "string" ||
-      !(INSTITUTIONAL_OBJECT_KINDS as readonly string[]).includes(input.kind)) {
+  if (
+    typeof input.kind !== "string" ||
+    !(INSTITUTIONAL_OBJECT_KINDS as readonly string[]).includes(input.kind)
+  ) {
     throw new TypeError("invalid institutional search: kind is not closed");
   }
-  for (const [field, label] of [["project_id", "project ID"], ["owner_office_id", "office ID"]] as const) {
+  for (
+    const [field, label] of [["project_id", "project ID"], [
+      "owner_office_id",
+      "office ID",
+    ]] as const
+  ) {
     const id = input[field];
     if (id !== undefined && id !== null && (!Number.isSafeInteger(id) || (id as number) < 1)) {
       throw new TypeError(`invalid institutional search: ${label} is invalid`);
@@ -107,6 +265,16 @@ export function validateInstitutionalSearchInputV1(
     validateInstitutionalReference(input.cursor, "institutional search cursor");
     if (input.kind !== (input.cursor as InstitutionalReferenceV1).kind) {
       throw new TypeError("invalid institutional search: cursor kind must match kind");
+    }
+  }
+  if (input.anchor !== undefined && input.anchor !== null) {
+    validateInstitutionalReference(input.anchor, "institutional search anchor");
+    const anchor = input.anchor as InstitutionalReferenceV1;
+    if (
+      input.kind !== "publication" || anchor.kind === "experiment_run" ||
+      anchor.kind === "publication"
+    ) {
+      throw new TypeError("invalid institutional search: anchor is not publishable");
     }
   }
 }
@@ -140,11 +308,16 @@ export function validateInstitutionalPageV1<T>(
     throw new FrameProtocolError("invalid_json", "institutional page must be an object");
   }
   const page = value as Record<string, unknown>;
-  if (!("items" in page) || !("next_cursor" in page) || !Array.isArray(page.items) || page.items.length > 50) {
+  if (
+    !("items" in page) || !("next_cursor" in page) || !Array.isArray(page.items) ||
+    page.items.length > 50
+  ) {
     throw new FrameProtocolError("invalid_json", "institutional page is not bounded");
   }
   for (const item of page.items) validateItem(item);
-  if (page.next_cursor !== null) validateInstitutionalReference(page.next_cursor, "institutional next cursor");
+  if (page.next_cursor !== null) {
+    validateInstitutionalReference(page.next_cursor, "institutional next cursor");
+  }
 }
 
 export const OPERATION = {
@@ -174,6 +347,7 @@ export const OPERATION = {
   operatorAuditShow: "operator.audit.show",
   operatorInstitutionalSearch: "operator.institutional.search",
   operatorInstitutionalShow: "operator.institutional.show",
+  operatorPublicationCreate: "operator.publication.create",
   sessionVerifyPacket: "session.verify_packet",
   sessionSealArtifact: "session.seal_artifact",
   sessionSubmitTerminal: "session.submit_terminal",
@@ -181,9 +355,7 @@ export const OPERATION = {
   forumListThreads: "forum.list_threads",
   forumSearch: "forum.search",
   forumReadThread: "forum.read_thread",
-  forumCreateTopic: "forum.create_topic",
-  forumCreateThread: "forum.create_thread",
-  forumPost: "forum.post",
+  publicationCreate: "publication.create",
 } as const;
 
 export type OperationName = (typeof OPERATION)[keyof typeof OPERATION];
@@ -342,6 +514,7 @@ export type ProtocolResponseShape =
   | "audit_show"
   | "institutional_search"
   | "institutional_show"
+  | "publication"
   | "page";
 
 function responseObject(value: unknown, operation: string): Record<string, unknown> {
@@ -876,7 +1049,9 @@ export function validateProtocolResponse(
         for (const field of ["session_id", "assignment_id"]) {
           responseInteger(row, field, expectedOperation);
         }
-        for (const field of ["assignment_role", "model_provider", "model_id", "outcome", "cost_state"]) {
+        for (
+          const field of ["assignment_role", "model_provider", "model_id", "outcome", "cost_state"]
+        ) {
           responseString(row, field, expectedOperation);
         }
         if (
@@ -1035,6 +1210,22 @@ export function validateProtocolResponse(
       responseString(response, "lifecycle", expectedOperation);
       responseInteger(response, "revision", expectedOperation);
       responseInteger(response, "created_at_micros", expectedOperation);
+      break;
+    case "publication":
+      requiredResponseFields(
+        response,
+        ["audit_id", "aggregate_revision", "publication_id", "was_idempotent_retry"],
+        expectedOperation,
+      );
+      responseInteger(response, "audit_id", expectedOperation);
+      responseInteger(response, "aggregate_revision", expectedOperation);
+      responseInteger(response, "publication_id", expectedOperation);
+      if (typeof response.was_idempotent_retry !== "boolean") {
+        throw new FrameProtocolError(
+          "invalid_json",
+          `response for ${expectedOperation} requires publication replay flag`,
+        );
+      }
       break;
   }
 }
@@ -1865,6 +2056,28 @@ export class LocalProtocolClient {
     return await this.#read(OPERATION.operatorInstitutionalShow, call);
   }
 
+  async publicationCreate(call: PublicationCreateCall): Promise<PublicationReceiptResponse> {
+    validatePublicationCreateCall(call);
+    return await this.#mutate(OPERATION.publicationCreate, {
+      ...call,
+      attachments: call.attachments ?? [],
+      reply_to: call.reply_to ?? null,
+      supersedes: call.supersedes ?? null,
+    });
+  }
+
+  async operatorPublicationCreate(
+    call: OperatorPublicationCreateCall,
+  ): Promise<PublicationReceiptResponse> {
+    validateOperatorPublicationCreateCall(call);
+    return await this.#mutate(OPERATION.operatorPublicationCreate, {
+      ...call,
+      attachments: call.attachments ?? [],
+      reply_to: call.reply_to ?? null,
+      supersedes: call.supersedes ?? null,
+    });
+  }
+
   async sessionVerifyPacket(
     call: SessionVerifyPacketCall,
   ): Promise<SessionPacketVerificationResponse> {
@@ -1919,6 +2132,7 @@ export class LocalProtocolClient {
       | AuditShowResponse
       | InstitutionalSearchResponse
       | InstitutionalShowResponse
+      | PublicationReceiptResponse
       | ConflictResponse
       | ErrorResponse
     >(responseFrame, operation, RESPONSE_FRAME_MAX_BYTES);
@@ -1972,6 +2186,9 @@ export class LocalProtocolClient {
         ? "institutional_search"
         : operation === OPERATION.operatorInstitutionalShow
         ? "institutional_show"
+        : operation === OPERATION.publicationCreate ||
+            operation === OPERATION.operatorPublicationCreate
+        ? "publication"
         : "receipt",
     );
     if ("error_code" in response) {

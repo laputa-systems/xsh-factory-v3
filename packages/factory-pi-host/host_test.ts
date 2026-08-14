@@ -129,9 +129,6 @@ Deno.test("model-visible tool descriptors hide control-plane vocabulary", () => 
     "forum_list_topics",
     "forum_list_threads",
     "forum_read_thread",
-    "forum_create_topic",
-    "forum_create_thread",
-    "forum_post",
   ]);
   const forum = createForumTools(new ForumAdapter(noTransport));
   const common = createCommonToolAdapters({

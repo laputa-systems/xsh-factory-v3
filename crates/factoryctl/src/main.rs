@@ -20,17 +20,15 @@ use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, AuditShowResponse, CampaignReceiptResponse,
-    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV1, ForumAttachmentWireV1,
-    ForumCreateThreadRequestV1, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
-    ForumListTopicsRequestV1, ForumPostRequestV1, ForumPostsResponseV1, ForumReadThreadRequestV1,
-    ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1, ForumTopicsResponseV1,
-    OperationReceiptResponse, OperatorApplicationActivateRequest,
-    OperatorApplicationRegisterRequest, OperatorApplicationShowRequest,
-    OperatorArtifactSealReceiptResponse, OperatorArtifactSealRequest, OperatorAuditShowRequest,
-    OperatorCampaignStatusRequest, OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
-    OperatorStartCampaignRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V1, RuntimeRelativePath, SealedArtifactReferenceWireV1, TicketListResponse,
-    TicketShowResponse,
+    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV1,
+    ForumListThreadsRequestV1, ForumListTopicsRequestV1, ForumPostsResponseV1,
+    ForumReadThreadRequestV1, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1,
+    ForumTopicsResponseV1, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
+    OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
+    OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
+    OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorStartCampaignRequest,
+    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1, RuntimeRelativePath,
+    SealedArtifactReferenceWireV1, TicketListResponse, TicketShowResponse,
 };
 
 fn main() -> ExitCode {
@@ -353,71 +351,6 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .await?;
             print_forum_search(&response, connection.json);
-        }
-        CliCommand::ForumCreateTopic {
-            base,
-            name,
-            description,
-        } => {
-            let connection = base.connection.clone();
-            let receipt = OperatorClient::new(connection.socket_path)
-                .forum_create_topic(ForumCreateTopicRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
-                    request_id: forum_request_id("create-topic"),
-                    operation: "forum.create_topic".to_owned(),
-                    client_command_id: base.client_command_id,
-                    expected_revision: base.expected_revision,
-                    name,
-                    description,
-                })
-                .await?;
-            print_forum_receipt(&receipt, connection.json);
-        }
-        CliCommand::ForumCreateThread {
-            base,
-            topic_id,
-            title,
-        } => {
-            let connection = base.connection.clone();
-            let receipt = OperatorClient::new(connection.socket_path)
-                .forum_create_thread(ForumCreateThreadRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
-                    request_id: forum_request_id("create-thread"),
-                    operation: "forum.create_thread".to_owned(),
-                    client_command_id: base.client_command_id,
-                    expected_revision: base.expected_revision,
-                    topic_id,
-                    title,
-                })
-                .await?;
-            print_forum_receipt(&receipt, connection.json);
-        }
-        CliCommand::ForumPost {
-            base,
-            thread_id,
-            kind,
-            body,
-            reply_to,
-            supersedes,
-            attachments,
-        } => {
-            let connection = base.connection.clone();
-            let receipt = OperatorClient::new(connection.socket_path)
-                .forum_post(ForumPostRequestV1 {
-                    protocol_version: PROTOCOL_VERSION_V1,
-                    request_id: forum_request_id("post"),
-                    operation: "forum.post".to_owned(),
-                    client_command_id: base.client_command_id,
-                    expected_revision: base.expected_revision,
-                    thread_id,
-                    kind,
-                    body,
-                    reply_to,
-                    supersedes,
-                    attachments,
-                })
-                .await?;
-            print_forum_receipt(&receipt, connection.json);
         }
     }
     Ok(())
@@ -1201,24 +1134,6 @@ fn print_forum_search(response: &ForumSearchResponseV1, json: bool) {
         }
     }
 }
-fn print_forum_receipt(receipt: &OperationReceiptResponse, json: bool) {
-    if json {
-        println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"audit_id\":{},\"aggregate_revision\":{}}}",
-            receipt.protocol_version,
-            receipt.request_id,
-            receipt.operation,
-            receipt.audit_id,
-            receipt.aggregate_revision
-        );
-    } else {
-        println!(
-            "Forum mutation accepted (revision {}, audit #{})",
-            receipt.aggregate_revision, receipt.audit_id
-        );
-    }
-}
-
 fn optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_owned(), |value| value.to_string())
 }
@@ -1320,13 +1235,6 @@ struct ForumConnectionArgs {
     limit: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ForumMutationArgs {
-    connection: ConnectionArgs,
-    client_command_id: String,
-    expected_revision: u64,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CandidateDecision {
     Deliver,
@@ -1399,25 +1307,6 @@ enum CliCommand {
     ForumSearch {
         base: ForumConnectionArgs,
         query: String,
-    },
-    ForumCreateTopic {
-        base: ForumMutationArgs,
-        name: String,
-        description: String,
-    },
-    ForumCreateThread {
-        base: ForumMutationArgs,
-        topic_id: i64,
-        title: String,
-    },
-    ForumPost {
-        base: ForumMutationArgs,
-        thread_id: i64,
-        kind: u8,
-        body: String,
-        reply_to: Option<i64>,
-        supersedes: Option<i64>,
-        attachments: Vec<ForumAttachmentWireV1>,
     },
 }
 
@@ -1597,13 +1486,10 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
                 let query = values.next().ok_or_else(|| "search query is required".to_owned())?;
                 parse_forum_connection(values.collect()).map(|base| CliCommand::ForumSearch { base, query })
             }
-            Some("create-topic") => parse_forum_create_topic(values.collect()),
-            Some("create-thread") => parse_forum_create_thread(values.collect()),
-            Some("post") => parse_forum_post(values.collect()),
-            _ => Err("expected `forum topics|threads|read|search|create-topic|create-thread|post`".to_owned()),
+            _ => Err("expected `forum topics|threads|read|search`".to_owned()),
         },
         _ => Err(
-            "expected `init`, `daemon status`, application/campaign/ticket/candidate/audit commands, or `forum topics|threads|read|search|create-topic|create-thread|post`"
+            "expected `init`, `daemon status`, application/campaign/ticket/candidate/audit commands, or `forum topics|threads|read|search`"
                 .to_owned(),
         ),
     }
@@ -2085,171 +1971,6 @@ fn parse_forum_read(thread_id: i64, arguments: Vec<String>) -> Result<CliCommand
         thread_id,
         after_post_id,
     })
-}
-
-fn parse_forum_mutation(
-    arguments: Vec<String>,
-) -> Result<(ForumMutationArgs, Vec<(String, String)>), String> {
-    let mut values = arguments.into_iter();
-    let mut socket_path = None;
-    let mut json = false;
-    let mut client_command_id = None;
-    let mut expected_revision = None;
-    let mut remaining = Vec::new();
-    while let Some(flag) = values.next() {
-        match flag.as_str() {
-            "--socket" => set_once(
-                &mut socket_path,
-                PathBuf::from(next_value(&mut values, "--socket")?),
-                "--socket",
-            )?,
-            "--client-command-id" => set_once(
-                &mut client_command_id,
-                next_value(&mut values, "--client-command-id")?,
-                "--client-command-id",
-            )?,
-            "--expected-revision" => set_once(
-                &mut expected_revision,
-                nonnegative_u64(
-                    &next_value(&mut values, "--expected-revision")?,
-                    "--expected-revision",
-                )?,
-                "--expected-revision",
-            )?,
-            "--format" => {
-                let format = next_value(&mut values, "--format")?;
-                if format != "json" || json {
-                    return Err("only one `--format json` is supported".to_owned());
-                }
-                json = true;
-            }
-            _ => remaining.push((flag.clone(), next_value(&mut values, &flag)?)),
-        }
-    }
-    Ok((
-        ForumMutationArgs {
-            connection: ConnectionArgs {
-                socket_path: socket_path.ok_or_else(|| "--socket is required".to_owned())?,
-                json,
-            },
-            client_command_id: client_command_id
-                .ok_or_else(|| "--client-command-id is required".to_owned())?,
-            expected_revision: expected_revision
-                .ok_or_else(|| "--expected-revision is required".to_owned())?,
-        },
-        remaining,
-    ))
-}
-
-fn parse_forum_create_topic(arguments: Vec<String>) -> Result<CliCommand, String> {
-    let (base, fields) = parse_forum_mutation(arguments)?;
-    let mut name = None;
-    let mut description = None;
-    for (flag, value) in fields {
-        match flag.as_str() {
-            "--name" => set_once(&mut name, value, "--name")?,
-            "--description" => set_once(&mut description, value, "--description")?,
-            _ => return Err(format!("unknown flag {flag}")),
-        }
-    }
-    Ok(CliCommand::ForumCreateTopic {
-        base,
-        name: name.ok_or_else(|| "--name is required".to_owned())?,
-        description: description.ok_or_else(|| "--description is required".to_owned())?,
-    })
-}
-
-fn parse_forum_create_thread(arguments: Vec<String>) -> Result<CliCommand, String> {
-    let (base, fields) = parse_forum_mutation(arguments)?;
-    let mut topic_id = None;
-    let mut title = None;
-    for (flag, value) in fields {
-        match flag.as_str() {
-            "--topic-id" => set_once(
-                &mut topic_id,
-                positive_id(&value, "--topic-id")?,
-                "--topic-id",
-            )?,
-            "--title" => set_once(&mut title, value, "--title")?,
-            _ => return Err(format!("unknown flag {flag}")),
-        }
-    }
-    Ok(CliCommand::ForumCreateThread {
-        base,
-        topic_id: topic_id.ok_or_else(|| "--topic-id is required".to_owned())?,
-        title: title.ok_or_else(|| "--title is required".to_owned())?,
-    })
-}
-
-fn parse_forum_post(arguments: Vec<String>) -> Result<CliCommand, String> {
-    let (base, fields) = parse_forum_mutation(arguments)?;
-    let mut thread_id = None;
-    let mut kind = None;
-    let mut body = None;
-    let mut reply_to = None;
-    let mut supersedes = None;
-    let mut attachments = Vec::new();
-    for (flag, value) in fields {
-        match flag.as_str() {
-            "--thread-id" => set_once(
-                &mut thread_id,
-                positive_id(&value, "--thread-id")?,
-                "--thread-id",
-            )?,
-            "--kind" => set_once(&mut kind, forum_post_kind_code(&value)?, "--kind")?,
-            "--body" => set_once(&mut body, value, "--body")?,
-            "--reply-to" => set_once(
-                &mut reply_to,
-                positive_id(&value, "--reply-to")?,
-                "--reply-to",
-            )?,
-            "--supersedes" => set_once(
-                &mut supersedes,
-                positive_id(&value, "--supersedes")?,
-                "--supersedes",
-            )?,
-            "--attachment" => attachments.push(parse_forum_attachment(&value)?),
-            _ => return Err(format!("unknown flag {flag}")),
-        }
-    }
-    Ok(CliCommand::ForumPost {
-        base,
-        thread_id: thread_id.ok_or_else(|| "--thread-id is required".to_owned())?,
-        kind: kind.ok_or_else(|| "--kind is required".to_owned())?,
-        body: body.ok_or_else(|| "--body is required".to_owned())?,
-        reply_to,
-        supersedes,
-        attachments,
-    })
-}
-
-fn parse_forum_attachment(value: &str) -> Result<ForumAttachmentWireV1, String> {
-    let (artifact_id, label) = value
-        .split_once(':')
-        .ok_or_else(|| "--attachment must be <artifact-id>:<label>".to_owned())?;
-    if label.is_empty() || label.contains('\0') {
-        return Err("--attachment label must be nonempty and NUL-free".to_owned());
-    }
-    Ok(ForumAttachmentWireV1 {
-        artifact_id: positive_id(artifact_id, "--attachment artifact ID")?,
-        label: label.to_owned(),
-    })
-}
-
-fn forum_post_kind_code(value: &str) -> Result<u8, String> {
-    match value {
-        "note" => Ok(0),
-        "question" => Ok(1),
-        "finding" => Ok(2),
-        "proposal" => Ok(3),
-        "challenge" => Ok(4),
-        "correction" => Ok(5),
-        "decision_link" => Ok(6),
-        _ => Err(
-            "--kind must be note|question|finding|proposal|challenge|correction|decision_link"
-                .to_owned(),
-        ),
-    }
 }
 
 fn parse_application_show(
@@ -2876,7 +2597,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl init --database-url <url> --runtime-root <absolute-path> [--installation-root <absolute-path>] [--factoryd <absolute-path>] [--provider-credential-environment openrouter=<UPPERCASE_ENVIRONMENT_NAME>]\n  factoryctl daemon status --socket <path> [--format json]\n  factoryctl application show <key> [--application-revision-id <id>] --socket <path> [--format json]\n  factoryctl application register --socket <path> --client-command-id <id> --expected-revision <application-revision> --expected-kernel-build-revision <build-revision> --kernel-build-id <blake3> --source-root <absolute-path> --bundle-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl application activate <key> <revision-id> --socket <path> --client-command-id <id> --expected-revision <application-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl artifact seal --socket <path> --client-command-id <id> --expected-kernel-build-revision <revision> --source-root <absolute-path> --source-relative-path <safe-relative-path> --principal <name> [--format json]\n  factoryctl campaign start --application-revision-id <id> --expected-application-revision <revision> --aggregate-budget-micro-usd <amount> --deadline-unix-millis <millis> --delivery-target <count> --socket <path> --client-command-id <id> --principal <name> [--format json]\n  factoryctl campaign status <id> --socket <path> [--format json]\n  factoryctl campaign cancel <id> --socket <path> --client-command-id <id> --expected-revision <revision> --principal <name> [--format json]\n  factoryctl ticket list [--state proposed|sponsored|in_flight|delivered|blocked|resolved|superseded|rejected] --socket <path> [--format json]\n  factoryctl ticket show <id> --socket <path> [--format json]\n  factoryctl ticket sponsor <revision> --socket <path> --client-command-id <id> --expected-revision <revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl ticket release <attempt> --socket <path> --client-command-id <id> --expected-revision <attempt-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--format json]\n  factoryctl candidate show <id> --socket <path> [--format json]\n  factoryctl candidate decide <candidate> --review-id <review> --deliver|--rework|--reject --socket <path> --client-command-id <id> --expected-revision <candidate-revision> --rationale-artifact-id <id> --rationale-digest <blake3> --rationale-byte-length <bytes> --principal <name> [--quality-rejection-override-review-id <review>] [--format json]\n  factoryctl audit show ticket:<id>|candidate:<id>|campaign:<id>|application-revision:<id>|audit:<id> --socket <path> [--format json]\n  factoryctl forum topics [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum threads <topic-id> [--cursor <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum read <thread-id> [--after-post <id>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum search <query> [--cursor <opaque>] [--limit 1..20] --socket <path> [--format json]\n  factoryctl forum create-topic --name <name> --description <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum create-thread --topic-id <id> --title <text> --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]\n  factoryctl forum post --thread-id <id> --kind note|question|finding|proposal|challenge|correction|decision_link --body <text> [--reply-to <post-id>] [--supersedes <post-id>] [--attachment <artifact-id>:<label>]... --socket <path> --client-command-id <id> --expected-revision <revision> [--format json]"
+    "usage:\n  factoryctl <init|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl forum <topics|threads|read|search> ... (legacy reads only)"
 }
 
 #[cfg(test)]
@@ -3377,23 +3098,6 @@ mod tests {
             ])
             .is_err()
         );
-        assert!(matches!(
-            parse_args(vec![
-                "forum".to_owned(),
-                "create-topic".to_owned(),
-                "--name".to_owned(),
-                "updates".to_owned(),
-                "--description".to_owned(),
-                "bounded".to_owned(),
-                "--socket".to_owned(),
-                "/tmp/factory.sock".to_owned(),
-                "--client-command-id".to_owned(),
-                "forum-topic-1".to_owned(),
-                "--expected-revision".to_owned(),
-                "0".to_owned(),
-            ]),
-            Ok(CliCommand::ForumCreateTopic { .. })
-        ));
         assert!(
             parse_args(vec![
                 "forum".to_owned(),

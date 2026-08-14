@@ -28,20 +28,19 @@ use factory_protocol::{
     ArchitectReleaseTicketAttemptRequest, ArchitectSponsorTicketRevisionRequest, AssignmentId,
     AssignmentRole, AuditShowResponse, CampaignId, CampaignReceiptResponse, CampaignStatusResponse,
     CandidateShowResponse, ConflictResponse, ErrorResponse, FRAME_PREFIX_BYTES,
-    ForumCreateThreadRequestV1, ForumCreateTopicRequestV1, ForumListThreadsRequestV1,
-    ForumListTopicsRequestV1, ForumPostRequestV1, ForumPostsResponseV1, ForumReadThreadRequestV1,
-    ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1, ForumTopicsResponseV1,
-    FrameError, InstitutionalSearchResponse, InstitutionalShowResponse, OperationReceiptResponse,
+    ForumListThreadsRequestV1, ForumListTopicsRequestV1, ForumPostsResponseV1,
+    ForumReadThreadRequestV1, ForumSearchRequestV1, ForumSearchResponseV1, ForumThreadsResponseV1,
+    ForumTopicsResponseV1, FrameError, InstitutionalSearchResponse, InstitutionalShowResponse,
     OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
-    OperatorStartCampaignRequest, OperatorStatusRequest, OperatorStatusResponse,
-    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V1,
-    REQUEST_FRAME_MAX_BYTES, RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId,
-    TicketListResponse, TicketShowResponse, decode_frame, decode_json_frame,
-    decode_routing_envelope, encode_frame, encode_json_frame,
+    OperatorPublicationCreateRequest, OperatorStartCampaignRequest, OperatorStatusRequest,
+    OperatorStatusResponse, OperatorTicketListRequest, OperatorTicketShowRequest,
+    PROTOCOL_VERSION_V1, PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES,
+    RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId, TicketListResponse, TicketShowResponse,
+    decode_frame, decode_json_frame, decode_routing_envelope, encode_frame, encode_json_frame,
 };
 use miniserde::{Serialize, json};
 use rustix::{
@@ -68,6 +67,9 @@ use crate::{
     operator_forum_rpc::{OperatorForumRpc, OperatorForumRpcError},
     operator_navigation::{
         OperatorNavigationCapability, OperatorNavigationRpc, OperatorNavigationRpcError,
+    },
+    operator_publication_rpc::{
+        OperatorPublicationCapability, OperatorPublicationRpc, OperatorPublicationRpcError,
     },
     operator_rpc::{
         ArchitectTransitionResolver, CampaignOperatorRpc, CampaignOperatorRpcError,
@@ -719,9 +721,20 @@ impl OperatorClient {
             .await
     }
 
-    /// Browses permanent Forum state through the same local operator socket.
-    /// Read methods never create a receipt; mutation attribution is supplied
-    /// solely by daemon-side operator capability.
+    /// Creates one immutable publication from the authenticated local
+    /// operator socket. The selected office is verified against the supplied
+    /// application revision by the kernel; no session provenance is accepted.
+    pub async fn create_operator_publication(
+        &self,
+        request: OperatorPublicationCreateRequest,
+    ) -> Result<PublicationReceiptResponse, LocalTransportError> {
+        self.application_exchange(&request, factory_protocol::OP_OPERATOR_PUBLICATION_CREATE)
+            .await
+    }
+
+    /// Browses legacy Forum state through the same local operator socket.
+    /// Forum writes are intentionally absent: new durable discussion facts
+    /// must use an anchored institutional publication.
     pub async fn forum_list_topics(
         &self,
         request: ForumListTopicsRequestV1,
@@ -750,28 +763,6 @@ impl OperatorClient {
         self.application_exchange(&request, factory_protocol::OP_FORUM_SEARCH)
             .await
     }
-    pub async fn forum_create_topic(
-        &self,
-        request: ForumCreateTopicRequestV1,
-    ) -> Result<OperationReceiptResponse, LocalTransportError> {
-        self.application_exchange(&request, factory_protocol::OP_FORUM_CREATE_TOPIC)
-            .await
-    }
-    pub async fn forum_create_thread(
-        &self,
-        request: ForumCreateThreadRequestV1,
-    ) -> Result<OperationReceiptResponse, LocalTransportError> {
-        self.application_exchange(&request, factory_protocol::OP_FORUM_CREATE_THREAD)
-            .await
-    }
-    pub async fn forum_post(
-        &self,
-        request: ForumPostRequestV1,
-    ) -> Result<OperationReceiptResponse, LocalTransportError> {
-        self.application_exchange(&request, factory_protocol::OP_FORUM_POST)
-            .await
-    }
-
     async fn architect_exchange<T: Serialize>(
         &self,
         request: &T,
@@ -1095,6 +1086,7 @@ pub struct LocalDaemon {
     navigation_rpc: Option<OperatorNavigationRpc>,
     artifact_rpc: Option<OperatorArtifactRpc>,
     forum_rpc: Option<OperatorForumRpc>,
+    publication_rpc: Option<OperatorPublicationRpc>,
     active_sessions: ActiveSessionCancellationRegistry,
 }
 
@@ -1118,6 +1110,7 @@ impl LocalDaemon {
             navigation_rpc: None,
             artifact_rpc: None,
             forum_rpc: None,
+            publication_rpc: None,
             active_sessions: ActiveSessionCancellationRegistry::default(),
         })
     }
@@ -1209,6 +1202,21 @@ impl LocalDaemon {
         self
     }
 
+    /// Enables the one local-operator publication command. The operator
+    /// remains a distinct authority from an actor: it may deliberately select
+    /// an active durable office, but cannot fabricate actor session provenance.
+    #[must_use]
+    pub fn with_publication_control(
+        mut self,
+        publications: crate::publication_store::PublicationStore,
+    ) -> Self {
+        self.publication_rpc = Some(OperatorPublicationRpc::from_operator_transport(
+            OperatorPublicationCapability::from_operator_transport(),
+            publications,
+        ));
+        self
+    }
+
     /// Composes trusted resolver inputs for release/final decisions. The
     /// resolver must use kernel-owned reads and command runners, never actor
     /// payload fields. Sponsorship does not need this seam.
@@ -1297,6 +1305,7 @@ impl LocalDaemon {
             let navigation_router = self.navigation_rpc.clone();
             let artifact_router = self.artifact_rpc.clone();
             let forum_router = self.forum_rpc.clone();
+            let publication_router = self.publication_rpc.clone();
             let status_store = self.status_store.clone();
             smol::spawn(async move {
                 if let Err(error) = serve_operator_connection(
@@ -1311,6 +1320,7 @@ impl LocalDaemon {
                     navigation_router,
                     artifact_router,
                     forum_router,
+                    publication_router,
                 )
                 .await
                 {
@@ -1337,6 +1347,7 @@ impl LocalDaemon {
             self.navigation_rpc.clone(),
             self.artifact_rpc.clone(),
             self.forum_rpc.clone(),
+            self.publication_rpc.clone(),
         )
         .await
     }
@@ -1436,6 +1447,9 @@ pub enum LocalTransportError {
     #[error("operator artifact control was not configured for this daemon")]
     OperatorArtifactControlUnavailable,
 
+    #[error("operator publication control was not configured for this daemon")]
+    OperatorPublicationControlUnavailable,
+
     #[error("read-only navigation control was not configured for this daemon")]
     NavigationControlUnavailable,
 
@@ -1485,6 +1499,14 @@ impl From<ApplicationOperatorRpcError> for LocalTransportError {
 
 impl From<OperatorArtifactRpcError> for LocalTransportError {
     fn from(error: OperatorArtifactRpcError) -> Self {
+        Self::OperatorRpc {
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<OperatorPublicationRpcError> for LocalTransportError {
+    fn from(error: OperatorPublicationRpcError) -> Self {
         Self::OperatorRpc {
             message: error.to_string(),
         }
@@ -1688,6 +1710,7 @@ async fn serve_operator_connection(
     navigation_rpc: Option<OperatorNavigationRpc>,
     artifact_rpc: Option<OperatorArtifactRpc>,
     forum_rpc: Option<OperatorForumRpc>,
+    publication_rpc: Option<OperatorPublicationRpc>,
 ) -> Result<(), LocalTransportError> {
     let request = read_stream_frame(&mut stream, REQUEST_FRAME_MAX_BYTES, read_deadline)
         .await?
@@ -1837,13 +1860,29 @@ async fn serve_operator_connection(
             )
             .await
         }
+        factory_protocol::OP_OPERATOR_PUBLICATION_CREATE => {
+            let router = publication_rpc
+                .ok_or(LocalTransportError::OperatorPublicationControlUnavailable)?;
+            let response = with_operation_deadline(operation_deadline, async move {
+                router
+                    .dispatch(&request)
+                    .await
+                    .map_err(LocalTransportError::from)
+            })
+            .await?;
+            validate_response_json(&response)?;
+            write_stream_frame(
+                &mut stream,
+                &response,
+                RESPONSE_FRAME_MAX_BYTES,
+                write_deadline,
+            )
+            .await
+        }
         factory_protocol::OP_FORUM_LIST_TOPICS
         | factory_protocol::OP_FORUM_LIST_THREADS
         | factory_protocol::OP_FORUM_SEARCH
-        | factory_protocol::OP_FORUM_READ_THREAD
-        | factory_protocol::OP_FORUM_CREATE_TOPIC
-        | factory_protocol::OP_FORUM_CREATE_THREAD
-        | factory_protocol::OP_FORUM_POST => {
+        | factory_protocol::OP_FORUM_READ_THREAD => {
             let router = forum_rpc.ok_or(LocalTransportError::ForumControlUnavailable)?;
             let response = with_operation_deadline(operation_deadline, async move {
                 router
@@ -2114,6 +2153,7 @@ mod tests {
                     runtime.config.read_deadline,
                     runtime.config.operation_deadline,
                     runtime.config.write_deadline,
+                    None,
                     None,
                     None,
                     None,

@@ -16,9 +16,7 @@ export type ActorToolV1 =
   | "forum_list_topics"
   | "forum_list_threads"
   | "forum_read_thread"
-  | "forum_create_topic"
-  | "forum_create_thread"
-  | "forum_post"
+  | "publication_create"
   | "artifact_seal"
   | "artifact_read"
   | "product_submit_ticket"
@@ -193,9 +191,7 @@ const tools: readonly ActorToolV1[] = [
   "forum_list_topics",
   "forum_list_threads",
   "forum_read_thread",
-  "forum_create_topic",
-  "forum_create_thread",
-  "forum_post",
+  "publication_create",
   "artifact_seal",
   "artifact_read",
   "product_submit_ticket",
@@ -324,7 +320,11 @@ function assignmentRoleProfiles(
       fail("application.assignment_role_profiles must have one of each fixed assignment role");
     }
     known.add(profile.assignment_role);
-    template(profile.system_template, "assignment-role profile.system_template", requireTemplateDigests);
+    template(
+      profile.system_template,
+      "assignment-role profile.system_template",
+      requireTemplateDigests,
+    );
     template(
       profile.assignment_template,
       "assignment-role profile.assignment_template",
