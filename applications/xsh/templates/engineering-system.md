@@ -48,6 +48,17 @@ error)` path exactly once before returning the terminal failure. Preserve the or
 span, cause, and deterministic item index. Cover both the traced/single-worker path and the
 ordinary multi-worker path; do not make one execution mode silently turn an error into a list.
 
+Keep the two error domains distinct. A Rust `Err(RuntimeError)` from evaluator execution is an
+out-of-band terminal failure and must reach the coordinating evaluator as described above. By
+contrast, `LoweredValue::ResultErr` is an XSH language value: it is in-band output from a block
+that returned `Result::Err` without `?`. Preserve that value unchanged as
+`Ok(LoweredValue::ResultErr(value))`; do not turn it into a Rust `Err`, a diagnostic, or an empty
+list. `tests/xsh/par-map-result.xsh::test_par_map_collect_all` is the canonical guard: its
+`safe_div` error stays in the four-item output while the non-error rows remain usable. The direct
+indexing reproducer is a Rust evaluator failure, so it must still terminate with status 3. Run that
+collect-all test through the native runtime gate as well as the exact reproducer and full suite;
+do not submit while either contract fails.
+
 The nearest behavioral test is `tests/xsh/stdlib/streams.xsh`,
 `test_stream_errors_include_trace_context`. Its current `par-map` assertions describe the defect,
 not the desired contract. Change it into regression coverage that requires status 3,

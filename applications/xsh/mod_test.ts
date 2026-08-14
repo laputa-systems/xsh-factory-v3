@@ -45,7 +45,7 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
   assertBytesEqual(first.canonical_bytes, second.canonical_bytes, "canonical bundle");
   if (
     first.bundle.predecessor_bundle !==
-      "4621be39e92cd9338dacb40f207e374bb66dfac1cd8713b85454e0e9beb074d4"
+      "ce969a831f49ab66f652e11541136323c734243382b94124d76b02ba2aaffab4"
   ) {
     throw new Error("the current XSH declaration must pin its admitted predecessor bundle");
   }
@@ -192,6 +192,18 @@ Deno.test("XSH worker templates are neutral and compile deterministically", asyn
       [
         "direct reproducer proof before submission",
         /Do not submit if the exact direct command still exits 0/u,
+      ],
+      [
+        "in-band par-map ResultErr values",
+        /`LoweredValue::ResultErr` is an XSH language value: it is in-band output/u,
+      ],
+      [
+        "exact ResultErr preservation",
+        /Preserve that value unchanged as\s+`Ok\(LoweredValue::ResultErr\(value\)\)`/u,
+      ],
+      [
+        "collect-all regression gate",
+        /`tests\/xsh\/par-map-result\.xsh::test_par_map_collect_all` is the canonical guard/u,
       ],
     ] as const
   ) {
