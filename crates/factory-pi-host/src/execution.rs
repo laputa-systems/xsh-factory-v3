@@ -13,7 +13,8 @@ use crate::tool_bridge::{
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
 use pi_agent_core::event::{AgentEvent, AgentEventKind};
-use pi_agent_core::hooks::NoHooks;
+use pi_agent_core::hooks::HookSet;
+use pi_agent_core::provider::openai::OpenAiContextHook;
 use pi_agent_core::scheduler::ModelProvider;
 use pi_agent_core::state::{ModelDescriptor, RunSnapshot, StopReason};
 use pi_agent_core::tool::ToolRegistry;
@@ -193,10 +194,7 @@ impl ExecutionInput {
             .thinking_level(snapshot.thinking_level)
             .tools(registry)
             .model_provider(self.provider)
-            .hooks(Arc::new(LuaPolicyHookSet::new(
-                Arc::clone(&policy),
-                Arc::new(NoHooks),
-            )));
+            .hooks(factory_hook_set(Arc::clone(&policy)));
         for message in snapshot.host_messages {
             builder = builder.host_message(message);
         }
@@ -208,6 +206,10 @@ impl ExecutionInput {
             _policy: policy,
         })
     }
+}
+
+fn factory_hook_set(policy: Arc<LuaPolicy>) -> Arc<dyn HookSet> {
+    Arc::new(LuaPolicyHookSet::new(policy, Arc::new(OpenAiContextHook)))
 }
 
 /// Assemble the normal Factory capability and execution input for the FD 0 host integration.
@@ -522,7 +524,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pi_agent_core::hooks::ContextEnvelope;
     use pi_agent_core::scheduler::CancellationToken;
+    use pi_agent_core::state::{Message, MessageId};
     use pi_agent_luau::tool_handler::{
         CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
     };
@@ -584,6 +588,35 @@ mod tests {
         )
         .expect("handler is explicitly bound");
         assert_eq!(registry.names().collect::<Vec<_>>(), vec!["work_complete"]);
+    }
+
+    #[test]
+    fn factory_hooks_convert_context_to_provider_json() {
+        let converted = factory_hook_set(Arc::new(policy(true)))
+            .convert_to_llm(ContextEnvelope {
+                version: 1,
+                messages: vec![Message::User {
+                    id: MessageId(1),
+                    content: "hello".to_owned(),
+                }],
+                host_messages: Vec::new(),
+            })
+            .expect("factory provider hook converts retained messages");
+
+        let messages = pi_agent_protocol::JsonValue::parse(&converted)
+            .expect("factory provider context is valid JSON");
+        let message = messages
+            .as_array()
+            .and_then(|messages| messages.first())
+            .expect("factory provider context contains one message");
+        assert_eq!(
+            message.get("role").and_then(JsonValue::as_str),
+            Some("user")
+        );
+        assert_eq!(
+            message.get("content").and_then(JsonValue::as_str),
+            Some("hello")
+        );
     }
 
     #[test]
