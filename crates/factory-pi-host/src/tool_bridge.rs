@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The sole capability name used by daemon-bound policy handlers.
@@ -239,6 +239,7 @@ pub struct CommandContext {
     /// Expected aggregate revision for the current actor connection.
     session_revision: Arc<AtomicU64>,
     next_command_id: Arc<AtomicU64>,
+    product_submission_rejected: Arc<AtomicBool>,
 }
 
 impl CommandContext {
@@ -247,6 +248,7 @@ impl CommandContext {
         Self {
             session_revision: Arc::new(AtomicU64::new(session_revision)),
             next_command_id: Arc::new(AtomicU64::new(0)),
+            product_submission_rejected: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -263,6 +265,20 @@ impl CommandContext {
     fn next_command_id(&self, tool: ToolName) -> String {
         let ordinal = self.next_command_id.fetch_add(1, Ordering::Relaxed) + 1;
         format!("actor-{}-{ordinal}", tool.as_str())
+    }
+
+    fn mark_product_submission_rejected(&self) {
+        self.product_submission_rejected
+            .store(true, Ordering::Release);
+    }
+
+    fn clear_product_submission_rejected(&self) {
+        self.product_submission_rejected
+            .store(false, Ordering::Release);
+    }
+
+    fn product_submission_rejected(&self) -> bool {
+        self.product_submission_rejected.load(Ordering::Acquire)
     }
 }
 
@@ -537,6 +553,11 @@ where
 
         let payload = normalize_wire_input(name, request.arguments, &self.command_context)
             .map_err(|error| CapabilityError::InvalidArguments { message: error })?;
+        if name == ToolName::WorkComplete && self.command_context.product_submission_rejected() {
+            return Err(CapabilityError::Execution {
+                message: "The previous Product ticket submission was rejected. Repair and resubmit a valid proposal or continue the investigation; work_complete is not available yet.".into(),
+            });
+        }
         if name.defers_without_daemon() {
             self.terminal
                 .defer(name, payload)
@@ -552,18 +573,28 @@ where
             });
         }
         let value = if let Some(operation) = name.daemon_operation() {
-            let value = self
-                .daemon
-                .call(operation, payload.clone())
-                .await
-                .map_err(|error| CapabilityError::Execution {
-                    message: task_diagnostic(name, &error.to_string()),
-                })?;
-            validate_daemon_response(operation, &value).map_err(|error| {
-                CapabilityError::Execution {
-                    message: task_diagnostic(name, &error),
+            let value = match self.daemon.call(operation, payload.clone()).await {
+                Ok(value) => value,
+                Err(error) => {
+                    if name == ToolName::ProductSubmitTicket {
+                        self.command_context.mark_product_submission_rejected();
+                    }
+                    return Err(CapabilityError::Execution {
+                        message: task_diagnostic(name, &error.to_string()),
+                    });
                 }
-            })?;
+            };
+            if let Err(error) = validate_daemon_response(operation, &value) {
+                if name == ToolName::ProductSubmitTicket {
+                    self.command_context.mark_product_submission_rejected();
+                }
+                return Err(CapabilityError::Execution {
+                    message: task_diagnostic(name, &error),
+                });
+            }
+            if name == ToolName::ProductSubmitTicket {
+                self.command_context.clear_product_submission_rejected();
+            }
             if matches!(
                 operation,
                 "artifact.seal_workspace_file" | "session.seal_artifact"
@@ -1409,5 +1440,15 @@ mod tests {
         assert!(diagnostic.contains("continue the bounded investigation"));
         assert!(diagnostic.contains("do not call work_complete"));
         assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn rejected_product_submission_blocks_work_complete_until_repaired() {
+        let context = CommandContext::new(1);
+        assert!(!context.product_submission_rejected());
+        context.mark_product_submission_rejected();
+        assert!(context.product_submission_rejected());
+        context.clear_product_submission_rejected();
+        assert!(!context.product_submission_rejected());
     }
 }
