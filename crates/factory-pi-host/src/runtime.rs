@@ -253,6 +253,7 @@ fn object_field_kind(kind: ObjectKind, field: &str) -> Option<ObjectKind> {
             ObjectKind::Reproducer,
             "expected_observation" | "first_observation" | "second_observation",
         ) => Some(ObjectKind::Observation),
+        (ObjectKind::Observation, "stdout" | "stderr") => Some(ObjectKind::SealedArtifactReference),
         _ => None,
     }
 }
@@ -690,7 +691,7 @@ mod tests {
     use factory_protocol::{
         InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2, PublicationAttachmentWireV2,
         PublicationCreateRequest, REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest,
-        decode_operation_request, encode_frame,
+        decode_operation_request, decode_product_submit_ticket_request_v2, encode_frame,
     };
     use pi_agent_protocol::{JsonNumber, JsonValue};
 
@@ -780,5 +781,88 @@ mod tests {
             supersedes: None,
         });
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn request_json_orders_nested_product_observation_references() {
+        let sealed = |artifact_id| {
+            JsonValue::object([
+                (
+                    "artifact_id",
+                    JsonValue::Number(JsonNumber::Unsigned(artifact_id)),
+                ),
+                ("digest", JsonValue::String("a".repeat(64))),
+                ("byte_length", JsonValue::Number(JsonNumber::Unsigned(0))),
+            ])
+        };
+        let observation = |stdout_id, stderr_id| {
+            JsonValue::object([
+                ("exit_status", JsonValue::Number(JsonNumber::Signed(0))),
+                ("stdout", sealed(stdout_id)),
+                ("stderr", sealed(stderr_id)),
+            ])
+        };
+        let actual = request_json(
+            "product.submit_ticket",
+            "factory-pi-host-request-1",
+            JsonValue::object([
+                (
+                    "client_command_id",
+                    JsonValue::String("product-command".to_owned()),
+                ),
+                (
+                    "expected_revision",
+                    JsonValue::Number(JsonNumber::Unsigned(0)),
+                ),
+                ("title", JsonValue::String("title".to_owned())),
+                ("mission_value", JsonValue::String("mission".to_owned())),
+                ("scope", JsonValue::String("scope".to_owned())),
+                ("contract_owner", JsonValue::String("owner".to_owned())),
+                ("risk", JsonValue::String("risk".to_owned())),
+                ("narrative", sealed(1)),
+                ("evidence", sealed(2)),
+                (
+                    "acceptance_criteria",
+                    JsonValue::Array(vec![JsonValue::String("criterion".to_owned())]),
+                ),
+                (
+                    "contract_reads",
+                    JsonValue::Array(vec![JsonValue::object([
+                        ("path", JsonValue::String("AGENTS.md".to_owned())),
+                        ("reason", JsonValue::String("reason".to_owned())),
+                    ])]),
+                ),
+                (
+                    "duplicate_search",
+                    JsonValue::object([
+                        ("query", JsonValue::String("query".to_owned())),
+                        ("limit", JsonValue::Number(JsonNumber::Unsigned(1))),
+                    ]),
+                ),
+                (
+                    "reproducer_profile",
+                    JsonValue::String("xsh_program_reproducer".to_owned()),
+                ),
+                (
+                    "reproducer",
+                    JsonValue::object([
+                        (
+                            "comparison_rule_version",
+                            JsonValue::Number(JsonNumber::Unsigned(1)),
+                        ),
+                        ("command", sealed(3)),
+                        ("stdin", JsonValue::Null),
+                        ("expected_observation", observation(4, 5)),
+                        ("first_observation", observation(6, 7)),
+                        ("second_observation", observation(8, 9)),
+                    ]),
+                ),
+            ]),
+        )
+        .expect("canonical product request");
+        let frame = encode_frame(actual.as_bytes(), REQUEST_FRAME_MAX_BYTES)
+            .expect("encode product request");
+        decode_product_submit_ticket_request_v2(&frame)
+            .expect("daemon accepts canonical product request");
     }
 }
