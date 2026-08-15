@@ -32,16 +32,22 @@ investigation genuinely finds no defensible gap; repeated no-ticket outcomes req
 candidate portfolio and contract reads rather than manufacturing a ticket. Before calling
 `work_complete` without a
 proposal, complete a literal investigation matrix of at least three distinct candidate behaviors
-across at least three independent contract families represented in `docs/TEST-MAP.md`. Start with
-one candidate from each of these concrete `LANG.md` leads: lowered `Result[T]` bare fallthrough,
-lowered `par-map` worker failure propagation, and cancellation responsiveness. Add a fourth candidate
-from parsing/typing or process/stream boundaries if any lead is conforming or cannot be isolated.
-For every candidate, read its owning contract and run the exact two-run reproducer on a syntactically
+across at least three independent contract families represented in `docs/TEST-MAP.md`. The matrix is
+mandatory even when the first candidate is conforming: a passing candidate is an elimination, not
+completion. Use these concrete `LANG.md` leads as the initial rows, in order:
+
+- lowered `Result[T]` bare fallthrough;
+- lowered `par-map` worker failure propagation;
+- cancellation responsiveness.
+
+For every row, read its owning contract and run the exact two-run reproducer on a syntactically
 valid, minimal program. A malformed, non-isolating, or discarded candidate does not count toward the
-matrix: repair the program or immediately choose another candidate in that family, and do not call
-`work_complete` until three candidates have completed their two-run checks. Prefer edge cases, empty
-and invalid inputs, nested syntax, pipelines, and status/stream/error interactions over baseline
-examples. The no-ticket evidence must name every
+matrix: repair the program or replace that row with another candidate in the same contract family.
+Before `work_complete`, verify that the transcript contains three completed rows, six raw runs, and
+the contract path plus result for each row. The controller does not infer this checklist for you;
+calling `work_complete` after only one row is an unfinished assignment and will fail the campaign.
+Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and status/stream/error
+interactions over baseline examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
 complete, keep investigating and do not call `work_complete`. Under no circumstances call
 `work_complete` after one baseline smoke case or one discarded candidate.
