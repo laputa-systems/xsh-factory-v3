@@ -166,10 +166,26 @@ fn request_field_names(operation: &str) -> Option<&'static [&'static str]> {
             "regression_command",
             "expected_failure",
         ],
+        "candidate.submit" => &[
+            "client_command_id",
+            "expected_revision",
+            "commit_subject",
+            "commit_body",
+            "regression_test_identity",
+        ],
         "quality.run_full_suite" => &[
             "client_command_id",
             "expected_revision",
             "validation_profile",
+        ],
+        "quality.submit_review" => &[
+            "client_command_id",
+            "expected_revision",
+            "full_suite_validation_id",
+            "verdict",
+            "rationale",
+            "risks",
+            "additional_probes",
         ],
         "publication.create" => &[
             "client_command_id",
@@ -229,6 +245,9 @@ fn object_fields(kind: ObjectKind) -> &'static [&'static str] {
 fn request_object_kind(operation: &str, field: &str) -> Option<ObjectKind> {
     match (operation, field) {
         ("product.submit_ticket", "narrative" | "evidence") => {
+            Some(ObjectKind::SealedArtifactReference)
+        }
+        ("quality.submit_review", "rationale" | "risks" | "additional_probes") => {
             Some(ObjectKind::SealedArtifactReference)
         }
         ("product.submit_ticket", "duplicate_search") => Some(ObjectKind::DuplicateSearch),
@@ -689,9 +708,10 @@ fn io_error(error: io::Error) -> DaemonError {
 mod tests {
     use super::request_json;
     use factory_protocol::{
-        InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2, PublicationAttachmentWireV2,
-        PublicationCreateRequest, REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest,
-        decode_operation_request, decode_product_submit_ticket_request_v2, encode_frame,
+        CandidateSubmitRequest, InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2,
+        PublicationAttachmentWireV2, PublicationCreateRequest, QualitySubmitReviewRequest,
+        REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest, decode_operation_request,
+        decode_product_submit_ticket_request_v2, encode_frame,
     };
     use pi_agent_protocol::{JsonNumber, JsonValue};
 
@@ -724,6 +744,87 @@ mod tests {
             "session.verify_packet",
         )
         .expect("daemon accepts canonical request");
+    }
+
+    #[test]
+    fn request_json_supports_terminal_service_payloads() {
+        let candidate = request_json(
+            "candidate.submit",
+            "factory-pi-host-request-1",
+            JsonValue::object([
+                (
+                    "client_command_id",
+                    JsonValue::String("candidate-command".to_owned()),
+                ),
+                (
+                    "expected_revision",
+                    JsonValue::Number(JsonNumber::Unsigned(4)),
+                ),
+                (
+                    "commit_subject",
+                    JsonValue::String("Fix redirection".to_owned()),
+                ),
+                (
+                    "commit_body",
+                    JsonValue::String("Preserve the structured error.".to_owned()),
+                ),
+                (
+                    "regression_test_identity",
+                    JsonValue::String("reproducer".to_owned()),
+                ),
+            ]),
+        )
+        .expect("canonical candidate request");
+        let candidate_frame = encode_frame(candidate.as_bytes(), REQUEST_FRAME_MAX_BYTES)
+            .expect("encode candidate request");
+        decode_operation_request::<CandidateSubmitRequest>(
+            &candidate_frame,
+            REQUEST_FRAME_MAX_BYTES,
+            "candidate.submit",
+        )
+        .expect("daemon accepts candidate request");
+
+        let sealed = |artifact_id| {
+            JsonValue::object([
+                (
+                    "artifact_id",
+                    JsonValue::Number(JsonNumber::Unsigned(artifact_id)),
+                ),
+                ("digest", JsonValue::String("a".repeat(64))),
+                ("byte_length", JsonValue::Number(JsonNumber::Unsigned(0))),
+            ])
+        };
+        let review = request_json(
+            "quality.submit_review",
+            "factory-pi-host-request-2",
+            JsonValue::object([
+                (
+                    "client_command_id",
+                    JsonValue::String("quality-command".to_owned()),
+                ),
+                (
+                    "expected_revision",
+                    JsonValue::Number(JsonNumber::Unsigned(7)),
+                ),
+                (
+                    "full_suite_validation_id",
+                    JsonValue::Number(JsonNumber::Unsigned(11)),
+                ),
+                ("verdict", JsonValue::String("accept".to_owned())),
+                ("rationale", sealed(12)),
+                ("risks", sealed(13)),
+                ("additional_probes", sealed(14)),
+            ]),
+        )
+        .expect("canonical Quality review request");
+        let review_frame = encode_frame(review.as_bytes(), REQUEST_FRAME_MAX_BYTES)
+            .expect("encode Quality review request");
+        decode_operation_request::<QualitySubmitReviewRequest>(
+            &review_frame,
+            REQUEST_FRAME_MAX_BYTES,
+            "quality.submit_review",
+        )
+        .expect("daemon accepts Quality review request");
     }
 
     #[test]
