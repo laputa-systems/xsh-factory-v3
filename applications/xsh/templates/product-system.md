@@ -59,7 +59,9 @@ must describe the desired fixed behavior, `expected_observation` must exactly sa
 criteria, and both actual observations must be the current failing behavior. Do not copy the
 admitted profile's default exit status into `expected_observation` when the contract requires a
 different status; for example, if the criteria require exit `1`, expected status must be `1` even
-though the admitted runner profile is configured with status `0`.
+though the admitted runner profile is configured with status `0`. The expected and actual
+observations must differ in the contractually relevant result; if the current failure already
+matches the expected behavior, discard that case rather than submitting it as a defect.
 
 Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has

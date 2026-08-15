@@ -879,6 +879,9 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
         if sanitized.contains("blake3 digest is invalid") {
             return "Every submitted digest must be exactly the lower-case BLAKE3 digest from the matching artifact_seal receipt, not a SHA-256 hash or hand-transcribed variant. Reseal the referenced artifact, copy its exact artifact_id, digest, and byte_length, then resubmit the same proposal; do not call work_complete.".into();
         }
+        if sanitized.contains("the observed failure already matches the expected behavior") {
+            return "This proposal does not describe a defect: the actual failure already matches its expected behavior. Do not resubmit it unchanged; discard this case, continue the bounded investigation for a different public gap, and do not call work_complete solely because this proposal was rejected.".into();
+        }
         if sanitized.contains(
             "Product named a reproducer profile that is not in the admitted application revision",
         ) {
@@ -1392,6 +1395,18 @@ mod tests {
             "Product referenced an artifact whose registered identity does not match",
         );
         assert!(diagnostic.contains("lower-case BLAKE3 receipt"));
+        assert!(diagnostic.contains("do not call work_complete"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn product_matching_observation_failure_requests_new_investigation() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "Product proposal contract is invalid: the observed failure already matches the expected behavior",
+        );
+        assert!(diagnostic.contains("does not describe a defect"));
+        assert!(diagnostic.contains("continue the bounded investigation"));
         assert!(diagnostic.contains("do not call work_complete"));
         assert!(diagnostic.len() <= 512);
     }
