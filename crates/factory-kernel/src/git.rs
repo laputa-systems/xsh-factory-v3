@@ -387,31 +387,42 @@ impl CandidateRefName {
     pub fn new_scoped(
         ticket_id: TicketId,
         candidate_id: CandidateId,
-        engineering_session_digest: &ContentDigest,
+        scope: &ContentDigest,
     ) -> Self {
         Self(format!(
-            "refs/heads/factory/{}/{}/{}",
+            "refs/heads/factory-scoped/{}/{}/{}",
+            scope.to_hex(),
             ticket_id.get(),
             candidate_id.get(),
-            engineering_session_digest.to_hex(),
         ))
     }
 
     pub fn parse(value: impl Into<String>) -> Result<Self, GitCustodyError> {
         let value = value.into();
-        let Some(suffix) = value.strip_prefix("refs/heads/factory/") else {
-            return Err(GitCustodyError::InvalidCandidateRef);
+        let valid = if let Some(suffix) = value.strip_prefix("refs/heads/factory/") {
+            let fields: Vec<_> = suffix.split('/').collect();
+            matches!(fields.len(), 2 | 3)
+                && fields[..2].iter().all(|field| {
+                    !field.is_empty()
+                        && !field.starts_with('0')
+                        && field.bytes().all(|byte| byte.is_ascii_digit())
+                })
+                && (fields.len() == 2
+                    || (fields[2].len() == 64
+                        && fields[2].bytes().all(|byte| byte.is_ascii_hexdigit())))
+        } else if let Some(suffix) = value.strip_prefix("refs/heads/factory-scoped/") {
+            let fields: Vec<_> = suffix.split('/').collect();
+            fields.len() == 3
+                && fields[0].len() == 64
+                && fields[0].bytes().all(|byte| byte.is_ascii_hexdigit())
+                && fields[1..].iter().all(|field| {
+                    !field.is_empty()
+                        && !field.starts_with('0')
+                        && field.bytes().all(|byte| byte.is_ascii_digit())
+                })
+        } else {
+            false
         };
-        let fields: Vec<_> = suffix.split('/').collect();
-        let valid = matches!(fields.len(), 2 | 3)
-            && fields[..2].iter().all(|field| {
-                !field.is_empty()
-                    && !field.starts_with('0')
-                    && field.bytes().all(|byte| byte.is_ascii_digit())
-            })
-            && (fields.len() == 2
-                || (fields[2].len() == 64
-                    && fields[2].bytes().all(|byte| byte.is_ascii_hexdigit())));
         if !valid || value.len() > 512 {
             return Err(GitCustodyError::InvalidCandidateRef);
         }

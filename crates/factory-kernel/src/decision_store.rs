@@ -770,9 +770,11 @@ impl DecisionStore {
             attempt.ticket_id,
             command.candidate_id.get()
         );
-        let scoped_prefix = format!("{legacy_ref}/");
+        let scoped_suffix = format!("/{}/{}", attempt.ticket_id, command.candidate_id.get());
+        let scoped_ref = command.candidate_ref.starts_with("refs/heads/factory-scoped/")
+            && command.candidate_ref.ends_with(&scoped_suffix);
         if command.candidate_ref != legacy_ref
-            && !command.candidate_ref.starts_with(&scoped_prefix)
+            && !scoped_ref
         {
             return Err(DecisionStoreError::InvalidCandidateRef);
         }
@@ -2548,27 +2550,31 @@ fn validate_validation_command(command: &RecordValidation) -> Result<(), Decisio
 }
 
 fn validate_candidate_ref(value: &str) -> Result<(), DecisionStoreError> {
-    let Some(suffix) = value.strip_prefix("refs/heads/factory/") else {
-        return Err(DecisionStoreError::InvalidCandidateRef);
+    let valid = if let Some(suffix) = value.strip_prefix("refs/heads/factory/") {
+        let fields: Vec<_> = suffix.split('/').collect();
+        matches!(fields.len(), 2 | 3)
+            && fields[..2].iter().all(|field| {
+                !field.is_empty()
+                    && !field.starts_with('0')
+                    && field.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            && (fields.len() == 2
+                || (fields[2].len() == 64
+                    && fields[2].bytes().all(|byte| byte.is_ascii_hexdigit())))
+    } else if let Some(suffix) = value.strip_prefix("refs/heads/factory-scoped/") {
+        let fields: Vec<_> = suffix.split('/').collect();
+        fields.len() == 3
+            && fields[0].len() == 64
+            && fields[0].bytes().all(|byte| byte.is_ascii_hexdigit())
+            && fields[1..].iter().all(|field| {
+                !field.is_empty()
+                    && !field.starts_with('0')
+                    && field.bytes().all(|byte| byte.is_ascii_digit())
+            })
+    } else {
+        false
     };
-    let mut fields = suffix.split('/');
-    let Some(ticket_id) = fields.next() else {
-        return Err(DecisionStoreError::InvalidCandidateRef);
-    };
-    let Some(candidate_id) = fields.next() else {
-        return Err(DecisionStoreError::InvalidCandidateRef);
-    };
-    let scope = fields.next();
-    if value.len() > 512
-        || [ticket_id, candidate_id].iter().any(|field| {
-            field.is_empty()
-                || field.starts_with('0')
-                || !field.bytes().all(|byte| byte.is_ascii_digit())
-        })
-        || scope.is_some_and(|field| {
-            field.len() != 64 || !field.bytes().all(|byte| byte.is_ascii_hexdigit())
-        })
-    {
+    if value.len() > 512 || !valid {
         return Err(DecisionStoreError::InvalidCandidateRef);
     }
     Ok(())
@@ -2954,6 +2960,13 @@ mod tests {
         assert!(
             validate_candidate_ref(&format!("refs/heads/factory/12/34/{}", "a".repeat(64))).is_ok()
         );
+        assert!(validate_candidate_ref(&format!(
+            "refs/heads/factory-scoped/{}/{}/{}",
+            "a".repeat(64),
+            12,
+            34
+        ))
+        .is_ok());
         for invalid in [
             "refs/remotes/origin/main",
             "refs/heads/factory/12/../34",

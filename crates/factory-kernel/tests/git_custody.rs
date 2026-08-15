@@ -654,6 +654,43 @@ fn candidate_ref_compare_and_swap_conflict_is_not_overwritten() {
 }
 
 #[test]
+fn scoped_candidate_ref_coexists_with_legacy_ref_namespace() {
+    let fixture = Fixture::new();
+    let repository = fixture.qualify();
+    let actor = fixture
+        .custody
+        .create_detached_worktree(
+            &repository,
+            WorktreeKind::Actor,
+            WorktreeName::parse("scoped-ref").unwrap(),
+        )
+        .unwrap();
+    fs::write(actor.path().join("candidate"), b"candidate\n").unwrap();
+    let capture = fixture.custody.capture_tree(&actor).unwrap();
+    fixture.custody.cleanup_worktree(actor).unwrap();
+
+    run_in(
+        &fixture.repository,
+        &fixture.git,
+        &[
+            "update-ref",
+            CandidateRefName::new(TicketId::new(1).unwrap(), CandidateId::new(1).unwrap()).as_str(),
+            repository.snapshot().base_commit().as_str(),
+        ],
+    );
+    let mut request = commit_request(&capture, 2);
+    request.candidate_ref = fixture
+        .custody
+        .candidate_ref(TicketId::new(1).unwrap(), CandidateId::new(1).unwrap());
+
+    let candidate = fixture
+        .custody
+        .construct_candidate_commit(&repository, &request)
+        .unwrap();
+    assert_eq!(candidate.candidate_ref(), &request.candidate_ref);
+}
+
+#[test]
 fn guarded_fast_forward_is_local_and_refuses_moved_base() {
     let fixture = Fixture::new();
     let repository = fixture.qualify();
@@ -891,6 +928,7 @@ fn restarted_runtime_candidates_use_distinct_scoped_refs() {
     );
 
     assert_ne!(first.as_str(), second.as_str());
+    assert!(first.as_str().starts_with("refs/heads/factory-scoped/"));
     assert_eq!(CandidateRefName::parse(first.as_str()).unwrap(), first);
     assert_eq!(CandidateRefName::parse(second.as_str()).unwrap(), second);
 }
@@ -899,14 +937,12 @@ fn restarted_runtime_candidates_use_distinct_scoped_refs() {
 fn distinct_runtime_roots_never_reuse_candidate_refs() {
     let first = Fixture::new();
     let second = Fixture::new();
-    let first_ref = first.custody.candidate_ref(
-        TicketId::new(1).unwrap(),
-        CandidateId::new(1).unwrap(),
-    );
-    let second_ref = second.custody.candidate_ref(
-        TicketId::new(1).unwrap(),
-        CandidateId::new(1).unwrap(),
-    );
+    let first_ref = first
+        .custody
+        .candidate_ref(TicketId::new(1).unwrap(), CandidateId::new(1).unwrap());
+    let second_ref = second
+        .custody
+        .candidate_ref(TicketId::new(1).unwrap(), CandidateId::new(1).unwrap());
 
     assert_ne!(first_ref, second_ref);
 }
