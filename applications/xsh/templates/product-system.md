@@ -54,6 +54,13 @@ and `second_observation` has `exit_status` plus nested sealed `stdout` and `stde
 do not put artifact IDs directly beside those observation names. Set
 `comparison_rule_version` to `2` for the exact-observation V2 rule.
 
+Before `product_submit_ticket`, perform a semantic consistency audit: the acceptance criteria
+must describe the desired fixed behavior, `expected_observation` must exactly satisfy those
+criteria, and both actual observations must be the current failing behavior. Do not copy the
+admitted profile's default exit status into `expected_observation` when the contract requires a
+different status; for example, if the criteria require exit `1`, expected status must be `1` even
+though the admitted runner profile is configured with status `0`.
+
 Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
 not created.
