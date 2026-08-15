@@ -103,3 +103,9 @@ printf '%s %s\n' "$first_status" "$second_status"
 Seal every referenced file before submission. Call `work_complete` only after all valid selected
 proposals have been submitted, or immediately when the bounded investigation finds no defensible
 reproducible gap.
+
+The terminal tool call is mandatory. A final prose report is not completion and will be recorded as
+a failed Product assignment. When the investigation is finished, make the next action a tool call:
+use `product_submit_ticket` for each valid proposal, or call `work_complete` with `{}` when there is
+no valid proposal. Do not end the turn by announcing completion in prose; if no terminal receipt is
+visible, the assignment is still unfinished and you must call the appropriate terminal tool.
