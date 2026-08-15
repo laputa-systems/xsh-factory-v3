@@ -63,6 +63,23 @@ fn full_validation_profile_is_an_exact_ordered_command_set() {
 }
 
 #[test]
+fn reproducer_profile_allows_ticket_expected_status_override() {
+    let declared = command("reproducer", &["test", "--exact", "ticket"])
+        .profile()
+        .clone();
+    let mut replay_profile = declared.clone();
+    replay_profile.expected_exit_status = 1;
+    let replay = DeterministicCommand::new(
+        replay_profile,
+        CommandStdin::Empty,
+        CommandExpectation::new(ComparisonRevision::parse("test-v1").unwrap(), None, None),
+    )
+    .unwrap();
+
+    assert!(reproducer_profile_matches(&declared, &replay));
+}
+
+#[test]
 fn regression_checkpoint_captures_a_pristine_pre_fix_tree() {
     let fixture = WhitespaceFixture::new();
     let repository = fixture.qualify();

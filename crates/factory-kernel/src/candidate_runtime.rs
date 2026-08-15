@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole,
+    AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole, CommandProfileV2,
     CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV2, CandidateSubmissionV2,
     CandidateSubmitRequest, ContentDigest, ExpectedRevision, QualityRunFullSuiteRequest,
     QualitySubmitReviewRequest, QualityValidationReceiptV2, RepositoryObjectIdV2,
@@ -1200,12 +1200,21 @@ fn assert_declared_reproducer(
     if application
         .reproducer_profiles
         .iter()
-        .any(|profile| profile == command.profile())
+        .any(|profile| reproducer_profile_matches(profile, command))
     {
         Ok(())
     } else {
         Err(CandidateRuntimeError::UndeclaredCommand)
     }
+}
+
+fn reproducer_profile_matches(
+    declared: &CommandProfileV2,
+    command: &DeterministicCommand,
+) -> bool {
+    let mut actual = command.profile().clone();
+    actual.expected_exit_status = declared.expected_exit_status;
+    actual == *declared
 }
 
 fn assert_full_suite(
