@@ -47,7 +47,11 @@ main()?
 `docs/SPEC.md` requires unsuccessful `Result[Unit]` statements to propagate by default. Compare
 this exact program with the ordinary direct-call control case; if lowered execution still returns
 `2\n` with exit `0` instead of propagating `bad-one`, it is a valid candidate to reproduce twice and
-submit. Before calling
+submit. The `?` on `worker(value)?` is intentional: it is the propagation operator that exercises
+the claimed contract path, so do not dismiss this candidate because the reproducer uses `?` or
+because the direct-call control case propagates correctly. If the exact two-run observation is exit
+`0`, stdout `2\n2\n`, and empty stderr, the candidate is a confirmed defect and must be submitted;
+do not write no-ticket evidence for that branch. Before calling
 `work_complete` without a
 proposal, complete a literal investigation matrix of at least three distinct candidate behaviors
 across at least three independent contract families represented in `docs/TEST-MAP.md`. The matrix is
@@ -120,9 +124,10 @@ stdout `false\n`, empty stderr, and exit 0 are the expected successful observati
 Do not propose a status-observation case unless the observed status or boundary behavior actually
 differs from that contract.
 The sealed stdin must exercise the same path named by the title and acceptance criteria. When the
-contract distinguishes a control operator such as `?`, do not include that operator in a reproducer
-for the non-propagating path; test the control path separately as supporting evidence and keep the
-submitted reproducer focused on the claimed defect.
+contract distinguishes a control operator such as `?`, include it when the claimed defect is that
+the operator is ignored at a lowered boundary. In particular, the explicit lowered `par-map`
+candidate above must retain `worker(value)?`; removing it tests a different path and is not evidence
+against the candidate.
 
 Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
