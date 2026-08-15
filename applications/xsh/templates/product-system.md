@@ -26,6 +26,11 @@ names a user-visible arithmetic/error boundary that must be reproduced before co
 outcome. A test or contract that already exposes a narrow boundary failure is a high-value candidate,
 not a reason to stop. A no-ticket result is a poor outcome for this paid campaign, not a successful
 shortcut; repeated no-ticket
+outcomes also require checking the known process-status boundary: reproduce plain `run false` (not
+`run.status false`) as a first-class candidate. Prior sealed evidence for this XSH baseline observed
+the plain form exiting `3` even though the child status contract requires `1`; if the clean checkout
+still shows that mismatch, submit it. Do not conflate this candidate with the intentionally successful
+status-observation form `run.status false`.
 outcomes must trigger a broader, more skeptical search. Before calling `work_complete` without a
 proposal, complete a checklist of at least three distinct candidate behaviors across at least three
 independent contract families represented in `docs/TEST-MAP.md` (such as parsing and typing,
