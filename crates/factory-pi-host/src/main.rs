@@ -16,7 +16,7 @@ use pi_agent_core::state::StopReason;
 use pi_agent_core::{AgentEvent, AgentEventKind};
 use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
-use std::{env, fs, path::Path, process::ExitCode, sync::Arc};
+use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -41,7 +41,10 @@ async fn run() -> Result<(), String> {
     let provider = Arc::new(OpenRouterProvider::new(
         OpenRouterConfig::try_new(api_key, admission.packet.model.model_id.clone())
             .map_err(|e| e.to_string())?
-            .with_max_tokens(u64::from(admission.packet.model.output_token_limit)),
+            .with_max_tokens(u64::from(admission.packet.model.output_token_limit))
+            .with_request_timeout(Duration::from_millis(
+                (admission.packet.limits.wall_limit_millis / 4).max(1),
+            )),
     ));
     let accounting_provider = Arc::clone(&provider);
     let cost_reader: CostReader = Arc::new(move || provider_cost(&accounting_provider));
