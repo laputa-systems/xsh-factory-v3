@@ -29,7 +29,25 @@ status-observation control case, not a ticket merely because the child exits uns
 candidate is already covered by the contract or tests, record why it was discarded and move to a
 different behavior. A no-ticket result is not a success signal, but it is valid when the bounded
 investigation genuinely finds no defensible gap; repeated no-ticket outcomes require auditing the
-candidate portfolio and contract reads rather than manufacturing a ticket. Before calling
+candidate portfolio and contract reads rather than manufacturing a ticket. One high-value live
+boundary to test before stale leads is a fallible statement nested in a lowered `par-map` worker:
+
+```xsh
+proc worker(value: Int) [error] -> Result[Int] {
+  if value == 1 { error.fail("bad-one") }
+  value
+}
+proc main() [error] -> Result[Unit] {
+  let values = [1, 2] |> par-map --jobs=2 { |value| worker(value)? }
+  print ${values.len()}
+}
+main()?
+```
+
+`docs/SPEC.md` requires unsuccessful `Result[Unit]` statements to propagate by default. Compare
+this exact program with the ordinary direct-call control case; if lowered execution still returns
+`2\n` with exit `0` instead of propagating `bad-one`, it is a valid candidate to reproduce twice and
+submit. Before calling
 `work_complete` without a
 proposal, complete a literal investigation matrix of at least three distinct candidate behaviors
 across at least three independent contract families represented in `docs/TEST-MAP.md`. The matrix is
