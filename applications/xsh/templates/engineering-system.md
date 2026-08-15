@@ -71,8 +71,14 @@ with the propagated error message. Replacing the latter with
 focused regression fails because it still asserts successful `2\n2\n` output, repair that test to
 assert exit `3`, empty stdout, and `bad-one` stderr; do not weaken the production fix. Once the
 exact reproducer first passes, freeze the production path and only repair test assertions or
-validation mechanics. Keep the fix narrow and add the native regression at the lowered stream
-boundary.
+validation mechanics. For this exact reproducer, also inspect the value after
+`eval_indexed_expr`: the tail `worker(value)?` commonly arrives as
+`ControlFlow::Break(LoweredValue::ResultErr(error))` after the statement block returns normally.
+That `ResultErr` must also become `Err(runtime_error)` before the item is unwrapped; treating it as
+an ordinary mapped value is the observed bug. A patch that changes only the `StmtFlow` arm while
+leaving `ControlFlow::Break(ResultErr)` in-band is incomplete, and an exact run that still prints
+`2\n2\n` is definitive proof to continue tracing rather than submit. Keep the fix narrow and add
+the native regression at the lowered stream boundary.
 
 ## Bounded flaky-test remediation
 
