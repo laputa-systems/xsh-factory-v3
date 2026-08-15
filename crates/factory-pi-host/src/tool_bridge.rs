@@ -872,8 +872,12 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
     if tool == ToolName::ProductSubmitTicket {
         if sanitized.contains("artifact was sealed by a different assigned service build")
             || sanitized.contains("terminal CAS artifact is not registered")
+            || sanitized.contains("registered identity does not match")
         {
-            return "One or more proposal evidence references is not owned by this Product session. Replace every submitted artifact_id, digest, and byte_length with the exact receipt returned by that artifact_seal call; do not infer or reuse IDs, then resubmit the same proposal.".into();
+            return "One or more proposal evidence references does not match its sealed artifact. Reseal the referenced path if needed, then replace every submitted artifact_id, digest, and byte_length with the exact receipt returned by that artifact_seal call: it must be the exact lower-case BLAKE3 receipt; do not infer, hash, or reuse IDs, then resubmit the same proposal; do not call work_complete.".into();
+        }
+        if sanitized.contains("blake3 digest is invalid") {
+            return "Every submitted digest must be exactly the lower-case BLAKE3 digest from the matching artifact_seal receipt, not a SHA-256 hash or hand-transcribed variant. Reseal the referenced artifact, copy its exact artifact_id, digest, and byte_length, then resubmit the same proposal; do not call work_complete.".into();
         }
         if sanitized.contains(
             "Product named a reproducer profile that is not in the admitted application revision",
@@ -1377,6 +1381,17 @@ mod tests {
         );
         assert!(diagnostic.contains("expected_observation"));
         assert!(diagnostic.contains("actual failure"));
+        assert!(diagnostic.contains("do not call work_complete"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn product_artifact_identity_failure_requests_receipt_reuse() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "Product referenced an artifact whose registered identity does not match",
+        );
+        assert!(diagnostic.contains("lower-case BLAKE3 receipt"));
         assert!(diagnostic.contains("do not call work_complete"));
         assert!(diagnostic.len() <= 512);
     }
