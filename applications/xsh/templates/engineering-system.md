@@ -63,6 +63,10 @@ subprocess-assertion pattern used by `test.run_script` in `tests/xsh/stdlib/test
 required `ctx: TestContext` parameter and follow the local signature). Run a small embedded script
 containing `safe_div` and the fallible par-map, capture its returned status/stdout/stderr, and
 assert status `3`, empty stdout, and stderr containing `DivisionByZero` or `division by zero`.
+Use the corpus lint's membership syntax for those checks, for example
+`test.ok("DivisionByZero" in result.stderr or "division by zero" in result.stderr, result.stderr)?`;
+do not use method-style `.contains(...)`, which makes the full integration suite fail on a lint
+warning.
 The parent native test must pass because it expects the child failure; printing the result, removing
 the assertions, or leaving a directly failing par-map body is not a valid regression.
 
