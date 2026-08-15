@@ -530,7 +530,11 @@ where
                     message: error.to_string(),
                 })?;
             return Ok(CapabilityResponse {
-                value: JsonValue::object([("accepted", JsonValue::Bool(true))]),
+                value: capability_result(
+                    name,
+                    JsonValue::object([("accepted", JsonValue::Bool(true))]),
+                )
+                .map_err(|message| CapabilityError::Execution { message })?,
             });
         }
         let value = if let Some(operation) = name.daemon_operation() {
@@ -563,7 +567,8 @@ where
                 })?
         };
         Ok(CapabilityResponse {
-            value: model_visible_tool_result(name, value),
+            value: capability_result(name, value)
+                .map_err(|message| CapabilityError::Execution { message })?,
         })
     }
 }
@@ -694,6 +699,31 @@ pub fn model_visible_tool_result(name: ToolName, value: JsonValue) -> JsonValue 
         return translate_forum_kinds(visible);
     }
     visible
+}
+
+fn capability_result(name: ToolName, value: JsonValue) -> Result<JsonValue, String> {
+    let visible = model_visible_tool_result(name, value);
+    let details_json = visible
+        .to_json_string()
+        .map_err(|error| error.to_string())?;
+    let content = model_result_content(name, &visible);
+    Ok(JsonValue::object([
+        ("content", JsonValue::String(content)),
+        ("details_json", JsonValue::String(details_json)),
+        ("is_error", JsonValue::Bool(false)),
+        ("terminate", JsonValue::Bool(name.is_terminal())),
+    ]))
+}
+
+fn model_result_content(name: ToolName, value: &JsonValue) -> String {
+    if matches!(name, ToolName::WorkspaceRead | ToolName::ArtifactRead)
+        && let Some(encoded) = value.get("content_base64").and_then(JsonValue::as_str)
+        && let Some(bytes) = crate::admission::decode_base64(encoded)
+        && let Ok(content) = String::from_utf8(bytes)
+    {
+        return content;
+    }
+    value.to_json_string().unwrap_or_else(|_| "{}".to_owned())
 }
 
 fn strip_hidden_fields(value: JsonValue) -> JsonValue {
@@ -1217,6 +1247,55 @@ mod tests {
                 .get("kind")
                 .and_then(JsonValue::as_str),
             Some("Correction")
+        );
+    }
+
+    #[test]
+    fn capability_result_matches_luau_handler_contract() {
+        let result = capability_result(
+            ToolName::WorkspaceRead,
+            object([
+                ("canonical_path", JsonValue::String("AGENTS.md".into())),
+                ("content_base64", JsonValue::String("aGVsbG8=".into())),
+            ]),
+        )
+        .expect("tool result should be serializable");
+
+        assert_eq!(
+            result.get("content").and_then(JsonValue::as_str),
+            Some("hello")
+        );
+        assert!(
+            result
+                .get("details_json")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|value| value.contains("content_base64"))
+        );
+        assert_eq!(
+            result.get("is_error").and_then(JsonValue::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            result.get("terminate").and_then(JsonValue::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn terminal_capability_result_requests_core_termination() {
+        let result = capability_result(
+            ToolName::WorkComplete,
+            object([("accepted", JsonValue::Bool(true))]),
+        )
+        .expect("terminal result should be serializable");
+
+        assert_eq!(
+            result.get("terminate").and_then(JsonValue::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            result.get("content").and_then(JsonValue::as_str),
+            Some("{\"accepted\":true}")
         );
     }
 

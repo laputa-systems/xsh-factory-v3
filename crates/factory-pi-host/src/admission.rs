@@ -222,7 +222,7 @@ pub fn read_admission_from_fd0(_config: AdmissionConfig) -> Result<Admission, Ad
     ))
 }
 
-fn decode_base64(value: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_base64(value: &str) -> Option<Vec<u8>> {
     if value.is_empty() || !value.len().is_multiple_of(4) {
         return None;
     }
