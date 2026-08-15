@@ -250,7 +250,6 @@ fn decode_base64(value: &str) -> Option<Vec<u8>> {
         };
         if (!last && (chunk[2] == b'=' || chunk[3] == b'='))
             || (chunk[2] == b'=' && chunk[3] != b'=')
-            || (!last && padding != 0)
         {
             return None;
         }
@@ -321,6 +320,11 @@ mod tests {
         assert!(decode_base64("YR==").is_none());
         assert!(decode_base64("YWJ=").is_none());
         assert!(decode_base64("Y=Jj").is_none());
+    }
+
+    #[test]
+    fn base64_decoder_accepts_padding_only_on_the_final_chunk() {
+        assert_eq!(decode_base64("YWJjZGU="), Some(b"abcde".to_vec()));
     }
 
     #[test]
