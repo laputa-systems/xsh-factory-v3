@@ -57,6 +57,15 @@ Before `candidate_submit`, run the nearest native coverage check that exercises 
 it pass, in addition to the sealed exact reproducer. A full hard-validation run will reject a
 candidate that leaves this old success assertion unchanged.
 
+Do not make the native test itself execute the failing par-map directly: the native harness marks
+that child failure as a failed test. Convert `test_par_map_collect_all` to the established
+subprocess-assertion pattern used by `test.run_script` in `tests/xsh/stdlib/test.xsh` (add the
+required `ctx: TestContext` parameter and follow the local signature). Run a small embedded script
+containing `safe_div` and the fallible par-map, capture its returned status/stdout/stderr, and
+assert status `3`, empty stdout, and stderr containing `DivisionByZero` or `division by zero`.
+The parent native test must pass because it expects the child failure; printing the result, removing
+the assertions, or leaving a directly failing par-map body is not a valid regression.
+
 There is exactly one candidate gate: call `candidate_submit` at most once, and only after the final
 exact reproducer has passed. Immediately before that call, inspect and record the raw process exit
 status, stdout, and stderr. For the lowered `par-map` ticket, readiness specifically requires exit
