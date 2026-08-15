@@ -64,7 +64,15 @@ For a lowered `par-map` failure, compare the ordinary direct-call control case w
 unsuccessful `Result[Unit]` from a nested branch as `StmtFlow::Propagate` until the lowered stream
 boundary, then convert that flow through the same runtime-error path as the direct call; do not
 unwrap it into an in-band mapped value, change process exit-status policy, or hide the error in a
-worker sentinel. Keep the fix narrow and add the native regression at the lowered stream boundary.
+worker sentinel. The boundary invariant is exact: `StmtFlow::Return(value)` may become
+`Ok(ControlFlow::Break(value))`, but `StmtFlow::Propagate(value)` must become `Err(runtime_error)`
+with the propagated error message. Replacing the latter with
+`Ok(ControlFlow::Break(value))` is the original bug and must never be left in the candidate. If a
+focused regression fails because it still asserts successful `2\n2\n` output, repair that test to
+assert exit `3`, empty stdout, and `bad-one` stderr; do not weaken the production fix. Once the
+exact reproducer first passes, freeze the production path and only repair test assertions or
+validation mechanics. Keep the fix narrow and add the native regression at the lowered stream
+boundary.
 
 ## Bounded flaky-test remediation
 
