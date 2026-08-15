@@ -596,13 +596,14 @@ fn shell(
     timeout: Duration,
     cancellation: CancellationToken,
 ) -> Result<ShellOutput, DaemonError> {
+    let kernel_path = std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());
     let mut child = Command::new("/bin/sh")
         .arg("-lc")
         .arg(command)
         .current_dir(root)
         .env_clear()
         .env("NO_COLOR", "1")
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", kernel_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
