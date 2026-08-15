@@ -155,10 +155,24 @@ async fn verify_packet(
         )
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(error) = packet_verification_error(&response) {
+        return Err(error);
+    }
     if response.get("verified").and_then(JsonValue::as_bool) != Some(true) {
         return Err("daemon did not verify the admitted assignment packet".to_owned());
     }
     Ok(())
+}
+
+fn packet_verification_error(response: &JsonValue) -> Option<String> {
+    let error_code = response.get("error_code")?.as_str()?;
+    let message = response
+        .get("message")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("no rejection detail provided");
+    Some(format!(
+        "daemon rejected the admitted assignment packet: {error_code}: {message}"
+    ))
 }
 
 async fn seal_transcript(
@@ -437,4 +451,31 @@ fn crc32(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::packet_verification_error;
+    use pi_agent_protocol::JsonValue;
+
+    #[test]
+    fn packet_verification_error_preserves_daemon_rejection() {
+        let response = JsonValue::object([
+            (
+                "error_code",
+                JsonValue::String("session_rejected".to_owned()),
+            ),
+            (
+                "message",
+                JsonValue::String("packet bytes differ from daemon admission".to_owned()),
+            ),
+        ]);
+
+        assert_eq!(
+            packet_verification_error(&response).as_deref(),
+            Some(
+                "daemon rejected the admitted assignment packet: session_rejected: packet bytes differ from daemon admission"
+            )
+        );
+    }
 }
