@@ -20,18 +20,17 @@ the exact duplicate-search input in that submission. Submit no more than three p
 
 Do not treat a passing `print` smoke program as evidence that the product has no defect; a baseline
 such as `print "hello"` is not a candidate and does not count toward any investigation checklist.
-Start with authoritative edge-case tests and contract examples. In this repository, inspect
-`tests/runtime/run.rs` early: its `integer_division_by_zero_is_a_structured_runtime_failure` test
-names a user-visible arithmetic/error boundary that is a conforming control check, not a defect to
-submit: if `1 / 0` exits `3` with the structured `division-by-zero` diagnostic, discard it. The first
-high-value candidate to reproduce is plain `run false` (not `run.status false`): prior sealed evidence
-for this XSH baseline observed the plain form exiting `3` even though the child status contract
-requires `1`; if the clean checkout still shows that mismatch, submit it with expected exit status
-`1` and the exact actual artifacts. Do not conflate this candidate with the intentionally successful
-status-observation form `run.status false`. A no-ticket result is a poor outcome for this paid
-campaign, not a successful shortcut; repeated no-ticket outcomes require checking this process-status
-boundary before any no-ticket completion.
-outcomes must trigger a broader, more skeptical search. Before calling `work_complete` without a
+Start with authoritative edge-case tests and contract examples. Inspect `docs/SPEC.md`, the nearest
+native tests, and the open-ticket leads in `LANG.md`, but treat every lead as a hypothesis: the
+current contract and two-run observation decide whether it is a defect. In particular, plain
+`run false` is documented to propagate `ProcessError` and produce the runtime-failure status `3`;
+that is intentional and must not be submitted as a defect. Likewise, `run.status false` is a
+status-observation control case, not a ticket merely because the child exits unsuccessfully. If a
+candidate is already covered by the contract or tests, record why it was discarded and move to a
+different behavior. A no-ticket result is not a success signal, but it is valid when the bounded
+investigation genuinely finds no defensible gap; repeated no-ticket outcomes require auditing the
+candidate portfolio and contract reads rather than manufacturing a ticket. Before calling
+`work_complete` without a
 proposal, complete a checklist of at least three distinct candidate behaviors across at least three
 independent contract families represented in `docs/TEST-MAP.md` (such as parsing and typing,
 runtime/process behavior, and boundary or error semantics). For every candidate, read its owning

@@ -42,16 +42,17 @@ focused check exposes a concrete failure, inspect only the smallest additional s
 to explain it, repair the root cause, and rerun the exact reproducer plus that focused check.
 
 The submission gate is observable, not aspirational: immediately before `candidate_submit`, run the
-exact sealed reproducer after the final edit and inspect its exit status and stderr. Do not submit
-while it returns a nonzero status or the original diagnostic; the kernel will reject that candidate.
-When the ticket changes the expected exit status, verify the exact desired status from the XSH
-process rather than treating a successful Cargo/build wrapper as proof. For the assigned `run false`
-ticket, the final exact reproducer must report XSH exit status `1`; a wrapper result of `0` or the
-original `3` means the candidate is not ready. If `candidate_submit` reports hard validation
-rejection, that response is non-terminal: inspect the rejection, repair the candidate, rerun the exact
-reproducer, and submit again only after the raw status and stderr satisfy the ticket. Never stop,
-return a prose completion, or call another terminal path after a rejection; the candidate remains
-unfinished until an accepted `candidate_submit` receipt is returned.
+exact sealed reproducer after the final edit and inspect its exit status, stdout, and stderr. Do not
+submit while the raw observation is nonzero, still contains the original diagnostic, or otherwise
+fails the ticket's stated expected observation; the kernel will reject that candidate. When the
+ticket changes an exit status or stream, verify the exact desired result from the XSH process rather
+than treating a successful Cargo/build wrapper as proof. Treat the sealed ticket contract and its
+authoritative contract reads as the source of truth; do not "fix" behavior that the contract
+explicitly specifies. If hard validation rejects a candidate, that response is non-terminal: inspect
+the rejection and repair the candidate rather than stopping or claiming completion, but never submit
+until the exact reproducer and focused check are already ready for the single candidate gate. Never
+return a prose completion or call another terminal path after a rejection; the candidate remains
+unfinished until the controller accepts it or the assignment is otherwise explicitly reconciled.
 For a receiver-method defect, trace both the call-classification path and the method-dispatch path
 before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
 
