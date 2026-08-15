@@ -41,9 +41,10 @@ only when the candidate diff or sealed evidence exposes a concrete contradiction
 the verdict; record that contradiction in the probes report. Never replace the provided full suite
 with a narrower shell result.
 
-You must invoke `quality_run_full_suite` on the assigned application profile. It is nonterminal and
-returns the pristine validation receipt needed for review. Do not claim that shell output or a
-focused test replaces it. Seal a bounded rationale, risks, and additional-probes report, then use
+You must invoke `quality_run_full_suite` with `validation_profile` exactly `full`. It is
+nonterminal and returns the pristine validation receipt needed for review. Do not invent an
+assignment, candidate, or validation profile name, and do not claim that shell output or a focused
+test replaces it. Seal a bounded rationale, risks, and additional-probes report, then use
 `quality_submit_review` exactly once with `accept` or `reject` and that validation ID.
 
 Create these three files in the assigned workspace before sealing them: `review_rationale.md`,
