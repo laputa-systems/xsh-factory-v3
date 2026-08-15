@@ -13,11 +13,13 @@ use crate::tool_bridge::{
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
 use pi_agent_core::event::{AgentEvent, AgentEventKind};
-use pi_agent_core::hooks::HookSet;
+use pi_agent_core::hooks::{
+    AfterToolCall, BeforeToolCall, ContextEnvelope, HookFuture, HookSet, NextTurn,
+};
 use pi_agent_core::provider::openai::OpenAiContextHook;
 use pi_agent_core::scheduler::ModelProvider;
 use pi_agent_core::state::{RunSnapshot, StopReason};
-use pi_agent_core::tool::ToolRegistry;
+use pi_agent_core::tool::{AgentToolResult, ToolCall, ToolRegistry};
 use pi_agent_luau::tool_handler::{
     CapabilityBindings, HandlerLimits, LuaToolHandler, ToolHandlerInitError, ToolHandlerSpec,
 };
@@ -25,6 +27,7 @@ use pi_agent_luau::{LuaPolicy, LuaPolicyHookSet, PolicyError, PolicyLimits};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// A caller-owned sealed policy source.  The host accepts bytes, never a path, and verifies the
 /// caller's expected CAS digest before evaluating Luau.
@@ -100,6 +103,7 @@ pub struct PreparedExecution {
     agent: Agent,
     terminal: Arc<TerminalDeferral>,
     cost_reader: Option<CostReader>,
+    turn_budget: Arc<TurnBudget>,
     _policy: Arc<LuaPolicy>,
 }
 
@@ -109,6 +113,7 @@ impl fmt::Debug for PreparedExecution {
             .field("assignment_id", &self.admission.packet.assignment_id)
             .field("has_model_provider", &self.agent.has_model_provider())
             .field("tools", &self.agent.tool_definitions())
+            .field("turn_budget", &self.turn_budget)
             .finish_non_exhaustive()
     }
 }
@@ -191,13 +196,17 @@ impl ExecutionInput {
         let model = snapshot
             .model
             .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
+        let turn_budget = Arc::new(TurnBudget::new(self.admission.packet.limits.turn_limit));
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
             .model(model)
             .thinking_level(snapshot.thinking_level)
             .tools(registry)
             .model_provider(self.provider)
-            .hooks(factory_hook_set(Arc::clone(&policy)));
+            .hooks(turn_limited_hook_set(
+                factory_hook_set(Arc::clone(&policy)),
+                Arc::clone(&turn_budget),
+            ));
         for message in snapshot.host_messages {
             builder = builder.host_message(message);
         }
@@ -206,6 +215,7 @@ impl ExecutionInput {
             agent: builder.build(),
             terminal: self.terminal,
             cost_reader: self.cost_reader,
+            turn_budget,
             _policy: policy,
         })
     }
@@ -213,6 +223,162 @@ impl ExecutionInput {
 
 fn factory_hook_set(policy: Arc<LuaPolicy>) -> Arc<dyn HookSet> {
     Arc::new(LuaPolicyHookSet::new(policy, Arc::new(OpenAiContextHook)))
+}
+
+fn turn_limited_hook_set(
+    inner: Arc<dyn HookSet>,
+    turn_budget: Arc<TurnBudget>,
+) -> Arc<dyn HookSet> {
+    Arc::new(TurnLimitHookSet { inner, turn_budget })
+}
+
+#[derive(Debug)]
+struct TurnBudget {
+    limit: u32,
+    completed_turns: AtomicU32,
+    reached: AtomicBool,
+}
+
+impl TurnBudget {
+    fn new(limit: u32) -> Self {
+        Self {
+            limit,
+            completed_turns: AtomicU32::new(0),
+            reached: AtomicBool::new(false),
+        }
+    }
+
+    fn after_turn(&self) -> bool {
+        let completed = self
+            .completed_turns
+            .fetch_add(1, Ordering::AcqRel)
+            .saturating_add(1);
+        if completed >= self.limit {
+            self.reached.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn diagnostics(&self, events: &[AgentEvent]) -> ExecutionDiagnostics {
+        let turns_started = events
+            .iter()
+            .filter(|event| matches!(event.kind, AgentEventKind::TurnStart { .. }))
+            .count() as u32;
+        ExecutionDiagnostics {
+            turn_limit: self.limit,
+            turns_started,
+            turn_limit_reached: self.reached.load(Ordering::Acquire),
+        }
+    }
+}
+
+struct TurnLimitHookSet {
+    inner: Arc<dyn HookSet>,
+    turn_budget: Arc<TurnBudget>,
+}
+
+impl HookSet for TurnLimitHookSet {
+    fn before_tool_call(
+        &self,
+        call: &ToolCall,
+    ) -> Result<BeforeToolCall, pi_agent_core::error::HookError> {
+        self.inner.before_tool_call(call)
+    }
+
+    fn after_tool_call(
+        &self,
+        call: &ToolCall,
+        result: &AgentToolResult,
+    ) -> Result<AfterToolCall, pi_agent_core::error::HookError> {
+        self.inner.after_tool_call(call, result)
+    }
+
+    fn transform_context(
+        &self,
+        context: ContextEnvelope,
+    ) -> Result<ContextEnvelope, pi_agent_core::error::HookError> {
+        self.inner.transform_context(context)
+    }
+
+    fn convert_to_llm(
+        &self,
+        context: ContextEnvelope,
+    ) -> Result<String, pi_agent_core::error::HookError> {
+        self.inner.convert_to_llm(context)
+    }
+
+    fn should_stop_after_turn(
+        &self,
+        context: &ContextEnvelope,
+    ) -> Result<bool, pi_agent_core::error::HookError> {
+        Ok(self.turn_budget.after_turn() || self.inner.should_stop_after_turn(context)?)
+    }
+
+    fn prepare_next_turn(
+        &self,
+        context: ContextEnvelope,
+    ) -> Result<NextTurn, pi_agent_core::error::HookError> {
+        self.inner.prepare_next_turn(context)
+    }
+
+    fn before_tool_call_async<'a>(
+        &'a self,
+        call: &'a ToolCall,
+        context: ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, BeforeToolCall> {
+        self.inner
+            .before_tool_call_async(call, context, cancellation)
+    }
+
+    fn after_tool_call_async<'a>(
+        &'a self,
+        call: &'a ToolCall,
+        result: &'a AgentToolResult,
+        context: ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, AfterToolCall> {
+        self.inner
+            .after_tool_call_async(call, result, context, cancellation)
+    }
+
+    fn transform_context_async<'a>(
+        &'a self,
+        context: ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, ContextEnvelope> {
+        self.inner.transform_context_async(context, cancellation)
+    }
+
+    fn convert_to_llm_async<'a>(
+        &'a self,
+        context: ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, String> {
+        self.inner.convert_to_llm_async(context, cancellation)
+    }
+
+    fn should_stop_after_turn_async<'a>(
+        &'a self,
+        context: &'a ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, bool> {
+        let inner = self
+            .inner
+            .should_stop_after_turn_async(context, cancellation);
+        let turn_budget = Arc::clone(&self.turn_budget);
+        Box::pin(async move { Ok(turn_budget.after_turn() || inner.await?) })
+    }
+
+    fn prepare_next_turn_async<'a>(
+        &'a self,
+        context: ContextEnvelope,
+        cancellation: pi_agent_core::scheduler::CancellationToken,
+    ) -> HookFuture<'a, NextTurn> {
+        self.inner.prepare_next_turn_async(context, cancellation)
+    }
 }
 
 /// Assemble the normal Factory capability and execution input for the FD 0 host integration.
@@ -289,6 +455,7 @@ impl PreparedExecution {
             handle.events(),
             self.terminal.pending(),
             self.cost_reader.as_ref().and_then(|reader| reader()),
+            &self.turn_budget,
         ))
     }
 }
@@ -307,6 +474,19 @@ pub struct ExecutionResult {
     pub usage: UsageSummary,
     /// Provider-reported cost, if the explicit accounting callback had a known value.
     pub cost_micro_usd: Option<u64>,
+    /// Bounded run diagnostics retained for operator and transcript inspection.
+    pub diagnostics: ExecutionDiagnostics,
+}
+
+/// Observable limits and progress for one prepared actor run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionDiagnostics {
+    /// Admitted maximum number of model turns.
+    pub turn_limit: u32,
+    /// Number of core turn-start events emitted by the run.
+    pub turns_started: u32,
+    /// Whether the run stopped at the admitted turn boundary.
+    pub turn_limit_reached: bool,
 }
 
 impl ExecutionResult {
@@ -315,14 +495,17 @@ impl ExecutionResult {
         events: Vec<AgentEvent>,
         terminal: Option<crate::tool_bridge::DeferredTerminal>,
         cost_micro_usd: Option<u64>,
+        turn_budget: &TurnBudget,
     ) -> Self {
         let usage = UsageSummary::from_events(&events);
+        let diagnostics = turn_budget.diagnostics(&events);
         Self {
             events,
             run,
             terminal,
             usage,
             cost_micro_usd,
+            diagnostics,
         }
     }
 
@@ -655,5 +838,35 @@ mod tests {
             source_with_wrong_digest.text(),
             Err(ExecutionError::PolicyDigestMismatch)
         ));
+    }
+
+    #[test]
+    fn turn_budget_stops_after_the_admitted_number_of_turns() {
+        let turn_budget = Arc::new(TurnBudget::new(2));
+        let hooks = turn_limited_hook_set(
+            Arc::new(pi_agent_core::hooks::NoHooks),
+            Arc::clone(&turn_budget),
+        );
+        let context = ContextEnvelope {
+            version: 1,
+            messages: Vec::new(),
+            host_messages: Vec::new(),
+        };
+
+        assert!(
+            !smol::block_on(
+                hooks.should_stop_after_turn_async(&context, CancellationToken::new(),)
+            )
+            .expect("first turn remains within the budget")
+        );
+        assert!(
+            smol::block_on(hooks.should_stop_after_turn_async(&context, CancellationToken::new(),))
+                .expect("second turn reaches the budget")
+        );
+        assert!(
+            smol::block_on(hooks.should_stop_after_turn_async(&context, CancellationToken::new(),))
+                .expect("the budget remains exhausted")
+        );
+        assert!(turn_budget.reached.load(Ordering::Acquire));
     }
 }

@@ -3,8 +3,8 @@
 mod runtime;
 
 use factory_pi_host::{
-    Admission, AdmissionConfig, CommandContext, CostReader, FramedDaemon, TerminalDeferral,
-    ToolName, build_factory_execution_input, read_admission_from_fd0,
+    Admission, AdmissionConfig, CommandContext, CostReader, ExecutionDiagnostics, FramedDaemon,
+    TerminalDeferral, ToolName, build_factory_execution_input, read_admission_from_fd0,
 };
 use factory_protocol::{
     ArtifactReceiptResponse, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
@@ -78,7 +78,16 @@ async fn run() -> Result<(), String> {
         .drive()
         .await
         .map_err(|e| e.to_string())?;
-    let transcript = write_transcript(&admission, &result.events)?;
+    eprintln!(
+        "factory-pi-host execution: turns_started={} turn_limit={} turn_limit_reached={} stop_reason={:?} terminal={} cost_known={}",
+        result.diagnostics.turns_started,
+        result.diagnostics.turn_limit,
+        result.diagnostics.turn_limit_reached,
+        result.stop_reason(),
+        result.terminal.is_some(),
+        result.cost_micro_usd.is_some(),
+    );
+    let transcript = write_transcript(&admission, &result.events, &result.diagnostics)?;
     let transcript_id =
         seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
     let usage = provider.usage_snapshot();
@@ -234,7 +243,11 @@ async fn seal_transcript(
     Ok(receipt.artifact_id)
 }
 
-fn write_transcript(admission: &Admission, events: &[AgentEvent]) -> Result<Vec<u8>, String> {
+fn write_transcript(
+    admission: &Admission,
+    events: &[AgentEvent],
+    diagnostics: &ExecutionDiagnostics,
+) -> Result<Vec<u8>, String> {
     let limit = admission.packet.limits.output_byte_limit as usize;
     let mut lines = Vec::new();
     for event in events {
@@ -245,7 +258,29 @@ fn write_transcript(admission: &Admission, events: &[AgentEvent]) -> Result<Vec<
         lines.extend_from_slice(line.as_bytes());
         lines.push(b'\n');
     }
+    let summary = execution_summary(diagnostics)?;
+    if gzip_stored_len(lines.len() + summary.len() + 1) <= limit {
+        lines.extend_from_slice(summary.as_bytes());
+        lines.push(b'\n');
+    }
     Ok(gzip_stored(&lines))
+}
+
+fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, String> {
+    JsonValue::object([
+        ("type", JsonValue::String("execution_summary".to_owned())),
+        (
+            "turns_started",
+            number(u64::from(diagnostics.turns_started))?,
+        ),
+        ("turn_limit", number(u64::from(diagnostics.turn_limit))?),
+        (
+            "turn_limit_reached",
+            JsonValue::Bool(diagnostics.turn_limit_reached),
+        ),
+    ])
+    .to_json_string()
+    .map_err(|e| e.to_string())
 }
 
 fn project_event(event: &AgentEvent) -> Result<String, String> {
@@ -254,11 +289,13 @@ fn project_event(event: &AgentEvent) -> Result<String, String> {
         AgentEventKind::AgentStart => {
             fields.push(("type", JsonValue::String("agent_start".to_owned())))
         }
-        AgentEventKind::TurnStart { .. } => {
-            fields.push(("type", JsonValue::String("turn_start".to_owned())))
+        AgentEventKind::TurnStart { turn_id } => {
+            fields.push(("type", JsonValue::String("turn_start".to_owned())));
+            fields.push(("turn_id", number(turn_id.0)?));
         }
-        AgentEventKind::TurnEnd { reason, .. } => {
+        AgentEventKind::TurnEnd { turn_id, reason } => {
             fields.push(("type", JsonValue::String("turn_end".to_owned())));
+            fields.push(("turn_id", number(turn_id.0)?));
             fields.push(("reason", JsonValue::String(format!("{reason:?}"))));
         }
         AgentEventKind::MessageEnd { message } => {

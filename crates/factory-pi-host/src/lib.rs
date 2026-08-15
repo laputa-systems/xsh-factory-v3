@@ -20,9 +20,9 @@ pub use admission::{
 };
 pub use agent_host::{AgentHost, AgentHostError, BareAgentHost, load_luau_policy};
 pub use execution::{
-    CostReader, ExecutionError, ExecutionInput, ExecutionResult, PreparedExecution,
-    SealedPolicySource, UsageSummary, build_factory_execution_input, build_policy_tools,
-    factory_capability_bindings,
+    CostReader, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,
+    PreparedExecution, SealedPolicySource, UsageSummary, build_factory_execution_input,
+    build_policy_tools, factory_capability_bindings,
 };
 pub use tool_bridge::{
     BoundTool, CommandContext, DaemonError, DaemonFuture, DeferredTerminal, FACTORY_CAPABILITY,
