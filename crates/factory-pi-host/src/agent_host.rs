@@ -68,20 +68,24 @@ impl BareAgentHost {
     }
 
     /// Bind the caller-owned provider and obtain a runnable host.
-    pub fn bind_provider(self, provider: Arc<dyn ModelProvider>) -> AgentHost {
+    pub fn bind_provider(
+        self,
+        provider: Arc<dyn ModelProvider>,
+    ) -> Result<AgentHost, AgentHostError> {
         let snapshot = self.agent.snapshot();
+        let model = snapshot.model.ok_or(AgentHostError::MissingModel)?;
         let mut builder = Agent::builder()
             .system_prompt(snapshot.system_prompt)
-            .model(snapshot.model.unwrap_or_default())
+            .model(model)
             .thinking_level(snapshot.thinking_level)
             .model_provider(provider);
         for message in snapshot.host_messages {
             builder = builder.host_message(message);
         }
-        AgentHost {
+        Ok(AgentHost {
             admission: self.admission,
             agent: builder.build(),
-        }
+        })
     }
 }
 
@@ -106,7 +110,7 @@ impl AgentHost {
         admission: Admission,
         provider: Arc<dyn ModelProvider>,
     ) -> Result<Self, AgentHostError> {
-        Ok(BareAgentHost::new(admission)?.bind_provider(provider))
+        BareAgentHost::new(admission)?.bind_provider(provider)
     }
 
     /// Borrow the immutable startup admission.
@@ -149,6 +153,8 @@ pub enum AgentHostError {
     ThinkingLevel(String),
     /// The agent core rejected a run transition.
     Core(pi_agent_core::CoreError),
+    /// The verified host attempted to bind a provider without a selected model.
+    MissingModel,
 }
 
 impl fmt::Display for AgentHostError {
@@ -157,6 +163,7 @@ impl fmt::Display for AgentHostError {
             Self::PacketText(error) => write!(f, "packet prompt invalid: {error}"),
             Self::ThinkingLevel(value) => write!(f, "unsupported packet thinking level: {value}"),
             Self::Core(error) => write!(f, "agent core rejected operation: {error}"),
+            Self::MissingModel => f.write_str("agent host has no selected model"),
         }
     }
 }

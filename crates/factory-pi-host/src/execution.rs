@@ -16,7 +16,7 @@ use pi_agent_core::event::{AgentEvent, AgentEventKind};
 use pi_agent_core::hooks::HookSet;
 use pi_agent_core::provider::openai::OpenAiContextHook;
 use pi_agent_core::scheduler::ModelProvider;
-use pi_agent_core::state::{ModelDescriptor, RunSnapshot, StopReason};
+use pi_agent_core::state::{RunSnapshot, StopReason};
 use pi_agent_core::tool::ToolRegistry;
 use pi_agent_luau::tool_handler::{
     CapabilityBindings, HandlerLimits, LuaToolHandler, ToolHandlerInitError, ToolHandlerSpec,
@@ -188,9 +188,12 @@ impl ExecutionInput {
                 policy.system_prompt_append()
             )
         };
+        let model = snapshot
+            .model
+            .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
-            .model(snapshot.model.unwrap_or_else(ModelDescriptor::default))
+            .model(model)
             .thinking_level(snapshot.thinking_level)
             .tools(registry)
             .model_provider(self.provider)

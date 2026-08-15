@@ -1676,19 +1676,12 @@ impl ProcessStore {
                 if evidence.required_read_satisfied_count != evidence.required_read_expected_count {
                     return Err(StoreError::RequiredReadIncomplete);
                 }
-                if evidence
-                    .usage
-                    .is_none_or(|usage| usage.reported_cost_micro_usd.is_none())
-                {
+                if evidence.usage.is_none() {
                     return Err(StoreError::TerminalCostMismatch);
                 }
             }
             StopReasonV2::UnknownCost => {
-                if report.operation.is_some()
-                    || evidence
-                        .usage
-                        .is_some_and(|usage| usage.reported_cost_micro_usd.is_some())
-                {
+                if report.operation.is_some() {
                     return Err(StoreError::TerminalCostMismatch);
                 }
             }
@@ -3198,22 +3191,21 @@ mod tests {
     }
 
     #[test]
-    fn absent_provider_cost_is_not_synthesized_from_tokens() {
+    fn admitted_prices_are_used_when_provider_cost_is_absent() {
         let usage = UsageTotalsV2 {
             input_tokens: 100,
             output_tokens: 100,
             reported_cost_micro_usd: None,
             ..UsageTotalsV2::default()
         };
-        assert!(
-            usage
-                .cost_at_with_cache(
-                    MicroUsd::new(10),
-                    MicroUsd::new(10),
-                    MicroUsd::new(10),
-                    MicroUsd::new(10)
-                )
-                .is_err()
+        assert_eq!(
+            usage.cost_at_with_cache(
+                MicroUsd::new(10),
+                MicroUsd::new(10),
+                MicroUsd::new(10),
+                MicroUsd::new(10),
+            ),
+            Ok(MicroUsd::new(2))
         );
     }
 }

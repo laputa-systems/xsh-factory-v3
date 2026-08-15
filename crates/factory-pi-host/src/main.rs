@@ -79,7 +79,7 @@ async fn run() -> Result<(), String> {
     let transcript_id =
         seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
     let usage = provider.usage_snapshot();
-    let completed = result.terminal.is_some() && result.cost_micro_usd.is_some();
+    let completed = result.terminal.is_some();
     let terminal_operation = completed
         .then(|| {
             result

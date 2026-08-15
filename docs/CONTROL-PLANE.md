@@ -55,8 +55,10 @@ non-fast-forward delivery.
 ## Failure and recovery
 
 The daemon owns the process group, deadline, output cap, cancellation, direct
-wait, and terminal reconciliation. A provider cost that cannot be measured is
-fail-closed for campaign admission. A released ticket requalifies again under
+wait, and terminal reconciliation. A session with neither usable token usage
+nor a provider cost is fail-closed; otherwise the kernel computes Factory cost
+from the admitted model rates rather than trusting a provider-reported zero. A
+released ticket requalifies again under
 an idempotency key bound to its campaign, immutable ticket-revision row, and
 current revision, so a retry cannot collide with sealed evidence from its
 earlier attempt. Assignment launch keys additionally bind the Engineering

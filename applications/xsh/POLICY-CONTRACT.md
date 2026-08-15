@@ -5,6 +5,12 @@ declaration, resolves the seven Markdown templates and the three Luau policy
 sources below this directory, verifies each BLAKE3 digest and byte limit, and
 seals the resulting source bytes. A running actor never reads this directory.
 
+The model price fields in the bundle are admitted accounting inputs. Keep their
+source of truth in Pi's model catalog at
+`/Users/josh/d/pi/packages/ai/src/providers/data/openrouter.json`; update the
+bundle only after syncing the selected model's rates and limits from that
+catalog.
+
 Every role policy returns the `pi-agent-luau` `factory_policy` declaration:
 
 - `system_prompt_append` is present and currently empty;
