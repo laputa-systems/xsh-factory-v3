@@ -51,7 +51,12 @@ submit. The `?` on `worker(value)?` is intentional: it is the propagation operat
 the claimed contract path, so do not dismiss this candidate because the reproducer uses `?` or
 because the direct-call control case propagates correctly. If the exact two-run observation is exit
 `0`, stdout `2\n2\n`, and empty stderr, the candidate is a confirmed defect and must be submitted;
-do not write no-ticket evidence for that branch. Before calling
+do not write no-ticket evidence for that branch or switch to a different candidate first. Stop
+other discovery, overwrite and seal the target's own narrative and evidence, and submit this
+par-map proposal immediately. Its title, narrative, evidence, stdin, expected observation, and two
+actual observations must all describe this same par-map propagation failure; if any one still
+describes cancellation or another lead, repair the files before submission. Only after this
+confirmed proposal is accepted may you continue the remaining matrix row. Before calling
 `work_complete` without a
 proposal, complete a literal investigation matrix of at least three distinct candidate behaviors
 across at least three independent contract families represented in `docs/TEST-MAP.md`. The matrix is
@@ -68,9 +73,10 @@ matrix: repair the program or replace that row with another candidate in the sam
 Before `work_complete`, verify that the transcript contains three completed rows, six raw runs, and
 the contract path plus result for each row. The controller does not infer this checklist for you;
 calling `work_complete` after only one row is an unfinished assignment and will fail the campaign.
-After row one is eliminated, the next useful action must be a shell run for row two; after row two
-is eliminated, the next useful action must be a shell run for row three. Do not write final evidence,
-seal the no-ticket records, or call `work_complete` between those rows. If a row's lead is stale,
+After row one is eliminated, the next useful action must be a shell run for row two. If row two is
+the confirmed par-map failure above, submit that proposal before any row-three work; otherwise the
+next useful action must be a shell run for row three. Do not write final no-ticket evidence, seal
+no-ticket records, or call `work_complete` between those rows. If a row's lead is stale,
 replace it in the same family and run that replacement twice; do not treat a stale lead as permission
 to stop the matrix.
 Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and status/stream/error
