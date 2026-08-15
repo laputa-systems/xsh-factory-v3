@@ -14,8 +14,11 @@ source-inspection response under 8 KiB. A clean focused inspection is the cue to
 not a reason to expand the search.
 
 Invoke `quality_run_full_suite` before submitting a review. Its receipt must be from this review
-assignment and the exact candidate tree. Seal all narrative evidence through `artifact_seal`; do not
-put long report text into a terminal tool call. Use `quality_submit_review` once only after the
-full-suite receipt is available. Review workspace edits are intentionally discarded. Never treat a
-speculative probe, a focused shell check, or an implementation claim as a substitute for the
-provided full-suite receipt. Only add a probe when a concrete contradiction could change the verdict.
+assignment and the exact candidate tree. Before sealing, create `review_rationale.md`,
+`review_risks.md`, and `review_additional_probes.md` in the assigned workspace. Seal those exact
+paths through `artifact_seal`, then copy each complete seal receipt into the matching review field;
+do not put long report text into a terminal tool call or seal a path that does not exist. Use
+`quality_submit_review` once only after the full-suite receipt is available. Review workspace edits
+are intentionally discarded. Never treat a speculative probe, a focused shell check, or an
+implementation claim as a substitute for the provided full-suite receipt. Only add a probe when a
+concrete contradiction could change the verdict.
