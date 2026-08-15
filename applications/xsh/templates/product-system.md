@@ -62,6 +62,10 @@ different status; for example, if the criteria require exit `1`, expected status
 though the admitted runner profile is configured with status `0`. The expected and actual
 observations must differ in the contractually relevant result; if the current failure already
 matches the expected behavior, discard that case rather than submitting it as a defect.
+The sealed stdin must exercise the same path named by the title and acceptance criteria. When the
+contract distinguishes a control operator such as `?`, do not include that operator in a reproducer
+for the non-propagating path; test the control path separately as supporting evidence and keep the
+submitted reproducer focused on the claimed defect.
 
 Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
