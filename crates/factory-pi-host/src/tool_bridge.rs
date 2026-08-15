@@ -166,6 +166,10 @@ impl ToolName {
         )
     }
 
+    const fn defers_without_daemon(self) -> bool {
+        matches!(self, Self::WorkComplete)
+    }
+
     /// Whether the operation receives host-owned retry identity fields.
     pub const fn is_mutating(self) -> bool {
         matches!(
@@ -533,7 +537,7 @@ where
 
         let payload = normalize_wire_input(name, request.arguments, &self.command_context)
             .map_err(|error| CapabilityError::InvalidArguments { message: error })?;
-        if name.is_terminal() {
+        if name.defers_without_daemon() {
             self.terminal
                 .defer(name, payload)
                 .map_err(|error| CapabilityError::Execution {
@@ -550,7 +554,7 @@ where
         let value = if let Some(operation) = name.daemon_operation() {
             let value = self
                 .daemon
-                .call(operation, payload)
+                .call(operation, payload.clone())
                 .await
                 .map_err(|error| CapabilityError::Execution {
                     message: task_diagnostic(name, &error.to_string()),
@@ -560,8 +564,19 @@ where
                     message: task_diagnostic(name, &error),
                 }
             })?;
-            if let Some(revision) = value.get("aggregate_revision").and_then(JsonValue::as_u64) {
+            if matches!(
+                operation,
+                "artifact.seal_workspace_file" | "session.seal_artifact"
+            ) && let Some(revision) = value.get("aggregate_revision").and_then(JsonValue::as_u64)
+            {
                 self.command_context.advance_revision(revision);
+            }
+            if name.is_terminal() {
+                self.terminal
+                    .defer(name, payload)
+                    .map_err(|error| CapabilityError::Execution {
+                        message: error.to_string(),
+                    })?;
             }
             value
         } else {

@@ -67,7 +67,7 @@ local artifact_seal_schema = [[
 {"type":"object","additionalProperties":false,"required":["workspace_relative_path","byte_limit"],"properties":{"workspace_relative_path":{"type":"string","minLength":1},"byte_limit":{"type":"integer","minimum":1}}}
 ]]
 local artifact_read_schema = [[
-{"type":"object","additionalProperties":false,"required":["artifact_id","expected_digest"],"properties":{"artifact_id":{"type":"integer","minimum":1},"expected_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"}}}
+{"type":"object","additionalProperties":false,"required":["artifact_id","expected_digest"],"properties":{"artifact_id":{"type":"integer","minimum":1},"expected_digest":{"type":"string"}}}
 ]]
 local full_suite_schema = [[
 {"type":"object","additionalProperties":false,"required":["validation_profile"],"properties":{"validation_profile":{"type":"string","minLength":1,"maxLength":160}}}
