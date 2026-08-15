@@ -16,15 +16,15 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
 # while the local core source remains the explicit dependency.
 cache:
 	test -f "$(PI_AGENT_CORE_MANIFEST)"
-	cargo fetch --manifest-path "$(PI_AGENT_CORE_MANIFEST)"
-	cargo fetch --workspace
+	cargo fetch --locked --manifest-path "$(PI_AGENT_CORE_MANIFEST)"
+	cargo fetch --locked --manifest-path "$(CURDIR)/Cargo.toml"
 
 pi-agent-core-rs-test:
 	test -f "$(PI_AGENT_CORE_MANIFEST)"
@@ -39,8 +39,31 @@ lint: pi-agent-core-rs-test
 	cargo check --workspace --all-targets
 	cargo test --workspace
 
-release-build:
-	cargo build --release --workspace
+release-build: cache
+	cargo build --locked --release --workspace
+
+# Requalify the complete release source graph before paid admission. The
+# identity check deliberately compares the freshly built local graph with the
+# build selected by the live daemon; a stale daemon fails closed before budget
+# or provider credentials cross the campaign boundary.
+paid-cycle-preflight:
+	$(MAKE) release-build
+	@set -eu; \
+	 expected_json="$$($(FACTORYCTL) build identity \
+	  --installation-root "$(CURDIR)" \
+	  --factoryd "$(CURDIR)/target/release/factoryd" \
+	  --format json)"; \
+	 expected_build="$$(printf '%s\n' "$$expected_json" | sed -n 's/.*"kernel_build_id":"\([^"]*\)".*/\1/p')"; \
+	 live_json="$$($(FACTORYCTL) daemon status \
+	  --socket "$(FACTORY_PAID_CYCLE_SOCKET)" \
+	  --format json)"; \
+	 live_build="$$(printf '%s\n' "$$live_json" | sed -n 's/.*"current_kernel_build_id":"\([^"]*\)".*/\1/p')"; \
+	 test -n "$$expected_build"; \
+	 test -n "$$live_build"; \
+	 if test "$$expected_build" != "$$live_build"; then \
+	  printf 'paid-cycle: stale runtime build; live=%s expected=%s; stop, initialize a fresh runtime, and serve the release build\n' "$$live_build" "$$expected_build" >&2; \
+	  exit 1; \
+	 fi
 
 # The credential is introduced only at the daemon process boundary. Callers
 # must choose the dedicated database and runtime root explicitly; this target
@@ -74,6 +97,7 @@ paid-cycle:
 	printf '%s\n' "$(FACTORY_PAID_CYCLE_BUDGET_MICRO_USD)" | grep -Eq '^[1-9][0-9]*$$'
 	printf '%s\n' "$(FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS)" | grep -Eq '^[1-9][0-9]*$$'
 	test "$(FACTORY_PAID_CYCLE_DEADLINE_UNIX_MILLIS)" -gt "$$(date +%s000)"
+	$(MAKE) paid-cycle-preflight
 	"$(FACTORYCTL)" campaign start \
 		--application-revision-id "$(FACTORY_PAID_CYCLE_APPLICATION_REVISION_ID)" \
 		--expected-application-revision "$(FACTORY_PAID_CYCLE_EXPECTED_APPLICATION_REVISION)" \

@@ -18,7 +18,12 @@ use std::{
     process::{Command, ExitCode},
 };
 
+use factory_kernel::installed_runtime::{
+    InstalledApprovedToolsQualificationV2, InstalledKernelBuildReceiptV2, InstalledRuntimeManifest,
+    InstalledRuntimeQualification, qualify_kernel_binary_v2, qualify_kernel_source_v2,
+};
 use factory_kernel::local_transport::OperatorClient;
+use factory_kernel::storage::SCHEMA_IDENTITY;
 use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
@@ -55,6 +60,16 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         CliCommand::Init(command) => {
             smol::unblock(move || spawn_factoryd_init(&command)).await?;
+        }
+        CliCommand::BuildIdentity(command) => {
+            let build_id = qualified_build_identity(&command)?;
+            if command.json {
+                println!(
+                    "{{\"operation\":\"factoryctl.build.identity\",\"kernel_build_id\":\"{build_id}\"}}"
+                );
+            } else {
+                println!("{build_id}");
+            }
         }
         CliCommand::BackupRestore(arguments) => {
             smol::unblock(move || backup_restore::run(arguments)).await?;
@@ -1261,6 +1276,7 @@ impl CandidateDecision {
 #[derive(Debug, PartialEq, Eq)]
 enum CliCommand {
     Init(InitCommand),
+    BuildIdentity(BuildIdentityArgs),
     BackupRestore(backup_restore::BackupRestoreArguments),
     DaemonStatus(ConnectionArgs),
     Sponsor {
@@ -1335,10 +1351,24 @@ struct InitCommand {
     openrouter_credential_environment: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BuildIdentityArgs {
+    installation_root: Option<PathBuf>,
+    factoryd: Option<PathBuf>,
+    openrouter_credential_environment: String,
+    json: bool,
+}
+
 fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
     let mut values = arguments.into_iter();
     match values.next().as_deref() {
         Some("init") => parse_init(values.collect()).map(CliCommand::Init),
+        Some("build") => match values.next().as_deref() {
+            Some("identity") => {
+                parse_build_identity(values.collect()).map(CliCommand::BuildIdentity)
+            }
+            _ => Err("expected `build identity`".to_owned()),
+        },
         Some("backup-restore") => match values.next().as_deref() {
             Some("qualify") => backup_restore::parse_options(&values.collect::<Vec<_>>())
                 .map(CliCommand::BackupRestore)
@@ -1496,10 +1526,51 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
             _ => Err("expected `forum topics|threads|read|search`".to_owned()),
         },
         _ => Err(
-            "expected `init`, `daemon status`, application/campaign/ticket/candidate/audit commands, or `forum topics|threads|read|search`"
+            "expected `init`, `build identity`, `daemon status`, application/campaign/ticket/candidate/audit commands, or `forum topics|threads|read|search`"
                 .to_owned(),
         ),
     }
+}
+
+fn parse_build_identity(arguments: Vec<String>) -> Result<BuildIdentityArgs, String> {
+    let mut values = arguments.into_iter();
+    let mut installation_root = None;
+    let mut factoryd = None;
+    let mut openrouter_credential_environment = "OPENROUTER_API_KEY".to_owned();
+    let mut json = false;
+    while let Some(flag) = values.next() {
+        match flag.as_str() {
+            "--installation-root" => set_once(
+                &mut installation_root,
+                PathBuf::from(next_value(&mut values, "--installation-root")?),
+                "--installation-root",
+            )?,
+            "--factoryd" => set_once(
+                &mut factoryd,
+                PathBuf::from(next_value(&mut values, "--factoryd")?),
+                "--factoryd",
+            )?,
+            "--provider-credential-environment" => {
+                openrouter_credential_environment = parse_openrouter_credential_environment(
+                    next_value(&mut values, "--provider-credential-environment")?,
+                )?;
+            }
+            "--format" => {
+                let format = next_value(&mut values, "--format")?;
+                if format != "json" || json {
+                    return Err("only one `--format json` is supported".to_owned());
+                }
+                json = true;
+            }
+            _ => return Err(format!("unknown flag {flag}")),
+        }
+    }
+    Ok(BuildIdentityArgs {
+        installation_root,
+        factoryd,
+        openrouter_credential_environment,
+        json,
+    })
 }
 
 fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
@@ -1773,6 +1844,59 @@ fn spawn_factoryd_init(command: &InitCommand) -> Result<(), io::Error> {
             "factoryd init {factoryd:?} exited with {status}"
         )))
     }
+}
+
+fn qualified_build_identity(
+    command: &BuildIdentityArgs,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let installation_root = match &command.installation_root {
+        Some(root) => fs::canonicalize(root)?,
+        None => discover_installation_root().map_err(io::Error::other)?,
+    };
+    if !is_installation_root(&installation_root) {
+        return Err(io::Error::other(format!(
+            "{} is not a complete Factory V3 installation",
+            installation_root.display()
+        ))
+        .into());
+    }
+    let factoryd = match &command.factoryd {
+        Some(path) => fs::canonicalize(path)?,
+        None => default_factoryd_executable().map_err(io::Error::other)?,
+    };
+    let host_source_root = installation_root.join("crates/factory-pi-host");
+    let host_source_files = closed_regular_file_inventory(&host_source_root)?;
+    let host_executable = resolve_host_executable(&installation_root, &factoryd)?;
+    let runtime = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
+        host_executable,
+        host_source_root,
+        host_source_files: host_source_files
+            .into_iter()
+            .map(|path| RuntimeRelativePath::parse(&path))
+            .collect::<Result<Vec<_>, _>>()?,
+    })?;
+    let source_files = closed_kernel_source_files(&installation_root)?;
+    let source = qualify_kernel_source_v2(
+        &installation_root,
+        &source_files
+            .iter()
+            .map(|path| RuntimeRelativePath::parse(path))
+            .collect::<Result<Vec<_>, _>>()?,
+    )?;
+    let binary = qualify_kernel_binary_v2(&factoryd)?;
+    let approved_tools = InstalledApprovedToolsQualificationV2::qualify(
+        &resolve_executable("cargo").map_err(io::Error::other)?,
+        &resolve_executable("git").map_err(io::Error::other)?,
+    )?;
+    let receipt = InstalledKernelBuildReceiptV2::from_qualifications(
+        SCHEMA_IDENTITY.to_owned(),
+        source,
+        binary,
+        approved_tools,
+        runtime,
+        command.openrouter_credential_environment.clone(),
+    )?;
+    Ok(receipt.kernel_build_id().digest().to_hex())
 }
 
 /// The child owns initialization semantics. This CLI's only authority here is
@@ -2635,7 +2759,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl <init|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
+    "usage:\n  factoryctl <init|build identity|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
 }
 
 #[cfg(test)]
@@ -2661,6 +2785,30 @@ mod tests {
         assert_eq!(
             daemon_status_output(&status, false),
             format!("daemon: ready; build {}; revision 7", "a".repeat(64))
+        );
+    }
+
+    #[test]
+    fn build_identity_parser_keeps_qualification_inputs_closed() {
+        let command = parse_args(vec![
+            "build".to_owned(),
+            "identity".to_owned(),
+            "--installation-root".to_owned(),
+            "/opt/factory".to_owned(),
+            "--factoryd".to_owned(),
+            "/opt/factory/factoryd".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+        ])
+        .expect("build identity command");
+        assert_eq!(
+            command,
+            CliCommand::BuildIdentity(BuildIdentityArgs {
+                installation_root: Some(PathBuf::from("/opt/factory")),
+                factoryd: Some(PathBuf::from("/opt/factory/factoryd")),
+                openrouter_credential_environment: "OPENROUTER_API_KEY".to_owned(),
+                json: true,
+            })
         );
     }
 

@@ -13,10 +13,11 @@ make lint
 make release-build
 ```
 
-`make release-build` builds `factoryd`, `factoryctl`, and `factory-pi-host`
-from the same release workspace. `factoryctl init` selects the actor host from
-the same Cargo profile as the selected `factoryd`, preventing mixed debug and
-release protocol binaries from entering an installed runtime.
+`make release-build` first fetches both locked workspaces, then builds
+`factoryd`, `factoryctl`, and `factory-pi-host` from the same release workspace.
+`factoryctl init` selects the actor host from the same Cargo profile as the
+selected `factoryd`, preventing mixed debug and release protocol binaries from
+entering an installed runtime.
 
 `make cache` fetches the two locked Cargo workspaces. `make lint` is the Grand
 Architect's pre-commit gate: it runs the local `pi-agent-core-rs` tests,
@@ -78,13 +79,22 @@ artifacts for sponsorship and final candidate decisions.
 
 ## One-commit paid cycle
 
-The exact request for a bounded paid run is encoded by `make paid-cycle`. It
-admits one provider-backed campaign with `--delivery-target 1`, after checking
-that the installed `factoryctl` exists, the operator socket is live, the
-product checkout is clean, and the application revision, budget, and deadline
-were supplied explicitly. The target does not make the two Architect decisions
-or bypass Product, Engineering, or Quality; those remain durable lifecycle
-gates in the daemon.
+The exact request for a bounded paid run is encoded by `make paid-cycle`. Before
+admission it runs `make release-build`, recomputes the closed build identity
+from the release binaries, Cargo locks, Factory source graph, and local
+`pi-agent-core-rs` checkout, and compares that identity with the live daemon.
+It fails closed on a stale runtime. Only then does it admit one provider-backed
+campaign with `--delivery-target 1`, after checking that the installed
+`factoryctl` exists, the operator socket is live, the product checkout is clean,
+and the application revision, budget, and deadline were supplied explicitly.
+The target does not make the two Architect decisions or bypass Product,
+Engineering, or Quality; those remain durable lifecycle gates in the daemon.
+
+`factoryctl build identity --format json` is the read-only identity probe used
+by that guard. If it differs from `factoryctl daemon status`, stop the daemon,
+initialize a fresh database/runtime pair with the newly built release, serve it
+through `vault OPENROUTER_API_KEY -- ...`, and reread the application revision
+before requesting another paid cycle.
 
 Supply the values read from the live daemon/application status and choose a
 fresh client command ID:
