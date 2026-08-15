@@ -617,7 +617,9 @@ CREATE TABLE factory.candidates (
     regression_test_identity TEXT NOT NULL CHECK (octet_length(regression_test_identity) BETWEEN 1 AND 4096 AND regression_test_identity !~ E'\\000'),
     risks_artifact_id BIGINT NOT NULL REFERENCES factory.artifacts (id),
     candidate_commit TEXT CHECK (octet_length(candidate_commit) BETWEEN 40 AND 64),
-    candidate_ref TEXT CHECK (candidate_ref LIKE 'refs/heads/factory/%' AND octet_length(candidate_ref) <= 512),
+    candidate_ref TEXT CHECK ((candidate_ref LIKE 'refs/heads/factory/%'
+        OR candidate_ref LIKE 'refs/heads/factory-scoped/%')
+        AND octet_length(candidate_ref) <= 512),
     lifecycle SMALLINT NOT NULL CHECK (lifecycle BETWEEN 0 AND 4),
     revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

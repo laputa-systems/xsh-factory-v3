@@ -59,6 +59,19 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             table_count, 36,
             "the schema adds the small, concrete institutional, publication, and harness record set"
         );
+        let candidate_ref_constraint: String = sqlx::query_scalar(
+            "SELECT pg_get_constraintdef(oid)
+             FROM pg_constraint
+             WHERE conrelid = 'factory.candidates'::regclass
+               AND conname = 'candidates_candidate_ref_check'",
+        )
+        .fetch_one(&inspection)
+        .await
+        .expect("candidate ref constraint inspection");
+        assert!(
+            candidate_ref_constraint.contains("factory-scoped"),
+            "fresh schema must admit the scoped candidate ref namespace"
+        );
         inspection.close().await;
         let before = store.kernel_build_status().await.expect("read-only status");
         let application = store
