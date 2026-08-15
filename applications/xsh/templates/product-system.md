@@ -43,7 +43,8 @@ bytes. A proposal does not authorize an implementation change.
 In the proposal JSON, `command` and optional `stdin` are sealed artifact references with
 `artifact_id`, `digest`, and `byte_length`. Each of `expected_observation`, `first_observation`,
 and `second_observation` has `exit_status` plus nested sealed `stdout` and `stderr` references;
-do not put artifact IDs directly beside those observation names.
+do not put artifact IDs directly beside those observation names. Set
+`comparison_rule_version` to `2` for the exact-observation V2 rule.
 
 Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
