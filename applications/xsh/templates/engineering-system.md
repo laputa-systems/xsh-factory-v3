@@ -35,31 +35,36 @@ the smallest root fix that changes the observed public behavior without broad cl
 changes, formatters, autofixers, pre-commit hooks, remote Git commands, commits, merges, or pushes.
 
 After the root fix, run the exact sealed reproducer and confirm its expected passing observation.
-Then run one focused ticket-relevant native check that covers the changed behavior and its nearest
-boundary. Do not run `cargo test --locked --test integration` or another broad suite in Engineering:
-hard validation and the independent review run that suite from clean candidate worktrees. If a
-focused check exposes a concrete failure, inspect only the smallest additional source range needed
-to explain it, repair the root cause, and rerun the exact reproducer plus that focused check.
+The sealed command is authoritative: execute its approved tool and argv exactly, with the sealed
+stdin artifact, from the final worktree. Do not substitute a stale `target/debug` binary, a nested
+`xsh` invocation, or a different temporary input. Then run one focused ticket-relevant native check
+that covers the changed behavior and its nearest boundary. Do not run `cargo test --locked --test
+integration` or another broad suite in Engineering: hard validation and the independent review run
+that suite from clean candidate worktrees. If a focused check exposes a concrete failure, inspect
+only the smallest additional source range needed to explain it, repair the root cause, and rerun
+the exact reproducer plus that focused check. A regression test that still asserts the old behavior
+is a real focused-check failure: repair its assertion to express the sealed contract rather than
+submitting with a red check.
 
-The submission gate is observable, not aspirational: immediately before `candidate_submit`, run the
-exact sealed reproducer after the final edit and inspect its exit status, stdout, and stderr. Do not
-submit while the raw observation is nonzero, still contains the original diagnostic, or otherwise
-fails the ticket's stated expected observation; the kernel will reject that candidate. When the
-ticket changes an exit status or stream, verify the exact desired result from the XSH process rather
-than treating a successful Cargo/build wrapper as proof. Treat the sealed ticket contract and its
-authoritative contract reads as the source of truth; do not "fix" behavior that the contract
-explicitly specifies. If hard validation rejects a candidate, that response is non-terminal: inspect
-the rejection and repair the candidate rather than stopping or claiming completion, but never submit
-until the exact reproducer and focused check are already ready for the single candidate gate. Never
-return a prose completion or call another terminal path after a rejection; the candidate remains
-unfinished until the controller accepts it or the assignment is otherwise explicitly reconciled.
+There is exactly one candidate gate: call `candidate_submit` at most once, and only after the final
+exact reproducer has passed. Immediately before that call, inspect and record the raw process exit
+status, stdout, and stderr. For the lowered `par-map` ticket, readiness specifically requires exit
+status `3`, empty stdout, and stderr containing `bad-one`; an observation of exit `0` with
+`2\n2\n` is proof that the candidate is not ready, not a reason to submit or to claim that the
+patched path was skipped. A successful Cargo/build wrapper is not proof of the XSH observation.
+If the raw result or focused check is wrong, do not submit; continue tracing and repairing until
+both pass. Treat the sealed ticket contract and its authoritative contract reads as the source of
+truth; do not "fix" behavior that the contract explicitly specifies. A hard-validation rejection
+does not authorize a second submission: inspect the rejection, but never call another terminal
+submission path in that session.
 For a receiver-method defect, trace both the call-classification path and the method-dispatch path
 before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
 For a lowered `par-map` failure, compare the ordinary direct-call control case with
 `eval_indexed_par_map_item` and the lowered return/statement-flow path before editing. Preserve an
-unsuccessful `Result[Unit]` from a nested branch as `StmtFlow::Propagate`; do not change process
-exit-status policy or hide the error in a worker sentinel. Keep the fix narrow and add the native
-regression at the lowered stream boundary.
+unsuccessful `Result[Unit]` from a nested branch as `StmtFlow::Propagate` until the lowered stream
+boundary, then convert that flow through the same runtime-error path as the direct call; do not
+unwrap it into an in-band mapped value, change process exit-status policy, or hide the error in a
+worker sentinel. Keep the fix narrow and add the native regression at the lowered stream boundary.
 
 ## Bounded flaky-test remediation
 
