@@ -24,6 +24,14 @@ For that fresh campaign, the Grand Architect must:
 - inspect the resulting Product, Engineering, and Quality evidence before
   making the delivery, bounded rework, or rejection decision.
 
+The office must also inspect recent campaign history and daemon diagnostics as
+trend evidence. Repeated no-ticket outcomes, unknown session costs, assignment
+faults, or runtime-drift signals are a control-plane warning, not ordinary
+iteration: investigate the common cause before authorizing another provider
+spend. Once a runtime is qualified and serving, changes to the Factory source
+graph, dependencies, selected build, or installed host invalidate that runtime
+and require fresh build qualification and runtime initialization.
+
 The request authorizes one fresh campaign only. If that campaign also reaches
 a terminal failure without delivery, stop and report the result; do not start
 another campaign automatically. A further campaign requires another explicit

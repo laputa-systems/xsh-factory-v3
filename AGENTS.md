@@ -26,6 +26,10 @@ For a paid-cycle request, the Grand Architect must:
 
 - inspect the live daemon/application/build state and the clean product
   checkout before spending provider budget;
+- review recent campaign statuses, ticket attempts, session cost states, and
+  daemon diagnostics as a trend; repeated no-ticket outcomes, unknown costs,
+  assignment faults, or runtime-drift signals require root-cause investigation
+  before another paid admission rather than automatic cycle churn;
 - start the campaign through `make paid-cycle`, with an explicit application
   revision, aggregate budget, future deadline, fresh command ID, and the
   target fixed at exactly one delivery;
@@ -35,6 +39,12 @@ For a paid-cycle request, the Grand Architect must:
   Quality evidence, then deliver, request one bounded rework, or reject;
 - stop after the campaign reaches its one-delivery target and prove the result
   with `make paid-cycle-verify`.
+
+After qualification and daemon start, treat the Factory source graph, selected
+build, installed Pi host, application revision, and runtime root as one frozen
+campaign input. A Factory commit, dependency change, rebuild, or runtime
+replacement invalidates that qualification; stop before spending, rebuild and
+reinitialize the runtime, then re-read live identities before admission.
 
 An explicit request to “run a fresh paid cycle” authorizes one new campaign
 after a prior campaign has failed, stopped without a ticket, or produced no

@@ -51,6 +51,14 @@ again before serving the new build. A runtime replacement retires the old
 runtime state: start the new daemon with a fresh database and runtime root
 rather than attempting compatibility recovery or dual dispatch.
 
+Before each paid admission, compare the live daemon/build identity with the
+current Factory source checkout and recent campaign diagnostics. Do not commit,
+rebuild, or change dependency inputs after qualification while a paid campaign
+is relying on that runtime. If the source graph changes, retire the runtime and
+repeat initialization and qualification before spending again; an installed
+runtime-drift fault is evidence of stale admission inputs, not an Engineering
+result to retry in place.
+
 ## Application revisions and campaigns
 
 Use the checked-in `applications/xsh/bundle.v2.json`, then use `factoryctl
