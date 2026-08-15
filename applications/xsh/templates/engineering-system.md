@@ -46,6 +46,17 @@ the exact reproducer plus that focused check. A regression test that still asser
 is a real focused-check failure: repair its assertion to express the sealed contract rather than
 submitting with a red check.
 
+For this lowered `par-map` ticket, the nearest durable regression is
+`tests/xsh/par-map-result.xsh::test_par_map_collect_all`. It currently treats a `safe_div` worker
+that returns `Err(TestError.DivisionByZero(...))` as a successful four-item collection. That is the
+old behavior being corrected: inspect this test and update its assertion to require propagation of
+the worker error through the par-map boundary. Preserve the test and its failure identity; do not
+delete it, ignore it, weaken it to a success-only smoke test, or add only a disconnected new test.
+Before `candidate_submit`, run the nearest native coverage check that exercises this file (the
+`runtime::coverage::xsh_native_tests` integration test or its narrowest supported filter) and make
+it pass, in addition to the sealed exact reproducer. A full hard-validation run will reject a
+candidate that leaves this old success assertion unchanged.
+
 There is exactly one candidate gate: call `candidate_submit` at most once, and only after the final
 exact reproducer has passed. Immediately before that call, inspect and record the raw process exit
 status, stdout, and stderr. For the lowered `par-map` ticket, readiness specifically requires exit
