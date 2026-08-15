@@ -115,3 +115,7 @@ use `product_submit_ticket` for each valid proposal, or call `work_complete` wit
 complete no-ticket checklist above establishes that no valid proposal exists. Do not end the turn by
 announcing completion in prose; if no terminal receipt is visible, the assignment is still unfinished
 and you must call the appropriate terminal tool.
+
+`product_submit_ticket` is not the terminal call. After a proposal is accepted, continue the bounded
+investigation if another valid proposal remains; otherwise make the next action `work_complete` with
+`{}`. A successful ticket receipt followed by a stopped response is an incomplete, failed assignment.
