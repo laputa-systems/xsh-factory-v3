@@ -886,6 +886,9 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
         if sanitized.contains("sealed reproducer command differs from its named admitted profile") {
             return "The sealed reproducer command must exactly match the assigned `reproducer` profile. Use the exact canonical JSON profile supplied in the assignment as the command artifact; keep the target executable only inside the sealed stdin program, then submit again.".into();
         }
+        if sanitized.contains("discovery did not reproduce one exact failure twice") {
+            return "The `expected_observation` must describe the desired fixed behavior, not the failing run. Set its exit_status/stdout/stderr to the contractually expected result (usually the admitted profile's successful status), keep first_observation and second_observation as the identical actual failure, then resubmit the same proposal; do not call work_complete after this rejection.".into();
+        }
         if sanitized.contains("ticket contract reads paths must be unique") {
             return "Use one `contract_reads` entry per repository path. Combine relevant constraints from the same file in that entry's reason, then submit again.".into();
         }
@@ -1363,6 +1366,18 @@ mod tests {
         );
         assert!(diagnostic.contains("exact receipt returned by that artifact_seal call"));
         assert!(diagnostic.contains("resubmit the same proposal"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn product_reproduction_failure_separates_expected_and_actual_observations() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "kernel-owned discovery did not reproduce one exact failure twice",
+        );
+        assert!(diagnostic.contains("expected_observation"));
+        assert!(diagnostic.contains("actual failure"));
+        assert!(diagnostic.contains("do not call work_complete"));
         assert!(diagnostic.len() <= 512);
     }
 }
