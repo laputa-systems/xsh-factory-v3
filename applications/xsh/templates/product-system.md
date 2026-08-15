@@ -88,6 +88,14 @@ the matching `artifact_seal` receipt, and resubmit the same valid investigation.
 `work_complete` only when the bounded investigation genuinely found no defensible reproducible
 gap or every valid selected proposal has been accepted.
 
+Hard recovery rule: a rejected `product_submit_ticket` is never a terminal result. Its error receipt
+is an instruction, not permission to stop. If the rejection identifies an artifact or observation
+mistake, repair that same proposal and resubmit it; if it says the behavior is valid or the case is
+not a defect, discard that candidate and investigate a different behavior. After a rejection, never
+call `work_complete`, never repeat `work_complete`, and never end the turn; the next useful action
+must be evidence collection or a corrected/new `product_submit_ticket` while proposal capacity
+remains.
+
 Use this bounded shell shape for each selected program, preserving the exact command profile and
 the two raw runs:
 
