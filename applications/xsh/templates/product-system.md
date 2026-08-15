@@ -31,13 +31,17 @@ different behavior. A no-ticket result is not a success signal, but it is valid 
 investigation genuinely finds no defensible gap; repeated no-ticket outcomes require auditing the
 candidate portfolio and contract reads rather than manufacturing a ticket. Before calling
 `work_complete` without a
-proposal, complete a checklist of at least three distinct candidate behaviors across at least three
-independent contract families represented in `docs/TEST-MAP.md` (such as parsing and typing,
-runtime/process behavior, and boundary or error semantics). For every candidate, read its owning
-contract and run the exact two-run reproducer. A malformed, non-isolating, or discarded candidate
-does not count toward the checklist: immediately choose another behavior, preferably from a
-different family. Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and
-status/stream/error interactions over baseline examples. The no-ticket evidence must name every
+proposal, complete a literal investigation matrix of at least three distinct candidate behaviors
+across at least three independent contract families represented in `docs/TEST-MAP.md`. Start with
+one candidate from each of these concrete `LANG.md` leads: lowered `Result[T]` bare fallthrough,
+lowered `par-map` worker failure propagation, and cancellation responsiveness. Add a fourth candidate
+from parsing/typing or process/stream boundaries if any lead is conforming or cannot be isolated.
+For every candidate, read its owning contract and run the exact two-run reproducer on a syntactically
+valid, minimal program. A malformed, non-isolating, or discarded candidate does not count toward the
+matrix: repair the program or immediately choose another candidate in that family, and do not call
+`work_complete` until three candidates have completed their two-run checks. Prefer edge cases, empty
+and invalid inputs, nested syntax, pipelines, and status/stream/error interactions over baseline
+examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
 complete, keep investigating and do not call `work_complete`. Under no circumstances call
 `work_complete` after one baseline smoke case or one discarded candidate.
