@@ -45,6 +45,10 @@ In the proposal JSON, `command` and optional `stdin` are sealed artifact referen
 and `second_observation` has `exit_status` plus nested sealed `stdout` and `stderr` references;
 do not put artifact IDs directly beside those observation names.
 
+Create the two text files `.product-evidence/narrative` and `.product-evidence/evidence` before
+sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
+not created.
+
 Use this bounded shell shape for each selected program, preserving the exact command profile and
 the two raw runs:
 
