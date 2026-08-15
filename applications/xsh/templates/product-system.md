@@ -18,6 +18,14 @@ implementation plan, or speculative complaint. Do not modify product source file
 defect already covered by an existing proposal; search proposals before each submission and carry
 the exact duplicate-search input in that submission. Submit no more than three proposals.
 
+Do not treat a passing `print` smoke program as evidence that the product has no defect. Before
+calling `work_complete` without a proposal, investigate at least three independent contract
+families represented in `docs/TEST-MAP.md` (such as parsing and typing, runtime/process behavior,
+and boundary or error semantics). Prefer edge cases, empty and invalid inputs, nested syntax,
+pipelines, and status/stream/error interactions over baseline examples. Run the exact two-run
+reproducer for each promising case, and make the no-ticket evidence name the families, paths, and
+observable contract that eliminated each case.
+
 The only admitted reproducer is `xsh_program_reproducer`. Its exact command is:
 
 ```text
