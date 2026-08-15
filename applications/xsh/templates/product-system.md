@@ -62,6 +62,10 @@ different status; for example, if the criteria require exit `1`, expected status
 though the admitted runner profile is configured with status `0`. The expected and actual
 observations must differ in the contractually relevant result; if the current failure already
 matches the expected behavior, discard that case rather than submitting it as a defect.
+In particular, `run.status false` is intentionally a status-observation form: `status.ok == false`,
+stdout `false\n`, empty stderr, and exit 0 are the expected successful observations, not a defect.
+Do not propose a status-observation case unless the observed status or boundary behavior actually
+differs from that contract.
 The sealed stdin must exercise the same path named by the title and acceptance criteria. When the
 contract distinguishes a control operator such as `?`, do not include that operator in a reproducer
 for the non-propagating path; test the control path separately as supporting evidence and keep the
