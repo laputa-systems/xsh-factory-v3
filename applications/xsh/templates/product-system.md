@@ -46,6 +46,11 @@ matrix: repair the program or replace that row with another candidate in the sam
 Before `work_complete`, verify that the transcript contains three completed rows, six raw runs, and
 the contract path plus result for each row. The controller does not infer this checklist for you;
 calling `work_complete` after only one row is an unfinished assignment and will fail the campaign.
+After row one is eliminated, the next useful action must be a shell run for row two; after row two
+is eliminated, the next useful action must be a shell run for row three. Do not write final evidence,
+seal the no-ticket records, or call `work_complete` between those rows. If a row's lead is stale,
+replace it in the same family and run that replacement twice; do not treat a stale lead as permission
+to stop the matrix.
 Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and status/stream/error
 interactions over baseline examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
