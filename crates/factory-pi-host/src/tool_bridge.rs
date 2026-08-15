@@ -233,7 +233,7 @@ impl std::error::Error for DaemonError {}
 #[derive(Clone, Debug)]
 pub struct CommandContext {
     /// Expected aggregate revision for the current actor connection.
-    pub session_revision: u64,
+    session_revision: Arc<AtomicU64>,
     next_command_id: Arc<AtomicU64>,
 }
 
@@ -241,9 +241,19 @@ impl CommandContext {
     /// Construct a context at the daemon-admitted revision.
     pub fn new(session_revision: u64) -> Self {
         Self {
-            session_revision,
+            session_revision: Arc::new(AtomicU64::new(session_revision)),
             next_command_id: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Return the latest daemon aggregate revision observed by this actor.
+    pub fn current_revision(&self) -> u64 {
+        self.session_revision.load(Ordering::Acquire)
+    }
+
+    /// Advance the actor revision after a successful daemon mutation.
+    pub fn advance_revision(&self, revision: u64) {
+        self.session_revision.fetch_max(revision, Ordering::AcqRel);
     }
 
     fn next_command_id(&self, tool: ToolName) -> String {
@@ -450,7 +460,7 @@ impl<C> fmt::Debug for FactoryCapability<C> {
         formatter
             .debug_struct("FactoryCapability")
             .field("tools", &self.tools.keys().collect::<Vec<_>>())
-            .field("session_revision", &self.command_context.session_revision)
+            .field("session_revision", &self.command_context.current_revision())
             .finish_non_exhaustive()
     }
 }
@@ -550,6 +560,9 @@ where
                     message: task_diagnostic(name, &error),
                 }
             })?;
+            if let Some(revision) = value.get("aggregate_revision").and_then(JsonValue::as_u64) {
+                self.command_context.advance_revision(revision);
+            }
             value
         } else {
             let local = self
@@ -671,7 +684,7 @@ fn normalize_wire_input(
         if name != ToolName::PublicationCreate {
             object.insert(
                 "expected_revision".into(),
-                JsonValue::number(JsonNumber::Unsigned(command_context.session_revision))
+                JsonValue::number(JsonNumber::Unsigned(command_context.current_revision()))
                     .map_err(|error| error.to_string())?,
             );
         }

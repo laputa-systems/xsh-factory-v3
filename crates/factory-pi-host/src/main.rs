@@ -56,11 +56,12 @@ async fn run() -> Result<(), String> {
         runtime::RootedWorkspace::new(&admission.packet.workspace_root)
             .map_err(|e| e.to_string())?,
     );
+    let command_context = CommandContext::new(admission.frame.session_revision);
     let input = build_factory_execution_input(
         admission.clone(),
         Arc::clone(&provider) as Arc<dyn ModelProvider>,
         Arc::clone(&daemon),
-        CommandContext::new(admission.frame.session_revision),
+        command_context.clone(),
         terminal,
         Some(workspace),
         PolicyLimits::default(),
@@ -75,7 +76,8 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let transcript = write_transcript(&admission, &result.events)?;
-    let transcript_id = seal_transcript(daemon.as_ref(), &admission, transcript).await?;
+    let transcript_id =
+        seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
     let usage = provider.usage_snapshot();
     let completed = result.terminal.is_some() && result.cost_micro_usd.is_some();
     let terminal_operation = completed
@@ -110,7 +112,7 @@ async fn run() -> Result<(), String> {
                 ),
                 (
                     "expected_revision",
-                    number(admission.frame.session_revision)?,
+                    number(command_context.current_revision())?,
                 ),
                 ("terminal_operation", optional_string(terminal_operation)),
                 (
@@ -179,6 +181,7 @@ async fn seal_transcript(
     daemon: &runtime::InheritedDaemon,
     admission: &Admission,
     transcript: Vec<u8>,
+    command_context: &CommandContext,
 ) -> Result<i64, String> {
     let path = Path::new(&admission.packet.staging_root).join("session.ndjson.gz");
     fs::write(path, transcript).map_err(|e| format!("write transcript: {e}"))?;
@@ -192,7 +195,7 @@ async fn seal_transcript(
                 ),
                 (
                     "expected_revision",
-                    number(admission.frame.session_revision)?,
+                    number(command_context.current_revision())?,
                 ),
                 (
                     "staging_relative_path",
@@ -207,6 +210,15 @@ async fn seal_transcript(
         )
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(error_code) = response.get("error_code").and_then(JsonValue::as_str) {
+        let message = response
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("no rejection detail provided");
+        return Err(format!(
+            "daemon transcript seal rejected: {error_code}: {message}"
+        ));
+    }
     let text = response.to_json_string().map_err(|e| e.to_string())?;
     let receipt: ArtifactReceiptResponse = miniserde::json::from_str(&text)
         .map_err(|_| "daemon transcript receipt is invalid".to_owned())?;
@@ -215,6 +227,7 @@ async fn seal_transcript(
     {
         return Err("daemon transcript receipt is outside packet limits".to_owned());
     }
+    command_context.advance_revision(receipt.aggregate_revision);
     Ok(receipt.artifact_id)
 }
 
