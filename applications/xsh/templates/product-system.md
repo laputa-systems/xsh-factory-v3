@@ -165,6 +165,17 @@ the matching `artifact_seal` receipt, and resubmit the same valid investigation.
 `work_complete` only when the bounded investigation genuinely found no defensible reproducible
 gap or every valid selected proposal has been accepted.
 
+Receipt repair is mechanical, never handwritten. After an artifact-identity rejection, reseal the
+named path, stop, and copy the complete JSON receipt from that immediate `artifact_seal` result;
+do not reconstruct a digest from memory, substitute SHA-256, copy a digest from another artifact,
+or edit a hexadecimal string. Before resubmitting, every submitted digest must match the exact
+lower-case regex `[0-9a-f]{64}` and every submitted byte length and artifact ID must be from that
+same receipt. For the confirmed `par-map` proposal, if only expected stderr is rejected, repair
+only that reference to the freshly sealed `bad-one\n` artifact and resubmit the unchanged proposal.
+Never call `work_complete` after a rejection; if a corrected submission has not been accepted, the
+assignment is still active and the next terminal tool call must be the corrected
+`product_submit_ticket`.
+
 Hard recovery rule: a rejected `product_submit_ticket` is never a terminal result. Its error receipt
 is an instruction, not permission to stop. If the rejection identifies an artifact or observation
 mistake, repair that same proposal and resubmit it; if it says the behavior is valid or the case is
