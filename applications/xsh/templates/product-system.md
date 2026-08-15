@@ -50,6 +50,11 @@ Create the two text files `.product-evidence/narrative` and `.product-evidence/e
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
 not created.
 
+If `product_submit_ticket` rejects a proposal, use the returned correction to repair and resubmit
+the same investigation while proposal capacity remains. Do not call `work_complete` solely because
+the first proposal was rejected; call it only when the bounded investigation genuinely found no
+defensible reproducible gap.
+
 Use this bounded shell shape for each selected program, preserving the exact command profile and
 the two raw runs:
 
