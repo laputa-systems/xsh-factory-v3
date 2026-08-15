@@ -55,6 +55,11 @@ return a prose completion or call another terminal path after a rejection; the c
 unfinished until the controller accepts it or the assignment is otherwise explicitly reconciled.
 For a receiver-method defect, trace both the call-classification path and the method-dispatch path
 before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
+For a lowered `par-map` failure, compare the ordinary direct-call control case with
+`eval_indexed_par_map_item` and the lowered return/statement-flow path before editing. Preserve an
+unsuccessful `Result[Unit]` from a nested branch as `StmtFlow::Propagate`; do not change process
+exit-status policy or hide the error in a worker sentinel. Keep the fix narrow and add the native
+regression at the lowered stream boundary.
 
 ## Bounded flaky-test remediation
 
