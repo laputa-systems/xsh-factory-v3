@@ -41,6 +41,12 @@ hard validation and the independent review run that suite from clean candidate w
 focused check exposes a concrete failure, inspect only the smallest additional source range needed
 to explain it, repair the root cause, and rerun the exact reproducer plus that focused check.
 
+The submission gate is observable, not aspirational: immediately before `candidate_submit`, run the
+exact sealed reproducer after the final edit and inspect its exit status and stderr. Do not submit
+while it returns a nonzero status or the original diagnostic; the kernel will reject that candidate.
+For a receiver-method defect, trace both the call-classification path and the method-dispatch path
+before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
+
 ## Bounded flaky-test remediation
 
 If a required validation test fails, first decide whether it is a real regression or a flaky
