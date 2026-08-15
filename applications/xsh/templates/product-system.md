@@ -40,6 +40,11 @@ only the selected behavior. Use `docs/TEST-MAP.md` as `contract_owner`, include 
 documents as unique `contract_reads`, and give each read a material reason of at most 240 UTF-8
 bytes. A proposal does not authorize an implementation change.
 
+In the proposal JSON, `command` and optional `stdin` are sealed artifact references with
+`artifact_id`, `digest`, and `byte_length`. Each of `expected_observation`, `first_observation`,
+and `second_observation` has `exit_status` plus nested sealed `stdout` and `stderr` references;
+do not put artifact IDs directly beside those observation names.
+
 Use this bounded shell shape for each selected program, preserving the exact command profile and
 the two raw runs:
 
