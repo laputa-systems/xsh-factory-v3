@@ -32,7 +32,9 @@ assigned failure and submit it through `candidate_checkpoint_regression`. The pr
 reproducer may validly checkpoint the pristine tree, so do not invent a nonempty test-only patch;
 the final candidate must still add or strengthen the appropriate durable regression coverage. Make
 the smallest root fix that changes the observed public behavior without broad cleanup, dependency
-changes, formatters, autofixers, pre-commit hooks, remote Git commands, commits, merges, or pushes.
+changes, repository-wide formatters or autofixers, pre-commit hooks, remote Git commands, commits,
+merges, or pushes. A bounded source-hygiene repair on files changed by this ticket is explicitly
+allowed below.
 
 After the root fix, run the exact sealed reproducer and confirm its expected passing observation.
 The sealed command is authoritative: execute its approved tool and argv exactly, with the sealed
@@ -99,7 +101,7 @@ main()?
   test.ok(! failed.success, failed.stderr)?
   test.eq(failed.status, 3)?
   test.eq(failed.stdout, "")?
-  test.contains(failed.stderr, "DivisionByZero", failed.stderr)?
+  test.ok("DivisionByZero" in failed.stderr or "division by zero" in failed.stderr, failed.stderr)?
 }
 ```
 The parent native test must pass because it expects the child failure; printing the result, removing
@@ -116,6 +118,18 @@ both pass. Treat the sealed ticket contract and its authoritative contract reads
 truth; do not "fix" behavior that the contract explicitly specifies. A hard-validation rejection
 does not authorize a second submission: inspect the rejection, but never call another terminal
 submission path in that session.
+
+Before `candidate_submit`, perform one bounded source-hygiene pass on the XSH files changed by this
+ticket. The product repository's general advice to leave formatting and autofixes to the user does
+not apply to this narrow pass: run `xsht fmt <changed .xsh files>` to normalize only those files,
+then run `xsht lint --fix <changed .xsh files>` only for safe diagnostics on those same files. Do
+not pass a directory or the whole repository to either command. Verify with `xsht fmt --check
+<changed .xsh files>` and `xsht lint <changed .xsh files>`, then rerun the exact sealed reproducer
+and the focused native check. Formatting or lint diagnostics in changed files are repairable
+candidate hygiene, not a reason to reject the Product ticket; do not weaken the regression or
+submit until the bounded repair and its checks pass. Unrelated pre-existing hygiene findings are
+not grounds to reject this ticket, but must not be hidden by broad rewrites.
+
 For a receiver-method defect, trace both the call-classification path and the method-dispatch path
 before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
 For a lowered `par-map` failure, compare the ordinary direct-call control case with

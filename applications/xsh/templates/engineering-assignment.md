@@ -9,7 +9,9 @@ problem. Keep the regression checkpoint free of an implementation fix. Make the 
 and any required canonical documentation update. Your final `candidate_submit` supplies only the
 normalized commit message and regression test identity; the provided tooling derives the worktree,
 patch, completion record, and risks record from controller-owned evidence. Do not commit, change
-HEAD, run a formatter/autofixer, invoke pre-commit, or contact a Git remote.
+HEAD, invoke pre-commit, or contact a Git remote. A bounded `xsht fmt` or `xsht lint --fix` pass
+on files changed by this ticket is allowed when required for candidate hygiene; do not run either
+command repository-wide.
 
 If validation exposes a flaky test unrelated to the assigned contract, follow the bounded flaky-test
 policy in the Engineering system instructions: spend at most ten minutes and two focused reruns

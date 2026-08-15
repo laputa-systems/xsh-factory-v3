@@ -24,8 +24,11 @@
    unrelated validation test is proven flaky, Engineering has a ten-minute,
    two-rerun remediation budget; a narrowly named reversible disable may be
    used only after an isolated pass, with the original test body retained and
-   the rationale recorded. This is a candidate change, not a validation
-   waiver. A passing candidate is not yet delivered.
+   the rationale recorded. Before submission, it may also apply one bounded
+   formatter/lint repair to files changed by the ticket and rerun the exact
+   reproducer plus focused check. This is candidate hygiene, not a validation
+   waiver: broad rewrites remain forbidden, and a passing candidate is not yet
+   delivered.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery

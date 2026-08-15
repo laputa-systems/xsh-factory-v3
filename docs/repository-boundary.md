@@ -10,6 +10,13 @@ It is never the factory database, ticket buffer, transcript store, CAS, or
 workflow state. Factory work reaches it only through kernel-owned isolated
 worktrees and guarded local fast-forward delivery.
 
+The pinned `pi-agent-core-rs` checkout is a runtime source dependency, not an
+XSH assignment workspace. A future `factory-engineer` core lane must bind its
+own application revision and isolated worktree to that repository; an XSH
+campaign cannot edit or deliver core changes. Core delivery changes the
+qualified runtime and therefore requires the daemon-stopped rebuild and
+requalification boundary described in `V1.md`.
+
 The dependency direction is deliberately one way:
 
 ```text
