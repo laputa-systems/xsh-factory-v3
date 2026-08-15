@@ -384,6 +384,41 @@ impl CandidateRefName {
     }
 
     #[must_use]
+    pub fn new_scoped(
+        ticket_id: TicketId,
+        candidate_id: CandidateId,
+        engineering_session_digest: &ContentDigest,
+    ) -> Self {
+        Self(format!(
+            "refs/heads/factory/{}/{}/{}",
+            ticket_id.get(),
+            candidate_id.get(),
+            engineering_session_digest.to_hex(),
+        ))
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, GitCustodyError> {
+        let value = value.into();
+        let Some(suffix) = value.strip_prefix("refs/heads/factory/") else {
+            return Err(GitCustodyError::InvalidCandidateRef);
+        };
+        let fields: Vec<_> = suffix.split('/').collect();
+        let valid = matches!(fields.len(), 2 | 3)
+            && fields[..2].iter().all(|field| {
+                !field.is_empty()
+                    && !field.starts_with('0')
+                    && field.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            && (fields.len() == 2
+                || (fields[2].len() == 64
+                    && fields[2].bytes().all(|byte| byte.is_ascii_hexdigit())));
+        if !valid || value.len() > 512 {
+            return Err(GitCustodyError::InvalidCandidateRef);
+        }
+        Ok(Self(value))
+    }
+
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -2413,6 +2448,8 @@ pub enum GitCustodyError {
     CandidateCommitTreeMismatch { expected: String, observed: String },
     #[error("candidate ref compare-and-swap conflicts")]
     CandidateRefConflict,
+    #[error("candidate ref is not a bounded local factory ref")]
+    InvalidCandidateRef,
     #[error("candidate ref no longer names candidate commit")]
     CandidateRefDoesNotBindCommit,
     #[error("candidate is not a one-parent child of the qualified base")]

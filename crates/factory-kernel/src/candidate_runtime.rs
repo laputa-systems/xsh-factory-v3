@@ -854,9 +854,10 @@ pub async fn resume_candidate_commit_attach(
         &authority.repository,
         &ConstructCandidateCommit {
             candidate_tree: authority.candidate_tree.clone(),
-            candidate_ref: CandidateRefName::new(
+            candidate_ref: CandidateRefName::new_scoped(
                 authority.ticket.ticket_id,
                 authority.candidate_id,
+                &authority.commit.engineering_session_digest,
             ),
             message,
             author: authority.commit.author.clone(),

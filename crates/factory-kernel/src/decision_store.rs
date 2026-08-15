@@ -765,16 +765,24 @@ impl DecisionStore {
             return Err(DecisionStoreError::HardValidationMissing);
         }
         let attempt = lock_candidate_attempt(&mut tx, candidate.ticket_attempt_id).await?;
-        // The Git custody ref is not merely shaped like a Factory ref: it
-        // names this exact durable ticket/candidate pair, preventing a
-        // qualified commit from being attached under another aggregate's ref.
-        if command.candidate_ref
-            != format!(
-                "refs/heads/factory/{}/{}",
-                attempt.ticket_id,
-                command.candidate_id.get()
-            )
-        {
+        let legacy_ref = format!(
+            "refs/heads/factory/{}/{}",
+            attempt.ticket_id,
+            command.candidate_id.get()
+        );
+        let session_digest = sqlx::query_scalar!(
+            "SELECT artifact.digest
+               FROM factory.candidates AS candidate
+               JOIN factory.sessions AS session ON session.id = candidate.engineering_session_id
+               JOIN factory.artifacts AS artifact ON artifact.id = session.transcript_artifact_id
+              WHERE candidate.id = $1",
+            command.candidate_id.get(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(DecisionStoreError::InvalidCandidateRef)?;
+        let scoped_ref = format!("{legacy_ref}/{}", hex_digest(&session_digest));
+        if command.candidate_ref != legacy_ref && command.candidate_ref != scoped_ref {
             return Err(DecisionStoreError::InvalidCandidateRef);
         }
         let next = candidate.revision.next()?;
@@ -2559,17 +2567,24 @@ fn validate_candidate_ref(value: &str) -> Result<(), DecisionStoreError> {
     let Some(candidate_id) = fields.next() else {
         return Err(DecisionStoreError::InvalidCandidateRef);
     };
-    if fields.next().is_some()
-        || value.len() > 512
+    let scope = fields.next();
+    if value.len() > 512
         || [ticket_id, candidate_id].iter().any(|field| {
             field.is_empty()
                 || field.starts_with('0')
                 || !field.bytes().all(|byte| byte.is_ascii_digit())
         })
+        || scope.is_some_and(|field| {
+            field.len() != 64 || !field.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
     {
         return Err(DecisionStoreError::InvalidCandidateRef);
     }
     Ok(())
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn validate_requalification(value: &CurrentHeadRequalification) -> Result<(), DecisionStoreError> {
@@ -2949,10 +2964,14 @@ mod tests {
     #[test]
     fn candidate_ref_never_accepts_a_remote_or_revision_expression() {
         assert!(validate_candidate_ref("refs/heads/factory/12/34").is_ok());
+        assert!(
+            validate_candidate_ref(&format!("refs/heads/factory/12/34/{}", "a".repeat(64))).is_ok()
+        );
         for invalid in [
             "refs/remotes/origin/main",
             "refs/heads/factory/12/../34",
             "refs/heads/factory/12/34^{tree}",
+            "refs/heads/factory/12/34/not-a-digest",
             "refs/heads/factory/12/34\nnext",
         ] {
             assert!(validate_candidate_ref(invalid).is_err(), "{invalid}");

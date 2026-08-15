@@ -877,6 +877,24 @@ fn commit_request(
     }
 }
 
+#[test]
+fn restarted_runtime_candidates_use_distinct_scoped_refs() {
+    let first = CandidateRefName::new_scoped(
+        TicketId::new(1).unwrap(),
+        CandidateId::new(1).unwrap(),
+        &ContentDigest::of_bytes(b"first engineering transcript"),
+    );
+    let second = CandidateRefName::new_scoped(
+        TicketId::new(1).unwrap(),
+        CandidateId::new(1).unwrap(),
+        &ContentDigest::of_bytes(b"second engineering transcript"),
+    );
+
+    assert_ne!(first.as_str(), second.as_str());
+    assert_eq!(CandidateRefName::parse(first.as_str()).unwrap(), first);
+    assert_eq!(CandidateRefName::parse(second.as_str()).unwrap(), second);
+}
+
 fn system_git() -> PathBuf {
     for candidate in ["/usr/bin/git", "/usr/local/bin/git"] {
         if let Ok(path) = fs::canonicalize(candidate) {

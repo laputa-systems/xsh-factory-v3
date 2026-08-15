@@ -408,8 +408,9 @@ impl DurableAuthorityResolver {
     ) -> Result<DeliveryReceipt, String> {
         let row = sqlx::query!(
             "SELECT c.ticket_attempt_id, c.base_commit, c.candidate_tree, c.candidate_commit,
+                    c.candidate_ref,
                     c.revision AS candidate_revision, ta.revision AS attempt_revision,
-                    tr.revision AS ticket_revision, tr.ticket_id, tr.application_revision_id,
+                    tr.revision AS ticket_revision, tr.application_revision_id,
                     camp.revision AS campaign_revision, camp.cost_state,
                     camp.measured_cost_micro_usd, kb.build_digest
                FROM factory.candidates c
@@ -430,7 +431,6 @@ impl DurableAuthorityResolver {
             .load_application(application_revision_id)
             .await?
             .repository;
-        let ticket_id = TicketId::new(row.ticket_id).map_err(|error| error.to_string())?;
         let candidate_commit = GitCommitId::parse(
             row.candidate_commit
                 .ok_or_else(|| "accepted candidate is missing its local commit".to_owned())?,
@@ -440,7 +440,11 @@ impl DurableAuthorityResolver {
             .map_err(|error| error.to_string())?;
         let candidate_tree = GitTreeId::parse(row.candidate_tree)
             .map_err(|error| format!("stored candidate tree is invalid: {error}"))?;
-        let candidate_ref = CandidateRefName::new(ticket_id, command.candidate_id);
+        let candidate_ref = CandidateRefName::parse(
+            row.candidate_ref
+                .ok_or_else(|| "accepted candidate is missing its local ref".to_owned())?,
+        )
+        .map_err(|error| format!("stored candidate ref is invalid: {error}"))?;
         let expected_old_commit_object = RepositoryObjectIdV2::parse(row.base_commit.clone())
             .map_err(|error| format!("stored candidate base object is invalid: {error}"))?;
         let expected_old_commit = GitCommitId::parse(row.base_commit)
