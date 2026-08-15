@@ -98,7 +98,7 @@ return {
         tool("workspace_edit", "Apply a bounded edit beneath the assigned workspace.", edit_schema, "workspace.edit"),
         tool("workspace_search", "Search the assigned workspace with bounded filters.", search_schema, "workspace.search"),
         tool("workspace_list", "List entries beneath the assigned workspace.", list_schema, "workspace.list"),
-        tool("shell", "Run one bounded command in the assigned workspace.", shell_schema, "workspace.shell"),
+        tool("shell", "Run one bounded command in the assigned workspace.", shell_schema, "shell.exec"),
         tool("forum_search", "Search discussion history with bounded filters and continuation.", forum_search_schema, "forum.search"),
         tool("forum_list_topics", "List discussion topics by recent activity.", forum_topics_schema, "forum.list_topics"),
         tool("forum_list_threads", "List threads in one discussion topic by recent activity.", forum_threads_schema, "forum.list_threads"),

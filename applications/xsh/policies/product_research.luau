@@ -75,7 +75,7 @@ return {
         tool("workspace_read", "Read exact bytes from one path in the assigned workspace.", read_schema, "workspace.read"),
         tool("workspace_search", "Search the assigned workspace with bounded filters.", search_schema, "workspace.search"),
         tool("workspace_list", "List entries beneath the assigned workspace.", list_schema, "workspace.list"),
-        tool("shell", "Run one bounded command in the assigned workspace.", shell_schema, "workspace.shell"),
+        tool("shell", "Run one bounded command in the assigned workspace.", shell_schema, "shell.exec"),
         tool("artifact_seal", "Seal one workspace file as immutable assignment evidence.", artifact_seal_schema, "artifact.seal_workspace_file"),
         tool("product_submit_ticket", "Submit one complete reproducible XSH defect proposal.", product_submit_schema, "product.submit_ticket"),
         tool("work_complete", "Complete this assignment without another proposal.", terminal_schema, "work.complete"),
