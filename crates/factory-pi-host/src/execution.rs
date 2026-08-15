@@ -448,11 +448,24 @@ impl PreparedExecution {
             .agent
             .start_prompt(prompt)
             .map_err(ExecutionError::Core)?;
-        handle.drive().await.map_err(ExecutionError::Core)?;
+        let drive_result = handle.drive().await;
         let snapshot = handle.snapshot();
+        let events = handle.events();
+        if let Err(error) = drive_result {
+            let diagnostics = self.turn_budget.diagnostics(&events);
+            eprintln!(
+                "factory-pi-host execution failure: turns_started={} turn_limit={} turn_limit_reached={} phase={:?} event_count={} error={error}",
+                diagnostics.turns_started,
+                diagnostics.turn_limit,
+                diagnostics.turn_limit_reached,
+                snapshot.phase,
+                events.len(),
+            );
+            return Err(ExecutionError::Core(error));
+        }
         Ok(ExecutionResult::from_run(
             snapshot,
-            handle.events(),
+            events,
             self.terminal.pending(),
             self.cost_reader.as_ref().and_then(|reader| reader()),
             &self.turn_budget,

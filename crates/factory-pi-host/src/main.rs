@@ -72,12 +72,16 @@ async fn run() -> Result<(), String> {
         Some(cost_reader),
     )
     .map_err(|e| e.to_string())?;
-    let result = input
-        .prepare()
-        .map_err(|e| e.to_string())?
-        .drive()
-        .await
-        .map_err(|e| e.to_string())?;
+    let prepared = input.prepare().map_err(|e| e.to_string())?;
+    let result = match prepared.drive().await {
+        Ok(result) => result,
+        Err(error) => {
+            if let Some(report) = provider.last_error_report() {
+                eprintln!("factory-pi-host provider failure: {report}");
+            }
+            return Err(error.to_string());
+        }
+    };
     eprintln!(
         "factory-pi-host execution: turns_started={} turn_limit={} turn_limit_reached={} stop_reason={:?} terminal={} cost_known={}",
         result.diagnostics.turns_started,
