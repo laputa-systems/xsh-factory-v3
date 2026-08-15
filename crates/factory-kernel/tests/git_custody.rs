@@ -895,6 +895,22 @@ fn restarted_runtime_candidates_use_distinct_scoped_refs() {
     assert_eq!(CandidateRefName::parse(second.as_str()).unwrap(), second);
 }
 
+#[test]
+fn distinct_runtime_roots_never_reuse_candidate_refs() {
+    let first = Fixture::new();
+    let second = Fixture::new();
+    let first_ref = first.custody.candidate_ref(
+        TicketId::new(1).unwrap(),
+        CandidateId::new(1).unwrap(),
+    );
+    let second_ref = second.custody.candidate_ref(
+        TicketId::new(1).unwrap(),
+        CandidateId::new(1).unwrap(),
+    );
+
+    assert_ne!(first_ref, second_ref);
+}
+
 fn system_git() -> PathBuf {
     for candidate in ["/usr/bin/git", "/usr/local/bin/git"] {
         if let Ok(path) = fs::canonicalize(candidate) {

@@ -770,19 +770,10 @@ impl DecisionStore {
             attempt.ticket_id,
             command.candidate_id.get()
         );
-        let session_digest = sqlx::query_scalar!(
-            "SELECT artifact.digest
-               FROM factory.candidates AS candidate
-               JOIN factory.sessions AS session ON session.id = candidate.engineering_session_id
-               JOIN factory.artifacts AS artifact ON artifact.id = session.transcript_artifact_id
-              WHERE candidate.id = $1",
-            command.candidate_id.get(),
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(DecisionStoreError::InvalidCandidateRef)?;
-        let scoped_ref = format!("{legacy_ref}/{}", hex_digest(&session_digest));
-        if command.candidate_ref != legacy_ref && command.candidate_ref != scoped_ref {
+        let scoped_prefix = format!("{legacy_ref}/");
+        if command.candidate_ref != legacy_ref
+            && !command.candidate_ref.starts_with(&scoped_prefix)
+        {
             return Err(DecisionStoreError::InvalidCandidateRef);
         }
         let next = candidate.revision.next()?;
@@ -2581,10 +2572,6 @@ fn validate_candidate_ref(value: &str) -> Result<(), DecisionStoreError> {
         return Err(DecisionStoreError::InvalidCandidateRef);
     }
     Ok(())
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn validate_requalification(value: &CurrentHeadRequalification) -> Result<(), DecisionStoreError> {

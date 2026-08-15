@@ -517,6 +517,7 @@ pub struct GitCustody {
     runtime_root: PathBuf,
     worktrees_root: PathBuf,
     indexes_root: PathBuf,
+    candidate_ref_scope: ContentDigest,
     stream_limit: u64,
     deadline: Duration,
     next_index: AtomicU64,
@@ -549,11 +550,14 @@ impl GitCustody {
         let worktrees_root = create_directory(&runtime_root.join("worktrees"), "worktree root")?;
         let indexes_root =
             create_directory(&runtime_root.join("git-indexes"), "temporary-index root")?;
+        let candidate_ref_scope =
+            ContentDigest::of_bytes(runtime_root.to_string_lossy().as_bytes());
         Ok(Self {
             executable,
             runtime_root,
             worktrees_root,
             indexes_root,
+            candidate_ref_scope,
             stream_limit,
             deadline,
             next_index: AtomicU64::new(1),
@@ -565,6 +569,15 @@ impl GitCustody {
     #[must_use]
     pub fn runtime_root(&self) -> &Path {
         &self.runtime_root
+    }
+
+    #[must_use]
+    pub fn candidate_ref(
+        &self,
+        ticket_id: TicketId,
+        candidate_id: CandidateId,
+    ) -> CandidateRefName {
+        CandidateRefName::new_scoped(ticket_id, candidate_id, &self.candidate_ref_scope)
     }
 
     /// Qualifies the configured primary checkout before a claim or delivery.
