@@ -14,12 +14,14 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use factory_protocol::{ContentDigest, KernelBuildId, RuntimeRelativePath};
+use factory_protocol::{
+    ContentDigest, KernelBuildId, MAX_SESSION_OUTPUT_BYTES, RuntimeRelativePath,
+};
 use thiserror::Error;
 
 /// A non-zero upper bound for one adopted object is required by the custody
 /// boundary.  The application supplies the role-specific value.
-pub const DEFAULT_MAX_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
+pub const DEFAULT_MAX_OBJECT_BYTES: u64 = MAX_SESSION_OUTPUT_BYTES;
 
 /// Errors raised at the physical CAS boundary.
 #[derive(Debug, Error)]

@@ -19,15 +19,15 @@ use crate::{
     CommandProfileV2, CommitMessagePolicyV2, ContentDigest, ContractError, DeliveryModeV2,
     DuplicateSearchInputV2, DurationMillis, EnvironmentAdditionV2, ExecutableV2, GitPolicyV2,
     InstitutionalObjectKind, InstitutionalReference, KernelBuildId, MAX_POLICY_ARTIFACT_BYTES,
-    MicroUsd, ModelCapabilityV2, ModelProfileV2, OP_FORUM_CREATE_THREAD_V2,
-    OP_FORUM_CREATE_TOPIC_V2, OP_FORUM_LIST_THREADS_V2, OP_FORUM_LIST_TOPICS_V2, OP_FORUM_POST_V2,
-    OP_FORUM_READ_THREAD_V2, OP_FORUM_SEARCH_V2, PolicyEntrypointV2, ProductTicketProposalV2,
-    PublicationId, QualityFullSuiteRequestV2, QualityReviewSubmissionV2, ReleaseDecisionV2,
-    RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2, ReviewId, ReviewVerdict,
-    RuntimeRelativePath, SealedArtifactReferenceV2, SessionLimitsV2, SponsorshipDecisionV2,
-    TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketAttemptId, TicketBoundsV2,
-    TicketContractReadV2, TicketPolicyV2, TicketRevisionId, TwoRunReproducerV2, ValidationId,
-    ValidationProfilesV2,
+    MAX_SESSION_OUTPUT_BYTES, MicroUsd, ModelCapabilityV2, ModelProfileV2,
+    OP_FORUM_CREATE_THREAD_V2, OP_FORUM_CREATE_TOPIC_V2, OP_FORUM_LIST_THREADS_V2,
+    OP_FORUM_LIST_TOPICS_V2, OP_FORUM_POST_V2, OP_FORUM_READ_THREAD_V2, OP_FORUM_SEARCH_V2,
+    PolicyEntrypointV2, ProductTicketProposalV2, PublicationId, QualityFullSuiteRequestV2,
+    QualityReviewSubmissionV2, ReleaseDecisionV2, RepositoryBindingV2, RepositoryRelativePath,
+    RequiredReadV2, ReviewId, ReviewVerdict, RuntimeRelativePath, SealedArtifactReferenceV2,
+    SessionLimitsV2, SponsorshipDecisionV2, TemplateArtifactV2, TemplatePlaceholderV2,
+    ThinkingLevelV2, TicketAttemptId, TicketBoundsV2, TicketContractReadV2, TicketPolicyV2,
+    TicketRevisionId, TwoRunReproducerV2, ValidationId, ValidationProfilesV2,
 };
 
 pub const PROTOCOL_VERSION_V2: u16 = 2;
@@ -1920,8 +1920,12 @@ fn validate_assignment_packet_wire_v2(
     if packet.limits.turn_limit == 0
         || packet.limits.wall_limit_millis == 0
         || packet.limits.output_byte_limit == 0
+        || u64::from(packet.limits.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
     {
-        return packet_error("limits", "must be positive");
+        return packet_error(
+            "limits",
+            "must be positive and output must fit one CAS object",
+        );
     }
     if packet.remaining_campaign_allowance_micro_usd == 0 {
         return packet_error("remaining_campaign_allowance_micro_usd", "must be positive");

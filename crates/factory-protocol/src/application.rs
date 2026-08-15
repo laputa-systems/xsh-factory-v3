@@ -22,6 +22,8 @@ pub const MAX_APPLICATION_ARTIFACT_BYTES: usize = 8 * 1024 * 1024;
 /// Policies are intentionally much smaller than templates: a policy declares
 /// tools and handlers, it is not a place to hide an application.
 pub const MAX_POLICY_ARTIFACT_BYTES: usize = 1024 * 1024;
+/// One session transcript and its terminal streams must each fit one CAS object.
+pub const MAX_SESSION_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_APPLICATION_SOURCE_PATH_BYTES: usize = 240;
 
 /// Canonical, closed application policy understood by the generic kernel.
@@ -592,10 +594,14 @@ pub struct SessionLimitsV2 {
 
 impl SessionLimitsV2 {
     fn validate(&self) -> Result<(), ContractError> {
-        if self.turn_limit == 0 || self.wall_limit.get() == 0 || self.output_byte_limit == 0 {
+        if self.turn_limit == 0
+            || self.wall_limit.get() == 0
+            || self.output_byte_limit == 0
+            || u64::from(self.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
+        {
             return Err(bundle_error(
                 "session limits",
-                "all limits must be positive",
+                "limits must be positive and output must fit one CAS object",
             ));
         }
         Ok(())

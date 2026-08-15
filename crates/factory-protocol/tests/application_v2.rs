@@ -5,10 +5,10 @@ use factory_protocol::{
     ApplicationCompilerV2, ApplicationKey, ApplicationRelativePath, ApplicationSourceFileV2,
     ApprovedToolV2, AssignmentRole, AssignmentRoleProfileV2, CommandProfileV2,
     CommitMessagePolicyV2, ContentDigest, DeliveryModeV2, DurationMillis, EnvironmentAdditionV2,
-    ExecutableV2, GitPolicyV2, MicroUsd, ModelProfileV2, PolicyEntrypointV2, RepositoryBindingV2,
-    RepositoryRelativePath, RequiredReadV2, SessionLimitsV2, TemplateArtifactV2,
-    TemplatePlaceholderV2, ThinkingLevelV2, TicketBoundsV2, TicketPolicyV2, ValidationProfilesV2,
-    seal_policy_artifact_v2,
+    ExecutableV2, GitPolicyV2, MAX_SESSION_OUTPUT_BYTES, MicroUsd, ModelProfileV2,
+    PolicyEntrypointV2, RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2,
+    SessionLimitsV2, TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketBoundsV2,
+    TicketPolicyV2, ValidationProfilesV2, seal_policy_artifact_v2,
 };
 
 fn app_path(value: &str) -> ApplicationRelativePath {
@@ -197,6 +197,15 @@ fn compiler_rejects_undeclared_and_mismatched_source() {
     let mut files = source_files();
     files[0] = source("templates/mission.md", b"wrong bytes");
     assert!(ApplicationCompilerV2::compile(bundle(), files).is_err());
+}
+
+#[test]
+fn compiler_rejects_session_output_limit_above_cas_ceiling() {
+    let mut application = bundle();
+    application.assignment_role_profiles[0]
+        .limits
+        .output_byte_limit = (MAX_SESSION_OUTPUT_BYTES + 1) as u32;
+    assert!(ApplicationCompilerV2::compile(application, source_files()).is_err());
 }
 
 #[test]

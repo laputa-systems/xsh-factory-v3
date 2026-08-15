@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 use crate::{
     AbsoluteHostPath, AggregateRevision, ApplicationRevisionId, ArtifactId, AssignmentRole,
     CandidateId, ContentDigest, ContractError, ExpectedRevision, KernelBuildId,
-    MAX_POLICY_ARTIFACT_BYTES, MicroUsd, PROTOCOL_VERSION_V2, PolicyEntrypointV2,
-    RepositoryRelativePath, SessionLimitsV2, TicketAttemptId,
+    MAX_POLICY_ARTIFACT_BYTES, MAX_SESSION_OUTPUT_BYTES, MicroUsd, PROTOCOL_VERSION_V2,
+    PolicyEntrypointV2, RepositoryRelativePath, SessionLimitsV2, TicketAttemptId,
 };
 
 pub const ASSIGNMENT_PACKET_V2_FORMAT: u16 = 2;
@@ -522,6 +522,16 @@ impl AssignmentPacketV2 {
             return Err(ContractError::InvalidValue {
                 field: "assignment target",
                 reason: "must be 1 through 4096 bytes without NUL",
+            });
+        }
+        if self.limits.turn_limit == 0
+            || self.limits.wall_limit.get() == 0
+            || self.limits.output_byte_limit == 0
+            || u64::from(self.limits.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
+        {
+            return Err(ContractError::InvalidValue {
+                field: "assignment session limits",
+                reason: "must be positive and output must fit one CAS object",
             });
         }
         if self.policy_byte_limit == 0

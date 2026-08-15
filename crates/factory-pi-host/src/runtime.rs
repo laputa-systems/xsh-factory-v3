@@ -841,7 +841,7 @@ mod tests {
                 ),
                 (
                     "reproducer_profile",
-                    JsonValue::String("xsh_program_reproducer".to_owned()),
+                    JsonValue::String("reproducer".to_owned()),
                 ),
                 (
                     "reproducer",
