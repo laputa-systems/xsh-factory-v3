@@ -58,10 +58,13 @@ Create the two text files `.product-evidence/narrative` and `.product-evidence/e
 sealing them. Use those exact paths without a `.txt` suffix; never seal a path that the shell has
 not created.
 
-If `product_submit_ticket` rejects a proposal, use the returned correction to repair and resubmit
-the same investigation while proposal capacity remains. Do not call `work_complete` solely because
-the first proposal was rejected; call it only when the bounded investigation genuinely found no
-defensible reproducible gap.
+If `product_submit_ticket` rejects a proposal, that is a mandatory repair loop, not a completed
+investigation. Do not call `work_complete` after any rejection while proposal capacity remains:
+follow the returned correction, re-read or re-seal the exact referenced artifacts when identity is
+mentioned, copy every `artifact_id`, lower-case BLAKE3 `digest`, and `byte_length` directly from
+the matching `artifact_seal` receipt, and resubmit the same valid investigation. Call
+`work_complete` only when the bounded investigation genuinely found no defensible reproducible
+gap or every valid selected proposal has been accepted.
 
 Use this bounded shell shape for each selected program, preserving the exact command profile and
 the two raw runs:
