@@ -7,7 +7,7 @@
 //! retains no polling cursor, session handle, or retry queue: PostgreSQL and
 //! the process/session transitions remain the recovery boundary.
 
-use std::{env, ffi::OsString, sync::Arc};
+use std::{ffi::OsString, sync::Arc};
 
 use factory_protocol::{AggregateRevision, CampaignId, ExpectedRevision};
 use thiserror::Error;
@@ -88,8 +88,8 @@ pub enum CampaignDriverError {
     #[error("durable campaign action was rejected: {0}")]
     Durable(String),
 
-    #[error("configured OpenRouter credential environment {name:?} is absent or empty")]
-    CredentialUnavailable { name: String },
+    #[error("configured OpenRouter credential {name:?} is unavailable: {detail}")]
+    CredentialUnavailable { name: String, detail: String },
 }
 
 /// Exact installed services retained by the resident daemon. The driver has
@@ -103,26 +103,13 @@ pub struct CampaignDriver {
     installed: InstalledKernelBuildReceiptV2,
     execution: InstalledKernelExecutionTools,
     resolver: Arc<DurableAuthorityResolver>,
-    credential_lookup: Arc<dyn Fn(&str) -> Option<OsString> + Send + Sync>,
+    credential_lookup: Arc<dyn Fn(&str) -> Result<OsString, String> + Send + Sync>,
 }
 
 impl CampaignDriver {
-    #[must_use]
-    pub fn new(
-        store: KernelStore,
-        cas: CasStore,
-        installed: InstalledKernelBuildReceiptV2,
-        execution: InstalledKernelExecutionTools,
-        resolver: Arc<DurableAuthorityResolver>,
-    ) -> Self {
-        Self::with_credential_lookup(store, cas, installed, execution, resolver, |name| {
-            env::var_os(name)
-        })
-    }
-
-    /// Production reads only the admitted environment name at the launch
-    /// boundary. Provider-free callers inject an inert value instead of
-    /// mutating the process-global environment.
+    /// The caller resolves the admitted credential through its external
+    /// provider at the launch boundary. Provider-free callers inject a
+    /// deterministic resolver without mutating process-global environment.
     pub fn with_credential_lookup<F>(
         store: KernelStore,
         cas: CasStore,
@@ -132,7 +119,7 @@ impl CampaignDriver {
         credential_lookup: F,
     ) -> Self
     where
-        F: Fn(&str) -> Option<OsString> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<OsString, String> + Send + Sync + 'static,
     {
         Self {
             store,
@@ -611,12 +598,22 @@ impl CampaignDriver {
 
 fn credential_environment_value(
     name: &str,
-    lookup: &Arc<dyn Fn(&str) -> Option<OsString> + Send + Sync>,
+    lookup: &Arc<dyn Fn(&str) -> Result<OsString, String> + Send + Sync>,
 ) -> Result<OsString, CampaignDriverError> {
     lookup(name)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CampaignDriverError::CredentialUnavailable {
+        .map_err(|detail| CampaignDriverError::CredentialUnavailable {
             name: name.to_owned(),
+            detail,
+        })
+        .and_then(|value| {
+            if value.is_empty() {
+                Err(CampaignDriverError::CredentialUnavailable {
+                    name: name.to_owned(),
+                    detail: "resolver returned an empty value".to_owned(),
+                })
+            } else {
+                Ok(value)
+            }
         })
 }
 

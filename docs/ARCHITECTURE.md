@@ -41,8 +41,10 @@ canonical packet and identity, and then uses only the inherited full-duplex
 descriptor. It does not accept a socket path, database URL, resume input, or
 application source path. The daemon remains the owner of SQL, CAS, Git,
 worktrees, validation, campaign state, terminal reconciliation, and delivery.
-The selected credential is available only to the provider; child tools and
-evidence do not receive it.
+The selected credential is resolved from Vault by the daemon at assignment
+launch, is installed only in the provider host's exact child environment, and
+is never retained in daemon environment state. Child tools and evidence do not
+receive it.
 
 The application bundle is V2-only and inert. Each role's sealed Luau policy is
 carried in the packet, checked against the exact packet tool allowlist, and

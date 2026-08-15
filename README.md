@@ -38,8 +38,9 @@ The first full provider-free gate is:
 make pi-agent-core-rs-acceptance
 ```
 
-`make factoryd-serve` deliberately introduces the OpenRouter credential only
-at the daemon process boundary through `vault OPENROUTER_API_KEY -- ...`.
+`make factoryd-serve` keeps the OpenRouter credential out of the daemon
+environment. The daemon checks `vault OPENROUTER_API_KEY -- ...` before
+binding its socket and resolves the credential from Vault for each assignment.
 It requires explicit `FACTORY_DATABASE_URL` and `FACTORY_RUNTIME_ROOT`; it
 does not itself start paid work.
 

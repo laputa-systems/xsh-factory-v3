@@ -8,7 +8,7 @@
 use std::{
     env, io,
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{Command, ExitCode},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -85,6 +85,8 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .path()
         .to_owned();
     verify_serve_preflight(&installed, current_build, &running_binary)?;
+    let credential_environment = installed.openrouter_credential_environment().to_owned();
+    verify_vault_credential_preflight(&credential_environment)?;
     // The receipt is the only source of Cargo/Git/host paths. Reconstructing
     // these services here makes an executable or toolchain drift fail before
     // the daemon exposes operator authority or can launch a paid actor.
@@ -139,12 +141,13 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
     // gate outcome; actionable work chains immediately through the next
     // durable scheduler read once its bounded operation returns.
     let daemon = Arc::new(daemon);
-    let driver = CampaignDriver::new(
+    let driver = CampaignDriver::with_credential_lookup(
         store.clone(),
         cas.as_ref().clone(),
         installed.clone(),
         execution,
         Arc::clone(&authority_resolver),
+        |name| vault_credential(name).map_err(|error| error.to_string()),
     );
     let driver_daemon = Arc::clone(&daemon);
     let driver_task = smol::spawn(async move {
@@ -209,6 +212,47 @@ fn verify_serve_preflight(
     installed
         .verify_installed_material(SCHEMA_IDENTITY)
         .map_err(|error| init_error(&format!("installed build preflight failed: {error}")))
+}
+
+fn verify_vault_credential_preflight(name: &str) -> Result<(), io::Error> {
+    vault_credential(name).map(|_| ())
+}
+
+fn vault_credential(name: &str) -> Result<std::ffi::OsString, io::Error> {
+    vault_credential_with_command(Path::new("vault"), name)
+}
+
+fn vault_credential_with_command(
+    vault: &Path,
+    name: &str,
+) -> Result<std::ffi::OsString, io::Error> {
+    let output = Command::new(vault)
+        .arg(name)
+        .arg("--")
+        .arg("/usr/bin/printenv")
+        .arg(name)
+        .env_remove(name)
+        .output()
+        .map_err(|error| {
+            io::Error::other(format!("unable to execute Vault for {name:?}: {error}"))
+        })?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "Vault did not provide required credential {name:?}"
+        )));
+    }
+    let mut value = output.stdout;
+    if value.last() == Some(&b'\n') {
+        value.pop();
+    }
+    if value.is_empty() {
+        return Err(io::Error::other(format!(
+            "Vault provided an empty credential {name:?}"
+        )));
+    }
+    let value = String::from_utf8(value)
+        .map_err(|_| io::Error::other(format!("Vault provided a non-UTF-8 credential {name:?}")))?;
+    Ok(std::ffi::OsString::from(value))
 }
 
 /// Applies the forward-only schema lineage and installs one qualified build.
@@ -609,6 +653,36 @@ mod tests {
             DaemonCommand::Serve(DaemonArgs { runtime_root, .. })
                 if runtime_root == *"/tmp/factory"
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vault_credential_resolution_uses_the_named_secret_without_daemon_environment() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "factoryd-vault-resolution-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temporary root");
+        let vault = root.join("vault");
+        fs::write(
+            &vault,
+            "#!/bin/sh\n[ \"$1\" = OPENROUTER_API_KEY ] || exit 41\n[ \"$2\" = -- ] || exit 42\n[ -z \"$OPENROUTER_API_KEY\" ] || exit 43\nprintf 'fresh-vault-key\\n'\n",
+        )
+        .expect("fake vault");
+        let mut permissions = fs::metadata(&vault).expect("vault metadata").permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&vault, permissions).expect("vault permissions");
+
+        let value =
+            vault_credential_with_command(&vault, "OPENROUTER_API_KEY").expect("vault credential");
+        assert_eq!(value, "fresh-vault-key");
+        fs::remove_dir_all(root).expect("remove temporary root");
     }
 
     #[test]

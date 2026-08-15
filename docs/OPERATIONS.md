@@ -43,14 +43,17 @@ FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factoryd-serve
 ```
 
-The serve target runs `vault OPENROUTER_API_KEY -- target/release/factoryd
-serve ...`; the credential is neither copied into source, the database, CAS,
-prompts, nor shell command arguments. It binds a mode-`0600` Unix operator
-socket under the runtime root. Stop the daemon before replacing a kernel,
-schema, Rust dependency source, or agent-core build input, then run `factoryctl init`
-again before serving the new build. A runtime replacement retires the old
-runtime state: start the new daemon with a fresh database and runtime root
-rather than attempting compatibility recovery or dual dispatch.
+The serve target starts `target/release/factoryd serve ...` without an
+OpenRouter credential in its environment. Before binding its mode-`0600` Unix
+operator socket, the daemon verifies `vault OPENROUTER_API_KEY -- ...` can
+provide the required credential; it resolves the credential through Vault again
+for every provider-backed assignment. The credential is never copied into
+source, the database, CAS, prompts, or shell command arguments. Stop the
+daemon before replacing a kernel, schema, Rust dependency source, or
+agent-core build input, then run `factoryctl init` again before serving the new
+build. A runtime replacement retires the old runtime state: start the new
+daemon with a fresh database and runtime root rather than attempting
+compatibility recovery or dual dispatch.
 
 Before each paid admission, compare the live daemon/build identity with the
 current Factory source checkout and recent campaign diagnostics. Do not commit,
@@ -93,8 +96,8 @@ Engineering, or Quality; those remain durable lifecycle gates in the daemon.
 `factoryctl build identity --format json` is the read-only identity probe used
 by that guard. If it differs from `factoryctl daemon status`, stop the daemon,
 initialize a fresh database/runtime pair with the newly built release, serve it
-through `vault OPENROUTER_API_KEY -- ...`, and reread the application revision
-before requesting another paid cycle.
+with `make factoryd-serve`, and reread the application revision before
+requesting another paid cycle.
 
 Supply the values read from the live daemon/application status and choose a
 fresh client command ID:

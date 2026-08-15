@@ -680,8 +680,8 @@ impl InstalledKernelBuildReceiptV2 {
 
     /// Builds the assignment-packet runtime identity only for the one
     /// credential provider admitted by this MVP. The returned descriptor is a
-    /// configuration name; the environment value remains in the operator
-    /// process and is supplied only to the supervised child later.
+    /// configuration name; its Vault-resolved value is never part of runtime
+    /// identity or durable assignment data.
     pub fn runtime_identity_for_provider(
         &self,
         provider: &str,
@@ -698,9 +698,9 @@ impl InstalledKernelBuildReceiptV2 {
     }
 
     /// Builds the exact Rust host process contract for the installed
-    /// runtime. `credential_environment` comes from the operator process only
-    /// at spawn time; this receipt compares its name with configuration but
-    /// never reads, stores, logs, or returns its value.
+    /// runtime. `credential_environment` comes from a Vault-backed resolver
+    /// only at spawn time; this receipt compares its name with configuration
+    /// but never reads, stores, logs, or returns its value.
     pub fn pi_host_spawn_spec_for_provider(
         &self,
         provider: &str,

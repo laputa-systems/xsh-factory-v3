@@ -11,8 +11,10 @@ reports, and operators do not write SQL or manufacture those facts.
 ## Cooperative same-user boundary
 
 Actors are ordinary processes under the operator's OS account with workspace
-tools, networking, and the selected provider credential only at the daemon
-process boundary. Factory detects accidental and protocol-level authority,
+tools, networking, and the selected provider credential only in the supervised
+provider host. Factory resolves that credential through Vault and does not
+retain it in daemon environment state. Factory detects accidental and
+protocol-level authority,
 identity, lifecycle, repository, and evidence mistakes. It does not defend
 against a malicious same-user process that can inspect accessible credentials,
 change unrelated files, or signal peer processes. Containers, VMs, seccomp,

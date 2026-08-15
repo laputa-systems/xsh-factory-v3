@@ -65,13 +65,13 @@ paid-cycle-preflight:
 	  exit 1; \
 	 fi
 
-# The credential is introduced only at the daemon process boundary. Callers
-# must choose the dedicated database and runtime root explicitly; this target
-# never starts a provider-backed actor on its own.
+# The daemon has no provider credential in its environment. It invokes Vault
+# for startup preflight and again at each provider-backed assignment launch.
+# Callers must choose the dedicated database and runtime root explicitly.
 factoryd-serve:
 	test -n "$$FACTORY_DATABASE_URL"
 	test -n "$$FACTORY_RUNTIME_ROOT"
-	vault OPENROUTER_API_KEY -- target/release/factoryd serve \
+	target/release/factoryd serve \
 		--database-url "$$FACTORY_DATABASE_URL" \
 		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
 		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
