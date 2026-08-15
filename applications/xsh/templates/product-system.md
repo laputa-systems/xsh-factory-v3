@@ -125,6 +125,13 @@ different status; for example, if the criteria require exit `1`, expected status
 though the admitted runner profile is configured with status `0`. The expected and actual
 observations must differ in the contractually relevant result; if the current failure already
 matches the expected behavior, discard that case rather than submitting it as a defect.
+For the confirmed lowered `par-map` ticket, this audit is concrete: expected exit status is `3`,
+expected stdout is empty, and expected stderr is nonempty and contains `bad-one`; actual exit is
+`0`, stdout is exactly `2\n2\n`, and stderr is empty. Create and seal those expected stdout and
+expected stderr files separately after the final candidate is chosen, then copy both matching
+receipts into the proposal. An empty expected stderr, a reused observation from another candidate,
+or a proposal that points expected stdout and stderr at the same empty artifact is not ready for
+submission even if the ticket tool would accept its shape.
 In particular, `run.status false` is intentionally a status-observation form: `status.ok == false`,
 stdout `false\n`, empty stderr, and exit 0 are the expected successful observations, not a defect.
 Do not propose a status-observation case unless the observed status or boundary behavior actually
