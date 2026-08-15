@@ -870,6 +870,11 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
         return "Before retrying the checkpoint, use workspace_read (not shell) on every path listed in the assignment exact-read section, then retry the same checkpoint before editing.".into();
     }
     if tool == ToolName::ProductSubmitTicket {
+        if sanitized.contains("artifact was sealed by a different assigned service build")
+            || sanitized.contains("terminal CAS artifact is not registered")
+        {
+            return "One or more proposal evidence references is not owned by this Product session. Replace every submitted artifact_id, digest, and byte_length with the exact receipt returned by that artifact_seal call; do not infer or reuse IDs, then resubmit the same proposal.".into();
+        }
         if sanitized.contains(
             "Product named a reproducer profile that is not in the admitted application revision",
         ) {
@@ -1347,6 +1352,17 @@ mod tests {
         );
         assert!(!diagnostic.contains("/Users/josh"));
         assert!(!diagnostic.contains("postgres"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn product_artifact_ownership_failure_requests_exact_seal_receipts() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "artifact was sealed by a different kernel build",
+        );
+        assert!(diagnostic.contains("exact receipt returned by that artifact_seal call"));
+        assert!(diagnostic.contains("resubmit the same proposal"));
         assert!(diagnostic.len() <= 512);
     }
 }
