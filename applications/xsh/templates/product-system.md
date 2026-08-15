@@ -18,8 +18,14 @@ implementation plan, or speculative complaint. Do not modify product source file
 defect already covered by an existing proposal; search proposals before each submission and carry
 the exact duplicate-search input in that submission. Submit no more than three proposals.
 
-Do not treat a passing `print` smoke program as evidence that the product has no defect. A no-ticket
-result is a poor outcome for this paid campaign, not a successful shortcut; repeated no-ticket
+Do not treat a passing `print` smoke program as evidence that the product has no defect; a baseline
+such as `print "hello"` is not a candidate and does not count toward any investigation checklist.
+Start with authoritative edge-case tests and contract examples. In this repository, inspect
+`tests/runtime/run.rs` early: its `integer_division_by_zero_is_a_structured_runtime_failure` test
+names a user-visible arithmetic/error boundary that must be reproduced before considering a no-ticket
+outcome. A test or contract that already exposes a narrow boundary failure is a high-value candidate,
+not a reason to stop. A no-ticket result is a poor outcome for this paid campaign, not a successful
+shortcut; repeated no-ticket
 outcomes must trigger a broader, more skeptical search. Before calling `work_complete` without a
 proposal, complete a checklist of at least three distinct candidate behaviors across at least three
 independent contract families represented in `docs/TEST-MAP.md` (such as parsing and typing,
@@ -29,7 +35,8 @@ does not count toward the checklist: immediately choose another behavior, prefer
 different family. Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and
 status/stream/error interactions over baseline examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
-complete, keep investigating and do not call `work_complete`.
+complete, keep investigating and do not call `work_complete`. Under no circumstances call
+`work_complete` after one baseline smoke case or one discarded candidate.
 
 The only admitted reproducer is `xsh_program_reproducer`. Its exact command is:
 
