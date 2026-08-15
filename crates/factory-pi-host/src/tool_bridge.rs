@@ -962,6 +962,17 @@ pub fn validate_daemon_response(operation: &str, value: &JsonValue) -> Result<()
     let object = value
         .as_object()
         .ok_or_else(|| format!("{operation} response must be an object"))?;
+    if object.contains_key("error_code") {
+        let error_code = object
+            .get("error_code")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| format!("{operation} error response requires string error_code"))?;
+        let message = object
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| format!("{operation} error response requires string message"))?;
+        return Err(format!("{operation} rejected ({error_code}): {message}"));
+    }
     let require = |field: &str| {
         if object.contains_key(field) {
             Ok(())
@@ -1299,6 +1310,28 @@ mod tests {
             ("extra", JsonValue::Bool(true)),
         ]);
         assert!(validate_json_schema(&schema, &bad).is_err());
+    }
+
+    #[test]
+    fn daemon_error_envelope_is_reported_before_success_shape_validation() {
+        let error = object([
+            (
+                "protocol_version",
+                JsonValue::Number(JsonNumber::Unsigned(2)),
+            ),
+            ("request_id", JsonValue::String("request-1".into())),
+            ("operation", JsonValue::String("candidate.submit".into())),
+            ("error_code", JsonValue::String("candidate_rejected".into())),
+            (
+                "message",
+                JsonValue::String("hard validation failed".into()),
+            ),
+        ]);
+
+        assert_eq!(
+            validate_daemon_response("candidate.submit", &error),
+            Err("candidate.submit rejected (candidate_rejected): hard validation failed".into())
+        );
     }
 
     #[test]
