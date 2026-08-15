@@ -39,7 +39,7 @@ proc worker(value: Int) [error] -> Result[Int] {
 }
 proc main() [error] -> Result[Unit] {
   let values = [1, 2] |> par-map --jobs=2 { |value| worker(value)? }
-  print ${values.len()}
+  print $values.len()
 }
 main()?
 ```
