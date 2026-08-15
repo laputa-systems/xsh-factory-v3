@@ -101,9 +101,233 @@ fn request_json(
         "operation".to_owned(),
         JsonValue::String(operation.to_owned()),
     );
-    JsonValue::Object(object)
-        .to_json_string()
-        .map_err(|error| DaemonError::new(error.to_string()))
+    let mut field_names = vec!["protocol_version", "request_id", "operation"];
+    field_names
+        .extend_from_slice(request_field_names(operation).ok_or_else(|| {
+            DaemonError::new(format!("unsupported daemon operation {operation}"))
+        })?);
+    canonical_object(&object, &field_names, None, operation)
+}
+
+#[derive(Clone, Copy)]
+enum ObjectKind {
+    SealedArtifactReference,
+    ContractRead,
+    DuplicateSearch,
+    Observation,
+    Reproducer,
+    InstitutionalReference,
+    PublicationAttachment,
+}
+
+fn request_field_names(operation: &str) -> Option<&'static [&'static str]> {
+    Some(match operation {
+        "workspace.read" => &["repository_relative_path"],
+        "forum.list_topics" => &["cursor", "limit"],
+        "forum.list_threads" => &["topic_id", "cursor", "limit"],
+        "forum.search" => &[
+            "query",
+            "topic_id",
+            "thread_id",
+            "author_office",
+            "post_kind",
+            "created_after_micros",
+            "created_before_micros",
+            "cursor",
+            "limit",
+        ],
+        "forum.read_thread" => &["thread_id", "after_post_id", "limit"],
+        "artifact.seal_workspace_file" => &[
+            "client_command_id",
+            "expected_revision",
+            "workspace_relative_path",
+            "byte_limit",
+        ],
+        "artifact.read" => &["artifact_id", "expected_digest"],
+        "product.submit_ticket" => &[
+            "client_command_id",
+            "expected_revision",
+            "title",
+            "mission_value",
+            "scope",
+            "contract_owner",
+            "risk",
+            "narrative",
+            "evidence",
+            "acceptance_criteria",
+            "contract_reads",
+            "duplicate_search",
+            "reproducer_profile",
+            "reproducer",
+        ],
+        "candidate.checkpoint_regression" => &[
+            "client_command_id",
+            "expected_revision",
+            "regression_command",
+            "expected_failure",
+        ],
+        "quality.run_full_suite" => &[
+            "client_command_id",
+            "expected_revision",
+            "validation_profile",
+        ],
+        "publication.create" => &[
+            "client_command_id",
+            "anchor",
+            "kind",
+            "summary",
+            "body_artifact_id",
+            "attachments",
+            "reply_to",
+            "supersedes",
+        ],
+        "session.verify_packet" => &["packet_digest", "packet_bytes_b64"],
+        "session.seal_artifact" => &[
+            "client_command_id",
+            "expected_revision",
+            "staging_relative_path",
+            "role",
+            "byte_limit",
+        ],
+        "session.submit_terminal" => &[
+            "client_command_id",
+            "expected_revision",
+            "terminal_operation",
+            "terminal_payload_b64",
+            "transcript_artifact_id",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "reasoning_tokens",
+            "reported_cost_micro_usd",
+            "stop_reason",
+        ],
+        _ => return None,
+    })
+}
+
+fn object_fields(kind: ObjectKind) -> &'static [&'static str] {
+    match kind {
+        ObjectKind::SealedArtifactReference => &["artifact_id", "digest", "byte_length"],
+        ObjectKind::ContractRead => &["path", "reason"],
+        ObjectKind::DuplicateSearch => &["query", "limit"],
+        ObjectKind::Observation => &["exit_status", "stdout", "stderr"],
+        ObjectKind::Reproducer => &[
+            "comparison_rule_version",
+            "command",
+            "stdin",
+            "expected_observation",
+            "first_observation",
+            "second_observation",
+        ],
+        ObjectKind::InstitutionalReference => &["kind", "id"],
+        ObjectKind::PublicationAttachment => &["artifact_id", "label"],
+    }
+}
+
+fn request_object_kind(operation: &str, field: &str) -> Option<ObjectKind> {
+    match (operation, field) {
+        ("product.submit_ticket", "narrative" | "evidence") => {
+            Some(ObjectKind::SealedArtifactReference)
+        }
+        ("product.submit_ticket", "duplicate_search") => Some(ObjectKind::DuplicateSearch),
+        ("product.submit_ticket", "reproducer") => Some(ObjectKind::Reproducer),
+        ("publication.create", "anchor") => Some(ObjectKind::InstitutionalReference),
+        _ => None,
+    }
+}
+
+fn request_array_object_kind(operation: &str, field: &str) -> Option<ObjectKind> {
+    match (operation, field) {
+        ("product.submit_ticket", "contract_reads") => Some(ObjectKind::ContractRead),
+        ("publication.create", "attachments") => Some(ObjectKind::PublicationAttachment),
+        _ => None,
+    }
+}
+
+fn object_field_kind(kind: ObjectKind, field: &str) -> Option<ObjectKind> {
+    match (kind, field) {
+        (ObjectKind::Reproducer, "command" | "stdin") => Some(ObjectKind::SealedArtifactReference),
+        (
+            ObjectKind::Reproducer,
+            "expected_observation" | "first_observation" | "second_observation",
+        ) => Some(ObjectKind::Observation),
+        _ => None,
+    }
+}
+
+fn canonical_object(
+    object: &BTreeMap<String, JsonValue>,
+    field_names: &[&str],
+    object_kind: Option<ObjectKind>,
+    operation: &str,
+) -> Result<String, DaemonError> {
+    if object.len() != field_names.len()
+        || object
+            .keys()
+            .any(|field| !field_names.contains(&field.as_str()))
+    {
+        return Err(DaemonError::new(format!(
+            "request payload fields do not match {operation}"
+        )));
+    }
+    let mut output = String::from("{");
+    for (index, field) in field_names.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        let key = JsonValue::String((*field).to_owned())
+            .to_json_string()
+            .map_err(|error| DaemonError::new(error.to_string()))?;
+        let value = object
+            .get(*field)
+            .ok_or_else(|| DaemonError::new(format!("request payload is missing {field}")))?;
+        let nested_object_kind = object_kind
+            .and_then(|kind| object_field_kind(kind, field))
+            .or_else(|| request_object_kind(operation, field));
+        let value = canonical_value(
+            value,
+            nested_object_kind,
+            request_array_object_kind(operation, field),
+            operation,
+        )?;
+        output.push_str(&key);
+        output.push(':');
+        output.push_str(&value);
+    }
+    output.push('}');
+    Ok(output)
+}
+
+fn canonical_value(
+    value: &JsonValue,
+    object_kind: Option<ObjectKind>,
+    array_object_kind: Option<ObjectKind>,
+    operation: &str,
+) -> Result<String, DaemonError> {
+    match value {
+        JsonValue::Object(object) => {
+            let kind = object_kind.ok_or_else(|| {
+                DaemonError::new(format!("unexpected nested object in {operation}"))
+            })?;
+            canonical_object(object, object_fields(kind), Some(kind), operation)
+        }
+        JsonValue::Array(values) => {
+            let mut output = String::from("[");
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&canonical_value(value, array_object_kind, None, operation)?);
+            }
+            output.push(']');
+            Ok(output)
+        }
+        value => value
+            .to_json_string()
+            .map_err(|error| DaemonError::new(error.to_string())),
+    }
 }
 
 pub(crate) struct RootedWorkspace {
@@ -457,4 +681,103 @@ fn bound(text: &str, limit: usize) -> String {
 
 fn io_error(error: io::Error) -> DaemonError {
     DaemonError::new(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_json;
+    use factory_protocol::{
+        InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2, PublicationAttachmentWireV2,
+        PublicationCreateRequest, REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest,
+        decode_operation_request, encode_frame,
+    };
+    use pi_agent_protocol::{JsonNumber, JsonValue};
+
+    #[test]
+    fn request_json_matches_session_verify_wire_order() {
+        let request_id = "factory-pi-host-request-1";
+        let actual = request_json(
+            "session.verify_packet",
+            request_id,
+            JsonValue::object([
+                ("packet_bytes_b64", JsonValue::String("YWJj".to_owned())),
+                ("packet_digest", JsonValue::String("a".repeat(64))),
+            ]),
+        )
+        .expect("canonical request");
+        let expected = miniserde::json::to_string(&SessionVerifyPacketRequest {
+            protocol_version: PROTOCOL_VERSION_V2,
+            request_id: request_id.to_owned(),
+            operation: "session.verify_packet".to_owned(),
+            packet_digest: "a".repeat(64),
+            packet_bytes_b64: "YWJj".to_owned(),
+        });
+        assert_eq!(actual, expected);
+
+        let frame = encode_frame(actual.as_bytes(), REQUEST_FRAME_MAX_BYTES)
+            .expect("encode canonical request");
+        decode_operation_request::<SessionVerifyPacketRequest>(
+            &frame,
+            REQUEST_FRAME_MAX_BYTES,
+            "session.verify_packet",
+        )
+        .expect("daemon accepts canonical request");
+    }
+
+    #[test]
+    fn request_json_orders_nested_publication_objects() {
+        let actual = request_json(
+            "publication.create",
+            "factory-pi-host-request-1",
+            JsonValue::object([
+                (
+                    "client_command_id",
+                    JsonValue::String("publication-command".to_owned()),
+                ),
+                (
+                    "anchor",
+                    JsonValue::object([
+                        ("id", JsonValue::Number(JsonNumber::Unsigned(7))),
+                        ("kind", JsonValue::String("ticket".to_owned())),
+                    ]),
+                ),
+                ("kind", JsonValue::String("Finding".to_owned())),
+                ("summary", JsonValue::String("summary".to_owned())),
+                (
+                    "body_artifact_id",
+                    JsonValue::Number(JsonNumber::Unsigned(8)),
+                ),
+                (
+                    "attachments",
+                    JsonValue::Array(vec![JsonValue::object([
+                        ("label", JsonValue::String("attachment".to_owned())),
+                        ("artifact_id", JsonValue::Number(JsonNumber::Unsigned(9))),
+                    ])]),
+                ),
+                ("reply_to", JsonValue::Null),
+                ("supersedes", JsonValue::Null),
+            ]),
+        )
+        .expect("canonical nested request");
+        let expected = miniserde::json::to_string(&PublicationCreateRequest {
+            protocol_version: PROTOCOL_VERSION_V2,
+            request_id: "factory-pi-host-request-1".to_owned(),
+            operation: "publication.create".to_owned(),
+            client_command_id: "publication-command".to_owned(),
+            anchor: InstitutionalReferenceWireV2 {
+                kind: "ticket".to_owned(),
+                id: 7,
+            },
+            kind: "Finding".to_owned(),
+            summary: "summary".to_owned(),
+            body_artifact_id: 8,
+            attachments: vec![PublicationAttachmentWireV2 {
+                artifact_id: 9,
+                label: "attachment".to_owned(),
+            }],
+            reply_to: None,
+            supersedes: None,
+        });
+        assert_eq!(actual, expected);
+    }
 }
