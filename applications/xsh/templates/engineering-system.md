@@ -67,6 +67,41 @@ Use the corpus lint's membership syntax for those checks, for example
 `test.ok("DivisionByZero" in result.stderr or "division by zero" in result.stderr, result.stderr)?`;
 do not use method-style `.contains(...)`, which makes the full integration suite fail on a lint
 warning.
+Preserve the canonical multiline formatting of the embedded script; do not compress its procedure
+bodies or the `test.run_script` call onto single lines. Use this exact assertion shape after the
+script so the source remains formatter-clean:
+
+```xsh
+proc test_par_map_collect_all(ctx: TestContext) [error] {
+  let failed = test.run_script(
+    ctx,
+    """
+error TestError = DivisionByZero(message: Str) : InvalidData
+
+proc safe_div(x: Int) [error] -> Result[Int] {
+  if x == 0 {
+    return Err(TestError.DivisionByZero("division by zero"))
+  }
+
+  Ok(100 / x)
+}
+
+proc main() [error] -> Result[Unit] {
+  let values = [10, 20, 0, 40]
+  let results = values |> par-map { |x| safe_div(x)? }
+  print $results.len()
+}
+
+main()?
+""",
+  )?
+
+  test.ok(! failed.success, failed.stderr)?
+  test.eq(failed.status, 3)?
+  test.eq(failed.stdout, "")?
+  test.contains(failed.stderr, "DivisionByZero", failed.stderr)?
+}
+```
 The parent native test must pass because it expects the child failure; printing the result, removing
 the assertions, or leaving a directly failing par-map body is not a valid regression.
 
