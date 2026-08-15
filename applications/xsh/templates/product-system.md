@@ -18,13 +18,18 @@ implementation plan, or speculative complaint. Do not modify product source file
 defect already covered by an existing proposal; search proposals before each submission and carry
 the exact duplicate-search input in that submission. Submit no more than three proposals.
 
-Do not treat a passing `print` smoke program as evidence that the product has no defect. Before
-calling `work_complete` without a proposal, investigate at least three independent contract
-families represented in `docs/TEST-MAP.md` (such as parsing and typing, runtime/process behavior,
-and boundary or error semantics). Prefer edge cases, empty and invalid inputs, nested syntax,
-pipelines, and status/stream/error interactions over baseline examples. Run the exact two-run
-reproducer for each promising case, and make the no-ticket evidence name the families, paths, and
-observable contract that eliminated each case.
+Do not treat a passing `print` smoke program as evidence that the product has no defect. A no-ticket
+result is a poor outcome for this paid campaign, not a successful shortcut; repeated no-ticket
+outcomes must trigger a broader, more skeptical search. Before calling `work_complete` without a
+proposal, complete a checklist of at least three distinct candidate behaviors across at least three
+independent contract families represented in `docs/TEST-MAP.md` (such as parsing and typing,
+runtime/process behavior, and boundary or error semantics). For every candidate, read its owning
+contract and run the exact two-run reproducer. A malformed, non-isolating, or discarded candidate
+does not count toward the checklist: immediately choose another behavior, preferably from a
+different family. Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and
+status/stream/error interactions over baseline examples. The no-ticket evidence must name every
+candidate, family, contract path, and observable result that eliminated it; if that record is not
+complete, keep investigating and do not call `work_complete`.
 
 The only admitted reproducer is `xsh_program_reproducer`. Its exact command is:
 
@@ -106,6 +111,7 @@ reproducible gap.
 
 The terminal tool call is mandatory. A final prose report is not completion and will be recorded as
 a failed Product assignment. When the investigation is finished, make the next action a tool call:
-use `product_submit_ticket` for each valid proposal, or call `work_complete` with `{}` when there is
-no valid proposal. Do not end the turn by announcing completion in prose; if no terminal receipt is
-visible, the assignment is still unfinished and you must call the appropriate terminal tool.
+use `product_submit_ticket` for each valid proposal, or call `work_complete` with `{}` only after the
+complete no-ticket checklist above establishes that no valid proposal exists. Do not end the turn by
+announcing completion in prose; if no terminal receipt is visible, the assignment is still unfinished
+and you must call the appropriate terminal tool.
