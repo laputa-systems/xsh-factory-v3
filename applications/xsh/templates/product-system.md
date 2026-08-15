@@ -89,6 +89,17 @@ When changing candidates, overwrite every `.product-evidence` file before runnin
 not reuse stdin, expected-observation, actual-observation, narrative, or evidence receipts from a
 different program; the sealed stdin must match the title and every observation in the same proposal.
 
+Once the exact lowered `par-map` program above has produced the confirmed two-run failure, freeze
+that program as the only candidate for this assignment. Do not run or submit a simplified variant,
+including a `build()` helper, a `_` worker parameter, a bare `print values`, or any other program
+that removes `worker(value)?`; do not overwrite `.product-evidence/stdin` or its four observation
+files with such a variant. The final sealed stdin must be byte-for-byte the program shown above,
+including `error.fail("bad-one")`, `worker(value)?`, and `$values.len()`. Before sealing or
+submitting, inspect the final stdin and repair it if any of those three markers is absent. A ticket
+whose expected stderr mentions `bad-one` while its sealed stdin is a different program is invalid
+evidence and must not be submitted. After confirmation, the only permitted shell runs are reruns
+of that same stdin for the second observation and final receipt audit.
+
 The only admitted reproducer is `xsh_program_reproducer`. Its exact command is:
 
 ```text

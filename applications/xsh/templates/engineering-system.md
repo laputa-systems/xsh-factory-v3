@@ -80,6 +80,16 @@ leaving `ControlFlow::Break(ResultErr)` in-band is incomplete, and an exact run 
 `2\n2\n` is definitive proof to continue tracing rather than submit. Keep the fix narrow and add
 the native regression at the lowered stream boundary.
 
+For this ticket, the sealed command's argv is exactly `cargo run --quiet --locked --bin xsh --
+/dev/stdin`; the tokens after Cargo's `--` are only `/dev/stdin`. Never run `cargo ... -- run
+--quiet ...`, invoke a nested XSH command, or treat that wrapper error as the reproducer result.
+Read the sealed stdin artifact before the first validation run and verify that it contains the
+same `worker(value)?` program named by the ticket, including `error.fail("bad-one")` and
+`$values.len()`. If the artifact instead contains `build()`, `_`, or another simplified program,
+the Product evidence is malformed: do not submit a candidate from it. The raw gate is valid only
+when the exact command and exact sealed stdin together produce exit `3`, empty stdout, and stderr
+identifying `bad-one`.
+
 ## Bounded flaky-test remediation
 
 If a required validation test fails, first decide whether it is a real regression or a flaky
