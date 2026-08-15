@@ -45,9 +45,13 @@ The submission gate is observable, not aspirational: immediately before `candida
 exact sealed reproducer after the final edit and inspect its exit status and stderr. Do not submit
 while it returns a nonzero status or the original diagnostic; the kernel will reject that candidate.
 When the ticket changes the expected exit status, verify the exact desired status from the XSH
-process rather than treating a successful Cargo/build wrapper as proof. If `candidate_submit`
-reports hard validation rejection, inspect that rejection, repair the candidate, and rerun the
-exact reproducer before submitting again; do not call `work_complete` in place of repair.
+process rather than treating a successful Cargo/build wrapper as proof. For the assigned `run false`
+ticket, the final exact reproducer must report XSH exit status `1`; a wrapper result of `0` or the
+original `3` means the candidate is not ready. If `candidate_submit` reports hard validation
+rejection, that response is non-terminal: inspect the rejection, repair the candidate, rerun the exact
+reproducer, and submit again only after the raw status and stderr satisfy the ticket. Never stop,
+return a prose completion, or call another terminal path after a rejection; the candidate remains
+unfinished until an accepted `candidate_submit` receipt is returned.
 For a receiver-method defect, trace both the call-classification path and the method-dispatch path
 before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
 
