@@ -484,6 +484,7 @@ async fn seal_existing_observation_manifest(
 /// The terminal-only identity used by compatibility callers without stream
 /// evidence. Product discovery and requalification use the stream-aware
 /// variant so same-status output defects remain durable failures.
+#[cfg(test)]
 pub(crate) fn product_observation_manifest_bytes(terminal: &CommandTerminal) -> Vec<u8> {
     product_observation_manifest_bytes_with_optional_streams(terminal, None, None)
 }
