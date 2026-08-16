@@ -38,7 +38,7 @@ use crate::{
         ArchitectTransitionFuture, ArchitectTransitionResolutionError, ArchitectTransitionResolver,
         ResolvedCandidateDecisionTransition, ResolvedReleaseTransition,
     },
-    product_runtime::product_observation_manifest_bytes,
+    product_runtime::product_observation_manifest_bytes_with_streams,
     scheduler::ClaimReadyTicketAction,
     session_runtime::{
         CandidateQualityAuthorityFuture, CandidateQualityAuthorityResolutionError,
@@ -1143,17 +1143,19 @@ impl DurableAuthorityResolver {
             Some(reference) => CommandStdin::Artifact(self.exact_bytes(reference).await?),
             None => CommandStdin::Empty,
         };
+        let expected_stdout = self
+            .exact_bytes(&proposal.reproducer.expected_observation.stdout)
+            .await?;
+        let expected_stderr = self
+            .exact_bytes(&proposal.reproducer.expected_observation.stderr)
+            .await?;
         DeterministicCommand::new(
             profile,
             stdin,
             CommandExpectation::new(
-                // Product tickets establish their public process contract by
-                // exit status. Raw expected stream artifacts remain durable
-                // diagnostic evidence, but cannot be used for exact replay
-                // when a pre-fix host panic embeds a process-local id.
                 ComparisonRevision::parse("status-only-v1").map_err(|error| error.to_string())?,
-                None,
-                None,
+                Some(expected_stdout),
+                Some(expected_stderr),
             ),
         )
         .map_err(|error| format!("ticket reproducer command is invalid: {error}"))
@@ -2262,9 +2264,8 @@ struct CandidateRecovery {
     engineering_started_at_seconds: i64,
 }
 
-/// Stores the same status-only observation-manifest bytes used at Product
-/// admission. Full raw output remains sealed alongside it; DecisionStore
-/// compares the named comparison identity for current-head reproduction.
+/// Stores the same stream-aware observation-manifest bytes used at Product
+/// admission. Full raw output remains sealed alongside it for diagnosis.
 async fn seal_command_observation_manifest(
     process: &crate::process::ProcessStore,
     cas: &CasStore,
@@ -2293,7 +2294,11 @@ async fn seal_command_observation_manifest(
         )
         .await
         .map_err(|error| format!("could not seal current-head stderr: {error}"))?;
-    let bytes = product_observation_manifest_bytes(&receipt.terminal());
+    let bytes = product_observation_manifest_bytes_with_streams(
+        &receipt.terminal(),
+        receipt.stdout(),
+        receipt.stderr(),
+    );
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,

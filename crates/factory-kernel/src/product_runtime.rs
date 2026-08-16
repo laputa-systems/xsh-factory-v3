@@ -12,7 +12,8 @@ use std::path::Path;
 
 use factory_protocol::{
     ApplicationRevisionId, ApprovedToolV2, ArtifactId, CommandObservationV2, CommandProfileV2,
-    DurationMillis, ExecutableV2, ExpectedRevision, KernelBuildId, ProductSubmitTicketRequest,
+    ContentDigest, DurationMillis, ExecutableV2, ExpectedRevision, KernelBuildId,
+    ProductSubmitTicketRequest,
     ProductTicketProposalV2, RepositoryRelativePath, SealedArtifactReferenceV2,
     canonical_product_ticket_proposal_json_v2, parse_application_bundle_v2,
     parse_command_profile_v2,
@@ -112,22 +113,24 @@ pub async fn execute_product_proposal(
     };
     let mut profile = sealed_profile;
     profile.expected_exit_status = proposal.reproducer.expected_observation.exit_status;
-    let expected_stdout = registered_reference_bytes(
+    let expected_stdout_bytes = registered_reference_bytes(
         process,
         cas,
         input.principal,
         &proposal.reproducer.expected_observation.stdout,
     )
     .await?;
-    let expected_stderr = registered_reference_bytes(
+    let expected_stderr_bytes = registered_reference_bytes(
         process,
         cas,
         input.principal,
         &proposal.reproducer.expected_observation.stderr,
     )
     .await?;
-    let (expected_stdout, expected_stderr) =
-        product_expected_streams(expected_stdout, expected_stderr)?;
+    let (expected_stdout, expected_stderr) = product_expected_streams(
+        expected_stdout_bytes.clone(),
+        expected_stderr_bytes.clone(),
+    )?;
     let command = DeterministicCommand::new(
         profile,
         command_stdin,
@@ -170,12 +173,9 @@ pub async fn execute_product_proposal(
     )
     .await?;
     // The ticket store's one durable discovery-observation field is the
-    // canonical replay identity.  Product discovery is intentionally
-    // `status-only-v1`: a host may put a process-local identifier in an
-    // otherwise equivalent panic diagnostic.  Keep the independently sealed
-    // second receipt in session evidence for diagnosis, but submit the first
-    // canonical observation for both replay slots so the persisted ticket
-    // expresses the admitted comparison rule rather than accidental bytes.
+    // canonical replay identity. Keep the independently sealed second receipt
+    // in session evidence for diagnosis, but submit the first canonical
+    // observation for both replay slots.
     let (first_actual_observation_artifact_id, second_actual_observation_artifact_id) =
         persisted_discovery_observations(first.manifest_artifact_id, second.manifest_artifact_id);
     let proposal_bytes = canonical_product_ticket_proposal_json_v2(input.request);
@@ -214,6 +214,8 @@ pub async fn execute_product_proposal(
         &format!("{}-expected-observation", input.request.client_command_id),
         input.kernel_build_id,
         &proposal.reproducer.expected_observation,
+        &expected_stdout_bytes,
+        &expected_stderr_bytes,
     )
     .await?;
 
@@ -403,6 +405,8 @@ struct ProductObservationBytes<'a> {
     terminal: &'a str,
     exit_status: Option<i32>,
     signal: Option<i32>,
+    stdout_digest: Option<String>,
+    stderr_digest: Option<String>,
 }
 
 struct SealedObservation {
@@ -435,7 +439,11 @@ async fn seal_observation(
         receipt.stderr(),
     )
     .await?;
-    let manifest = product_observation_manifest_bytes(&receipt.terminal());
+    let manifest = product_observation_manifest_bytes_with_streams(
+        &receipt.terminal(),
+        receipt.stdout(),
+        receipt.stderr(),
+    );
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -457,20 +465,46 @@ async fn seal_existing_observation_manifest(
     command_id: &str,
     kernel_build_id: KernelBuildId,
     observation: &CommandObservationV2,
+    stdout: &[u8],
+    stderr: &[u8],
 ) -> Result<ArtifactId, ProductRuntimeError> {
-    let bytes = product_observation_manifest_bytes(&CommandTerminal::Exited {
-        exit_code: observation.exit_status,
-    });
+    let bytes = product_observation_manifest_bytes_with_streams(
+        &CommandTerminal::Exited {
+            exit_code: observation.exit_status,
+        },
+        stdout,
+        stderr,
+    );
     let (_, receipt) = process
         .adopt_and_register_kernel_bytes(cas, principal, command_id, kernel_build_id, &bytes)
         .await?;
     Ok(receipt.artifact_id)
 }
 
-/// The equality identity for Product's admitted `status-only-v1`
-/// discovery/requalification rule. Full stdout and stderr are sealed beside
-/// this manifest as diagnostic evidence, never discarded.
+/// The terminal-only identity used by compatibility callers without stream
+/// evidence. Product discovery and requalification use the stream-aware
+/// variant so same-status output defects remain durable failures.
 pub(crate) fn product_observation_manifest_bytes(terminal: &CommandTerminal) -> Vec<u8> {
+    product_observation_manifest_bytes_with_optional_streams(terminal, None, None)
+}
+
+pub(crate) fn product_observation_manifest_bytes_with_streams(
+    terminal: &CommandTerminal,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Vec<u8> {
+    product_observation_manifest_bytes_with_optional_streams(
+        terminal,
+        Some(stdout),
+        Some(stderr),
+    )
+}
+
+fn product_observation_manifest_bytes_with_optional_streams(
+    terminal: &CommandTerminal,
+    stdout: Option<&[u8]>,
+    stderr: Option<&[u8]>,
+) -> Vec<u8> {
     let (terminal_name, exit_status, signal) = match terminal {
         CommandTerminal::Exited { exit_code } => ("exited", Some(*exit_code), None),
         CommandTerminal::Signaled { signal } => ("signaled", None, Some(*signal)),
@@ -483,6 +517,8 @@ pub(crate) fn product_observation_manifest_bytes(terminal: &CommandTerminal) -> 
         terminal: terminal_name,
         exit_status,
         signal,
+        stdout_digest: stdout.map(|bytes| ContentDigest::of_bytes(bytes).to_hex()),
+        stderr_digest: stderr.map(|bytes| ContentDigest::of_bytes(bytes).to_hex()),
     })
     .into_bytes()
 }
@@ -554,7 +590,7 @@ mod tests {
 
     use super::{
         persisted_discovery_observations, product_expected_streams,
-        product_observation_manifest_bytes,
+        product_observation_manifest_bytes, product_observation_manifest_bytes_with_streams,
     };
 
     #[test]
@@ -575,7 +611,7 @@ mod tests {
                 &crate::command_supervision::CommandTerminal::Exited { exit_code: 101 },
             ))
             .expect("static JSON is UTF-8"),
-            "{\"comparison_revision\":\"status-only-v1\",\"terminal\":\"exited\",\"exit_status\":101,\"signal\":null}"
+            "{\"comparison_revision\":\"status-only-v1\",\"terminal\":\"exited\",\"exit_status\":101,\"signal\":null,\"stdout_digest\":null,\"stderr_digest\":null}"
         );
     }
 
@@ -586,5 +622,21 @@ mod tests {
 
         assert_eq!(stdout.bytes(), b"5\n");
         assert!(stderr.bytes().is_empty());
+    }
+
+    #[test]
+    fn stream_aware_product_manifest_distinguishes_same_status_output() {
+        let expected = product_observation_manifest_bytes_with_streams(
+            &crate::command_supervision::CommandTerminal::Exited { exit_code: 0 },
+            b"5\n",
+            b"",
+        );
+        let actual = product_observation_manifest_bytes_with_streams(
+            &crate::command_supervision::CommandTerminal::Exited { exit_code: 0 },
+            b"5\n5\n",
+            b"",
+        );
+
+        assert_ne!(expected, actual);
     }
 }
