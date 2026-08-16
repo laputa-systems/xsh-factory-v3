@@ -26,8 +26,8 @@ use crate::{
     },
     cas::CasStore,
     command_supervision::{
-        CommandExpectation, CommandReceipt, CommandRunner, CommandStdin, CommandTerminal,
-        CommandWorkspace, ComparisonRevision, DeterministicCommand, ExactBytes,
+        CommandExpectation, CommandReceipt, CommandRunner, CommandStdin, CommandWorkspace,
+        ComparisonRevision, DeterministicCommand, ExactBytes,
     },
     decision_store::{CandidateReceipt, DeliveryReceipt, RecordDelivery},
     git::{
@@ -38,7 +38,7 @@ use crate::{
         ArchitectTransitionFuture, ArchitectTransitionResolutionError, ArchitectTransitionResolver,
         ResolvedCandidateDecisionTransition, ResolvedReleaseTransition,
     },
-    product_runtime::status_only_observation_manifest_bytes,
+    product_runtime::product_observation_manifest_bytes,
     scheduler::ClaimReadyTicketAction,
     session_runtime::{
         CandidateQualityAuthorityFuture, CandidateQualityAuthorityResolutionError,
@@ -2273,14 +2273,6 @@ async fn seal_command_observation_manifest(
     kernel_build_id: KernelBuildId,
     receipt: &CommandReceipt,
 ) -> Result<ArtifactId, String> {
-    let exit_status = match receipt.terminal() {
-        CommandTerminal::Exited { exit_code } => exit_code,
-        other => {
-            return Err(format!(
-                "current-head reproducer did not exit normally: {other:?}"
-            ));
-        }
-    };
     let (_stdout, _) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -2301,7 +2293,7 @@ async fn seal_command_observation_manifest(
         )
         .await
         .map_err(|error| format!("could not seal current-head stderr: {error}"))?;
-    let bytes = status_only_observation_manifest_bytes(exit_status);
+    let bytes = product_observation_manifest_bytes(&receipt.terminal());
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,

@@ -544,9 +544,10 @@ impl CommandRunner {
     }
 
     /// Runs the discovery reproducer exactly twice. A reproducible failure
-    /// requires two identical normal exits which both disagree with the
-    /// expected observation; a timeout, stream limit, or signal is never
-    /// promoted to an exact product observation.
+    /// requires two identical observations which both disagree with the
+    /// expected observation. Product's terminal-aware comparison rule admits
+    /// stable termination outcomes for cancellation tickets; other rules
+    /// continue to require identical normal exits.
     pub fn run_discovery_reproducer(
         &self,
         workspace: &CommandWorkspace,
@@ -750,22 +751,27 @@ impl CommandReceipt {
     }
 
     fn same_actual_observation(&self, other: &Self) -> bool {
+        if self.comparison_revision.as_str() == "status-only-v1" {
+            return product_terminal_matches(&self.terminal, &other.terminal)
+                && self.exit_status == other.exit_status
+                && self.signal == other.signal;
+        }
         if !matches!(self.terminal, CommandTerminal::Exited { .. })
             || !matches!(other.terminal, CommandTerminal::Exited { .. })
             || self.exit_status != other.exit_status
         {
             return false;
         }
-        // Product discovery occasionally exposes a host-generated diagnostic
-        // identifier (for example a process-local Rust panic id) that changes
-        // between otherwise identical normal exits. `status-only-v1` keeps
-        // the two-run gate meaningful for that closed policy: the bounded
-        // command must fail twice with the same exit status. Every other
-        // comparison revision retains byte-for-byte stream equality.
-        if self.comparison_revision.as_str() == "status-only-v1" {
-            return true;
-        }
         self.stdout == other.stdout && self.stderr == other.stderr
+    }
+}
+
+fn product_terminal_matches(first: &CommandTerminal, second: &CommandTerminal) -> bool {
+    match (first, second) {
+        (CommandTerminal::Exited { .. }, CommandTerminal::Exited { .. })
+        | (CommandTerminal::Signaled { .. }, CommandTerminal::Signaled { .. })
+        | (CommandTerminal::TimedOut { .. }, CommandTerminal::TimedOut { .. }) => true,
+        _ => false,
     }
 }
 
@@ -1881,6 +1887,37 @@ exit 17
             runner()
                 .run_discovery_reproducer(&workspace(&root), &command)
                 .expect("two normal failures")
+                .classification(),
+            DiscoveryClassification::ReproducibleFailure
+        );
+        fs::remove_dir_all(root).expect("remove synthetic repository");
+    }
+
+    #[test]
+    fn status_only_discovery_accepts_a_stable_timeout_for_cancellation_evidence() {
+        let root = temporary_repository("status-only-timeout");
+        write_script(
+            &root,
+            "status-only-timeout",
+            "trap '' TERM; while :; do :; done",
+        );
+        let mut profile = repository_command("status-only-timeout", &[]);
+        profile.timeout = DurationMillis::new(100);
+        let command = DeterministicCommand::new(
+            profile,
+            CommandStdin::Empty,
+            CommandExpectation::new(
+                ComparisonRevision::parse("status-only-v1").expect("status-only revision"),
+                None,
+                None,
+            ),
+        )
+        .expect("status-only timeout command");
+
+        assert_eq!(
+            runner()
+                .run_discovery_reproducer(&workspace(&root), &command)
+                .expect("two stable cancellation observations")
                 .classification(),
             DiscoveryClassification::ReproducibleFailure
         );

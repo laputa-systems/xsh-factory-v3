@@ -33,10 +33,11 @@ use crate::{
 };
 
 // Product tickets establish a public exit-status contract. Some pre-fix host
-// panics include process-local diagnostic ids, so discovery deliberately uses
-// the narrowly named status-only comparison rule while preserving the raw
-// observations as evidence. Candidate hard validation and Quality still own
-// the deterministic product test suite.
+// panics include process-local diagnostic ids, and cancellation tickets need
+// stable timeout/signal terminals, so discovery uses the terminal-aware
+// status-only comparison rule while preserving raw observations as evidence.
+// Candidate hard validation and Quality still own the deterministic product
+// test suite.
 const PRODUCT_PROPOSAL_COMPARISON_REVISION: &str = "status-only-v1";
 
 #[derive(Debug, Error)]
@@ -374,9 +375,11 @@ fn proposal_artifacts(proposal: &ProductTicketProposalV2) -> Vec<&SealedArtifact
 }
 
 #[derive(Serialize)]
-struct StatusOnlyObservationBytes<'a> {
+struct ProductObservationBytes<'a> {
     comparison_revision: &'a str,
-    exit_status: i32,
+    terminal: &'a str,
+    exit_status: Option<i32>,
+    signal: Option<i32>,
 }
 
 struct SealedObservation {
@@ -409,11 +412,7 @@ async fn seal_observation(
         receipt.stderr(),
     )
     .await?;
-    let exit_status = match receipt.terminal() {
-        CommandTerminal::Exited { exit_code } => exit_code,
-        _ => return Err(ProductRuntimeError::ReproducerNotStableFailure),
-    };
-    let manifest = status_only_observation_manifest_bytes(exit_status);
+    let manifest = product_observation_manifest_bytes(&receipt.terminal());
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -436,20 +435,31 @@ async fn seal_existing_observation_manifest(
     kernel_build_id: KernelBuildId,
     observation: &CommandObservationV2,
 ) -> Result<ArtifactId, ProductRuntimeError> {
-    let bytes = status_only_observation_manifest_bytes(observation.exit_status);
+    let bytes = product_observation_manifest_bytes(&CommandTerminal::Exited {
+        exit_code: observation.exit_status,
+    });
     let (_, receipt) = process
         .adopt_and_register_kernel_bytes(cas, principal, command_id, kernel_build_id, &bytes)
         .await?;
     Ok(receipt.artifact_id)
 }
 
-/// The only equality identity for Product's admitted `status-only-v1`
+/// The equality identity for Product's admitted `status-only-v1`
 /// discovery/requalification rule. Full stdout and stderr are sealed beside
 /// this manifest as diagnostic evidence, never discarded.
-pub(crate) fn status_only_observation_manifest_bytes(exit_status: i32) -> Vec<u8> {
-    json::to_string(&StatusOnlyObservationBytes {
+pub(crate) fn product_observation_manifest_bytes(terminal: &CommandTerminal) -> Vec<u8> {
+    let (terminal_name, exit_status, signal) = match terminal {
+        CommandTerminal::Exited { exit_code } => ("exited", Some(*exit_code), None),
+        CommandTerminal::Signaled { signal } => ("signaled", None, Some(*signal)),
+        CommandTerminal::TimedOut { .. } => ("timed_out", None, None),
+        CommandTerminal::StdoutLimit { .. } => ("stdout_limit", None, None),
+        CommandTerminal::StderrLimit { .. } => ("stderr_limit", None, None),
+    };
+    json::to_string(&ProductObservationBytes {
         comparison_revision: PRODUCT_PROPOSAL_COMPARISON_REVISION,
+        terminal: terminal_name,
         exit_status,
+        signal,
     })
     .into_bytes()
 }
@@ -519,7 +529,7 @@ async fn execute_duplicate_query(
 mod tests {
     use factory_protocol::ArtifactId;
 
-    use super::{persisted_discovery_observations, status_only_observation_manifest_bytes};
+    use super::{persisted_discovery_observations, product_observation_manifest_bytes};
 
     #[test]
     fn status_only_discovery_uses_the_first_observation_as_the_ticket_replay_identity() {
@@ -533,11 +543,13 @@ mod tests {
     }
 
     #[test]
-    fn status_only_manifest_excludes_host_specific_output_bytes() {
+    fn product_manifest_excludes_host_specific_output_bytes() {
         assert_eq!(
-            String::from_utf8(status_only_observation_manifest_bytes(101))
-                .expect("static JSON is UTF-8"),
-            "{\"comparison_revision\":\"status-only-v1\",\"exit_status\":101}"
+            String::from_utf8(product_observation_manifest_bytes(
+                &crate::command_supervision::CommandTerminal::Exited { exit_code: 101 },
+            ))
+            .expect("static JSON is UTF-8"),
+            "{\"comparison_revision\":\"status-only-v1\",\"terminal\":\"exited\",\"exit_status\":101,\"signal\":null}"
         );
     }
 }
