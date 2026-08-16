@@ -19,7 +19,7 @@ use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
-const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
+const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1_200);
 const MAX_PROVIDER_RETRIES: u32 = 1;
 
 fn main() -> ExitCode {
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(provider_request_timeout(120_000), Duration::from_secs(40));
         assert_eq!(
             provider_request_timeout(3_600_000),
-            Duration::from_secs(900)
+            Duration::from_secs(1_200)
         );
     }
 
