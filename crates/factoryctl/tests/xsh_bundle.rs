@@ -35,7 +35,7 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
             .bundle
             .assignment_role_profiles
             .iter()
-            .all(|profile| profile.model.output_token_limit <= 32_768)
+            .all(|profile| profile.model.output_token_limit == 32_768)
     );
     assert_eq!(
         first
