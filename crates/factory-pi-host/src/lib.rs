@@ -27,7 +27,7 @@ pub use execution::{
 pub use tool_bridge::{
     BoundTool, CommandContext, DaemonError, DaemonFuture, DeferredTerminal, FACTORY_CAPABILITY,
     FactoryCapability, FramedDaemon, LocalToolExecutor, PolicyBindingError, TerminalDeferral,
-    ToolName, bind_policy,
+    ToolExecutionDiagnostic, ToolName, bind_policy,
 };
 pub use transport::{
     FrameClient, FrameTransportError, MAX_REQUEST_FRAME_BYTES, MAX_RESPONSE_FRAME_BYTES,

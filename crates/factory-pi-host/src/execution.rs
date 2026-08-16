@@ -8,7 +8,8 @@
 use crate::Admission;
 use crate::agent_host::{AgentHostError, BareAgentHost};
 use crate::tool_bridge::{
-    CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolName, bind_policy,
+    CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolExecutionDiagnostic,
+    ToolName, bind_policy,
 };
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
@@ -460,6 +461,8 @@ pub struct ExecutionDiagnostics {
     pub turns_started: u32,
     /// Controller-owned Engineering phase at terminal reconciliation.
     pub engineering_phase: String,
+    /// Host-boundary timing and failure counts for completed tool executions.
+    pub tool_executions: Vec<ToolExecutionDiagnostic>,
 }
 
 impl ExecutionResult {
@@ -478,6 +481,7 @@ impl ExecutionResult {
         let diagnostics = ExecutionDiagnostics {
             turns_started,
             engineering_phase: command_context.engineering_diagnostics().name().to_owned(),
+            tool_executions: command_context.tool_execution_diagnostics(),
         };
         Self {
             events,

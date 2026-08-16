@@ -21,6 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// The sole capability name used by daemon-bound policy handlers.
 pub const FACTORY_CAPABILITY: &str = "factory";
@@ -265,6 +266,29 @@ impl Default for EngineeringProgressState {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ToolExecutionStats {
+    calls: u32,
+    failures: u32,
+    total_millis: u64,
+    maximum_millis: u64,
+}
+
+/// Host-boundary timing for one model-visible tool name.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolExecutionDiagnostic {
+    /// Stable model-facing tool name.
+    pub tool: String,
+    /// Number of completed host executions.
+    pub calls: u32,
+    /// Number of host executions that returned an error.
+    pub failures: u32,
+    /// Sum of execution time in milliseconds.
+    pub total_millis: u64,
+    /// Longest execution time in milliseconds.
+    pub maximum_millis: u64,
+}
+
 /// Monotonic command context minted by the admitted daemon session.
 #[derive(Clone, Debug)]
 pub struct CommandContext {
@@ -273,6 +297,7 @@ pub struct CommandContext {
     next_command_id: Arc<AtomicU64>,
     product_submission_rejected: Arc<AtomicBool>,
     engineering: Arc<Mutex<EngineeringProgressState>>,
+    tool_execution: Arc<Mutex<BTreeMap<ToolName, ToolExecutionStats>>>,
 }
 
 impl CommandContext {
@@ -283,6 +308,7 @@ impl CommandContext {
             next_command_id: Arc::new(AtomicU64::new(0)),
             product_submission_rejected: Arc::new(AtomicBool::new(false)),
             engineering: Arc::new(Mutex::new(EngineeringProgressState::default())),
+            tool_execution: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -334,6 +360,41 @@ impl CommandContext {
             .lock()
             .map(|state| state.phase)
             .unwrap_or(EngineeringPhase::Disabled)
+    }
+
+    pub(crate) fn record_tool_execution(
+        &self,
+        tool: ToolName,
+        elapsed: Duration,
+        succeeded: bool,
+    ) {
+        let Ok(mut diagnostics) = self.tool_execution.lock() else {
+            return;
+        };
+        let elapsed_millis = elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+        let stats = diagnostics.entry(tool).or_default();
+        stats.calls = stats.calls.saturating_add(1);
+        if !succeeded {
+            stats.failures = stats.failures.saturating_add(1);
+        }
+        stats.total_millis = stats.total_millis.saturating_add(elapsed_millis);
+        stats.maximum_millis = stats.maximum_millis.max(elapsed_millis);
+    }
+
+    pub(crate) fn tool_execution_diagnostics(&self) -> Vec<ToolExecutionDiagnostic> {
+        let Ok(diagnostics) = self.tool_execution.lock() else {
+            return Vec::new();
+        };
+        diagnostics
+            .iter()
+            .map(|(tool, stats)| ToolExecutionDiagnostic {
+                tool: tool.as_str().to_owned(),
+                calls: stats.calls,
+                failures: stats.failures,
+                total_millis: stats.total_millis,
+                maximum_millis: stats.maximum_millis,
+            })
+            .collect()
     }
 
     pub(crate) fn require_engineering_checkpoint_before(
@@ -683,9 +744,12 @@ where
             });
         }
         let value = if let Some(operation) = name.daemon_operation() {
+            let started = std::time::Instant::now();
             let value = match self.daemon.call(operation, payload.clone()).await {
                 Ok(value) => value,
                 Err(error) => {
+                    self.command_context
+                        .record_tool_execution(name, started.elapsed(), false);
                     if name == ToolName::ProductSubmitTicket {
                         self.command_context.mark_product_submission_rejected();
                     }
@@ -695,6 +759,8 @@ where
                 }
             };
             if let Err(error) = validate_daemon_response(operation, &value) {
+                self.command_context
+                    .record_tool_execution(name, started.elapsed(), false);
                 if name == ToolName::ProductSubmitTicket {
                     self.command_context.mark_product_submission_rejected();
                 }
@@ -733,6 +799,8 @@ where
                         message: error.to_string(),
                     })?;
             }
+            self.command_context
+                .record_tool_execution(name, started.elapsed(), true);
             value
         } else {
             let local = self
@@ -742,12 +810,21 @@ where
                     capability: FACTORY_CAPABILITY.into(),
                     method: request.method,
                 })?;
-            local
-                .invoke(name, payload, cancellation)
-                .await
-                .map_err(|error| CapabilityError::Execution {
-                    message: task_diagnostic(name, &error.to_string()),
-                })?
+            let started = std::time::Instant::now();
+            match local.invoke(name, payload, cancellation).await {
+                Ok(value) => {
+                    self.command_context
+                        .record_tool_execution(name, started.elapsed(), true);
+                    value
+                }
+                Err(error) => {
+                    self.command_context
+                        .record_tool_execution(name, started.elapsed(), false);
+                    return Err(CapabilityError::Execution {
+                        message: task_diagnostic(name, &error.to_string()),
+                    });
+                }
+            }
         };
         Ok(CapabilityResponse {
             value: capability_result(name, value)
@@ -1040,7 +1117,7 @@ pub fn task_diagnostic(tool: ToolName, detail: &str) -> String {
         if sanitized.contains(
             "Product named a reproducer profile that is not in the admitted application revision",
         ) {
-            return "The admitted reproducer profile name is `reproducer`. Set `reproducer_profile` to `reproducer`; it names the profile, not the command bytes. Keep `reproducer.command` as the exact canonical JSON profile supplied in the assignment, then submit again.".into();
+            return "Set `reproducer_profile` to the exact profile_name shown in the assignment target; it names the admitted profile, not the behavioral program. Keep `reproducer.command` as the exact canonical JSON profile shown there, put the program only in `reproducer.stdin`, then submit the same proposal again.".into();
         }
         if sanitized.contains("command bytes are not canonical V2 JSON") {
             return "The sealed command artifact must be the canonical JSON profile, not a shell command string. Use the exact profile JSON supplied in the assignment as the command artifact; put the behavioral program only in the sealed stdin artifact.".into();
@@ -1600,6 +1677,28 @@ mod tests {
     }
 
     #[test]
+    fn product_command_profile_failure_explains_the_exact_repair() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "Product proposal contract is invalid: frame JSON is invalid for command profile: command bytes are not canonical V2 JSON",
+        );
+        assert!(diagnostic.contains("canonical JSON profile"));
+        assert!(diagnostic.contains("behavioral program only"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn product_unknown_profile_failure_points_to_the_assignment_target() {
+        let diagnostic = task_diagnostic(
+            ToolName::ProductSubmitTicket,
+            "Product named a reproducer profile that is not in the admitted application revision",
+        );
+        assert!(diagnostic.contains("exact profile_name shown in the assignment target"));
+        assert!(diagnostic.contains("submit the same proposal again"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
     fn rejected_product_submission_blocks_work_complete_until_repaired() {
         let context = CommandContext::new(1);
         assert!(!context.product_submission_rejected());
@@ -1607,6 +1706,32 @@ mod tests {
         assert!(context.product_submission_rejected());
         context.clear_product_submission_rejected();
         assert!(!context.product_submission_rejected());
+    }
+
+    #[test]
+    fn tool_execution_diagnostics_aggregate_without_arguments() {
+        let context = CommandContext::new(1);
+        context.record_tool_execution(
+            ToolName::WorkspaceSearch,
+            Duration::from_millis(7),
+            true,
+        );
+        context.record_tool_execution(
+            ToolName::WorkspaceSearch,
+            Duration::from_millis(11),
+            false,
+        );
+
+        assert_eq!(
+            context.tool_execution_diagnostics(),
+            vec![ToolExecutionDiagnostic {
+                tool: "workspace_search".to_owned(),
+                calls: 2,
+                failures: 1,
+                total_millis: 18,
+                maximum_millis: 11,
+            }]
+        );
     }
 
     #[test]

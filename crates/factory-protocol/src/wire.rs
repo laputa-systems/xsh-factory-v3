@@ -2344,14 +2344,56 @@ pub fn canonical_command_profile_json_v2(command: &CommandWireV2) -> Result<Stri
     canonical_command(command)
 }
 
+/// Returns the exact command-profile bytes that Product must seal when it
+/// submits a reproducer. This is the actor-facing spelling of the admitted
+/// domain value; it intentionally uses the same closed field order as bundle
+/// admission.
+pub fn canonical_command_profile_json_from_domain_v2(command: &CommandProfileV2) -> String {
+    let executable = match &command.executable {
+        ExecutableV2::ApprovedTool(tool) => match tool {
+            ApprovedToolV2::Cargo => "{\"approved_tool\":\"cargo\"}".to_owned(),
+            ApprovedToolV2::Git => "{\"approved_tool\":\"git\"}".to_owned(),
+        },
+        ExecutableV2::RepositoryPath(path) => {
+            format!("{{\"repository_path\":{}}}", json_quote(path.as_str()))
+        }
+    };
+    format!(
+        "{{\"argv\":[{}],\"environment\":[{}],\"executable\":{},\"expected_exit_status\":{},\"name\":{},\"stderr_byte_limit\":{},\"stdout_byte_limit\":{},\"timeout_millis\":{},\"working_directory\":{}}}",
+        command
+            .argv
+            .iter()
+            .map(|value| json_quote(value))
+            .collect::<Vec<_>>()
+            .join(","),
+        command
+            .environment
+            .iter()
+            .map(|value| format!(
+                "{{\"name\":{},\"value\":{}}}",
+                json_quote(&value.name),
+                json_quote(&value.value)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        executable,
+        command.expected_exit_status,
+        json_quote(&command.name),
+        command.stderr_byte_limit,
+        command.stdout_byte_limit,
+        command.timeout.get(),
+        json_quote(command.working_directory.as_str())
+    )
+}
+
 /// Parses exactly the canonical V2 command profile bytes used by Product
 /// reproducer custody. Unknown fields, alternate key order, or whitespace are
 /// rejected rather than normalized.
 pub fn parse_command_profile_v2(payload: &[u8]) -> Result<CommandProfileV2, FrameError> {
     let payload = std::str::from_utf8(payload).map_err(|_| FrameError::InvalidUtf8)?;
-    let wire: CommandWireV2 = json::from_str(payload).map_err(|error| FrameError::InvalidJson {
+    let wire: CommandWireV2 = json::from_str(payload).map_err(|_| FrameError::InvalidJson {
         operation: "command profile",
-        detail: format!("{error:?}"),
+        detail: "command bytes are not canonical V2 JSON".into(),
     })?;
     if canonical_command_profile_json_v2(&wire)? != payload {
         return Err(FrameError::InvalidJson {

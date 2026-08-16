@@ -287,6 +287,19 @@ fn write_transcript(
 }
 
 fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, String> {
+    let tool_executions = diagnostics
+        .tool_executions
+        .iter()
+        .map(|tool| {
+            Ok(JsonValue::object([
+                ("tool", JsonValue::String(tool.tool.clone())),
+                ("calls", number(u64::from(tool.calls))?),
+                ("failures", number(u64::from(tool.failures))?),
+                ("total_millis", number(tool.total_millis)?),
+                ("maximum_millis", number(tool.maximum_millis)?),
+            ]))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     JsonValue::object([
         ("type", JsonValue::String("execution_summary".to_owned())),
         (
@@ -297,6 +310,7 @@ fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, Strin
             "engineering_phase",
             JsonValue::String(diagnostics.engineering_phase.clone()),
         ),
+        ("tool_executions", JsonValue::Array(tool_executions)),
     ])
     .to_json_string()
     .map_err(|e| e.to_string())

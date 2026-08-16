@@ -24,7 +24,8 @@ use factory_protocol::{
     ContextItemV2, ContextReferenceV2, ExpectedRevision, HARNESS_COMPILER_VERSION_V2,
     HarnessSpecV2, MicroUsd, OfficeId, ReadExactFileV2, RequiredReadV2, SealedArtifactReferenceV2,
     TerminalOperationV2, TicketContractReadV2, canonical_assignment_packet_json_v2,
-    parse_application_bundle_v2, render_template_v2, unsigned_assignment_packet_digest_v2,
+    canonical_command_profile_json_from_domain_v2, parse_application_bundle_v2, render_template_v2,
+    unsigned_assignment_packet_digest_v2,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -625,6 +626,7 @@ fn with_cleanup_failure(
 
 struct ApplicationMaterial {
     mission: String,
+    reproducer_profiles: Vec<factory_protocol::CommandProfileV2>,
     system_template: factory_protocol::TemplateArtifactV2,
     system_source: String,
     assignment_template: factory_protocol::TemplateArtifactV2,
@@ -719,6 +721,7 @@ async fn load_application_material(
     })?;
     Ok(ApplicationMaterial {
         mission,
+        reproducer_profiles: bundle.reproducer_profiles.clone(),
         system_template: profile.system_template.clone(),
         system_source,
         assignment_template: profile.assignment_template.clone(),
@@ -963,6 +966,7 @@ fn compile_harness(
         input.target_facts,
         input.assignment_evidence,
         input.required_reads,
+        &input.application.reproducer_profiles,
     )?;
     let mut context_items = vec![ContextItemV2 {
         reference: ContextReferenceV2::Office(input.office_id),
@@ -1563,6 +1567,7 @@ fn target_text(
     target_facts: &HarnessTargetFacts,
     evidence: &[AssignmentEvidenceV2],
     required_reads: &[ReadExactFileV2],
+    reproducer_profiles: &[factory_protocol::CommandProfileV2],
 ) -> Result<String, AssignmentRuntimeError> {
     let target = match target_facts {
         HarnessTargetFacts::Product => "product-research".to_owned(),
@@ -1593,9 +1598,38 @@ fn target_text(
         ),
     };
     let mut rendered = target;
+    if matches!(target_facts, HarnessTargetFacts::Product) {
+        append_target_reproducer_profiles(&mut rendered, reproducer_profiles)?;
+    }
     append_target_evidence(&mut rendered, evidence)?;
     append_target_required_reads(&mut rendered, required_reads)?;
     Ok(rendered)
+}
+
+fn append_target_reproducer_profiles(
+    rendered: &mut String,
+    profiles: &[factory_protocol::CommandProfileV2],
+) -> Result<(), AssignmentRuntimeError> {
+    rendered.push_str(
+        "\n\nAdmitted reproducer profiles (seal the exact JSON as `reproducer.command`; put only the behavioral program in `reproducer.stdin`):\n",
+    );
+    for profile in profiles {
+        rendered.push_str("- profile_name: `");
+        rendered.push_str(&profile.name);
+        rendered.push_str("`\n  command_json: ");
+        rendered.push_str(&canonical_command_profile_json_from_domain_v2(profile));
+        rendered.push('\n');
+    }
+    rendered.push_str(
+        "Repair rule: after a Product submission rejection, correct only the named field and resubmit the same proposal; do not search for a new command shape.\n",
+    );
+    if rendered.len() > 4_096 {
+        Err(AssignmentRuntimeError::Application(
+            "target plus admitted reproducer profiles exceeds the packet bound".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// Appends only the neutral, closed evidence labels that actors may receive
@@ -1787,6 +1821,36 @@ mod tests {
         assert!(rendered.contains("Exact workspace reads required before any mutating tool"));
         assert!(rendered.contains("`docs/contract.md`: defines the assigned runtime behavior"));
         assert!(rendered.contains("`src/runtime.rs`: owns the assigned implementation boundary"));
+    }
+
+    #[test]
+    fn product_target_contains_the_exact_admitted_command_profile() {
+        let profile = factory_protocol::CommandProfileV2 {
+            name: "reproduce".to_owned(),
+            executable: factory_protocol::ExecutableV2::ApprovedTool(
+                factory_protocol::ApprovedToolV2::Cargo,
+            ),
+            argv: vec!["run".to_owned(), "/dev/stdin".to_owned()],
+            working_directory: factory_protocol::RepositoryRelativePath::parse(".").unwrap(),
+            environment: Vec::new(),
+            timeout: factory_protocol::DurationMillis::new(30_000),
+            stdout_byte_limit: 4096,
+            stderr_byte_limit: 4096,
+            expected_exit_status: 0,
+        };
+        let rendered = target_text(
+            &HarnessTargetFacts::Product,
+            &[],
+            &[],
+            std::slice::from_ref(&profile),
+        )
+        .unwrap();
+        assert!(rendered.contains("profile_name: `reproduce`"));
+        assert!(rendered.contains(
+            &canonical_command_profile_json_from_domain_v2(&profile)
+        ));
+        assert!(rendered.contains("behavioral program in `reproducer.stdin`"));
+        assert!(rendered.contains("correct only the named field and resubmit the same proposal"));
     }
 
     #[test]
