@@ -87,6 +87,11 @@ admitted `cargo run --quiet --locked --bin xsh -- /dev/stdin` command in the bac
 second raw observation. Then perform the same two-run signal check for `run sleep 300 ?` only if
 the first cancellation path is conforming. Do not substitute `run.status false`, a short
 successful command, or another already-covered status case for this cancellation row.
+Because the admitted command runs through `cargo`, capture its process group immediately after
+starting it (`pid=$!; pgid=$(ps -o pgid= -p "$pid" | tr -d ' ')`). Send `SIGTERM` to the whole
+group (`kill -TERM -- "-$pgid"`), poll the group, and if the defect keeps it alive send
+`SIGKILL` to that same group before `wait`. Killing only a wrapper PID can leave the XSH child
+holding the shell tool's pipes open and stall the assignment; every descendant must be reaped.
 After the two cancellation observations confirm the defect, do not begin another discovery turn:
 seal the final cancellation evidence and call `product_submit_ticket` on the next tool turn. Keep
 the proposal narrative and evidence concise; the terminal submission is more important than
