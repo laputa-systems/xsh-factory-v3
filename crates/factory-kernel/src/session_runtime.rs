@@ -2312,13 +2312,20 @@ async fn adopt_runtime_artifact(
 fn ensure_partial_transcript(path: &Path) -> Result<(), SessionRuntimeError> {
     let mut file = OpenOptions::new()
         .create(true)
-        .append(true)
+        .truncate(true)
+        .write(true)
         .open(path)
         .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
             path: path.to_owned(),
             source,
         })?;
-    file.flush()
+    file.write_all(
+        format!(
+            "{{\"type\":\"factory.partial_transcript.v1\",\"source\":\"{SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH}\",\"source_byte_length\":0,\"truncated\":false}}\n"
+        )
+        .as_bytes(),
+    )
+    .and_then(|()| file.flush())
         .and_then(|()| file.sync_all())
         .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
             path: path.to_owned(),
@@ -2789,6 +2796,23 @@ mod tests {
         assert!(decode_base64("YR==").is_err());
         assert!(decode_base64("YWJ=").is_err());
         assert!(decode_base64("Y=Jj").is_err());
+    }
+
+    #[test]
+    fn partial_transcript_marker_records_unsealed_deadline_evidence() {
+        let path = std::env::temp_dir().join(format!(
+            "factory-v3-partial-transcript-{}-{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+
+        ensure_partial_transcript(&path).expect("create partial transcript marker");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read partial transcript marker"),
+            "{\"type\":\"factory.partial_transcript.v1\",\"source\":\"session.ndjson\",\"source_byte_length\":0,\"truncated\":false}\n"
+        );
+        std::fs::remove_file(path).expect("remove partial transcript marker");
     }
 
     #[test]

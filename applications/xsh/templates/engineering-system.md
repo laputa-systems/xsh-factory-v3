@@ -49,6 +49,12 @@ turns on validation:
    by turn 28 with a concise normalized commit message and the assigned regression identity. Never
    call a second terminal submission path after rejection.
 
+The controller gives this assignment a bounded execution wall. Reach the regression checkpoint
+and implementation edit early, and submit the candidate as soon as the exact reproducer and one
+narrow focused check pass; do not spend the remaining wall on optional archaeology, broad suites,
+or repeated provider turns. A prior attempt exhausted its wall before editing, so checkpoint by
+turn 10 and reserve the final turns for the candidate submission.
+
 For a cancellation or signal ticket involving `time.sleep`, SIGTERM, or a canceled runtime error,
 start with one targeted search such as `rg -n 'time\.sleep|checkpoint|SIGTERM|signal|canceled'
 src/runtime tests`. Follow the signal path from registration or delivery through evaluator
