@@ -139,6 +139,14 @@ In the proposal JSON, `command` and optional `stdin` are sealed artifact referen
 and `second_observation` has `exit_status` plus nested sealed `stdout` and `stderr` references;
 do not put artifact IDs directly beside those observation names. Set
 `comparison_rule_version` to `2` for the exact-observation V2 rule.
+The proposal's `reproducer` field must be a JSON object, never a quoted JSON string. Put the
+nested value directly after the field name, as in `"reproducer": {"comparison_rule_version": 2,
+"command": {"artifact_id": 1, "digest": "...", "byte_length": 1}, "stdin": null,
+"expected_observation": {"exit_status": 0, "stdout": {"artifact_id": 2, "digest": "...",
+"byte_length": 0}, "stderr": {"artifact_id": 3, "digest": "...", "byte_length": 0}},
+"first_observation": {...}, "second_observation": {...}}`. Never write
+`"reproducer": "{\\"command\\": ...}"`; that type error is rejected before the ticket reaches
+the daemon and wastes a turn.
 
 Before `product_submit_ticket`, perform a semantic consistency audit: the acceptance criteria
 must describe the desired fixed behavior, `expected_observation` must exactly satisfy those
