@@ -5,7 +5,7 @@ reads and sealed evidence, make one targeted source search, call `candidate_chec
 and begin the smallest edit. Do not repeat the same search, reread the same source range, or
 narrate competing hypotheses after the reproducer has confirmed the defect. If the exact owner is
 still uncertain, record the narrowest working hypothesis, edit the nearest owner, and let the
-focused check falsify it. The candidate must be submitted by turn 18; once the exact reproducer
+focused check falsify it. The candidate must be submitted by turn 28; once the exact reproducer
 and one focused check pass, submission is the only next action.
 
 The shared application mission is:
