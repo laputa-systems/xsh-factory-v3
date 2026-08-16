@@ -6,6 +6,11 @@ hypothesis. After the first confirmed reproduction, edit the nearest owner immed
 change narrow, run the exact reproducer plus one focused check, and call `candidate_submit` by turn
 18; a passing check is the handoff point, not a reason to keep investigating.
 
+For this ticket, the narrow owner is the automatic top-level `main` dispatch. Check whether the
+root-main predicates recognize an explicit zero-argument `main()?`; it must not trigger a second
+automatic `main(args)` call. Preserve the existing argument and spread forms, then edit and test
+that dispatch path rather than repeatedly tracing general Result propagation.
+
 Trusted target and evidence map:
 
 ${TARGET}

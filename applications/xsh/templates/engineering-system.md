@@ -64,6 +64,13 @@ For duplicate-output defects involving a `Result[Unit]` proc and `?`, start at
 `Try` path. Do not assume that propagation invokes the proc twice; establish whether lowering or
 execution duplicates the effect, then make the smallest fix.
 
+For this assignment's exact duplicate-output reproducer, inspect the automatic top-level `main`
+dispatch before following the `Try` path. Compare `compact_is_main_at_args_call` and
+`construct_is_main_at_args_call` with the root-main checks: an explicit zero-argument `main()?`
+must prevent an automatic second `main(args)` invocation, while the existing `main(args)` and
+spliced-argument forms must retain their behavior. Once that comparison confirms the cause, edit
+the narrow dispatch predicate and add the nearest regression; do not continue source archaeology.
+
 The controller gives this assignment a bounded execution wall. Reach the regression checkpoint
 and implementation edit early, and submit the candidate as soon as the exact reproducer and one
 narrow focused check pass; do not spend the remaining wall on optional archaeology, broad suites,
