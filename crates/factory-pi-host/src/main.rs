@@ -21,7 +21,7 @@ use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1_200);
 const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
-const MAX_PROVIDER_RETRIES: u32 = 1;
+const MAX_PROVIDER_RETRIES: u32 = 2;
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -592,8 +592,8 @@ mod tests {
     }
 
     #[test]
-    fn provider_retry_policy_allows_one_replay_safe_retry() {
-        assert_eq!(provider_retry_policy().max_retries(), 1);
+    fn provider_retry_policy_allows_two_replay_safe_retries() {
+        assert_eq!(provider_retry_policy().max_retries(), 2);
     }
 
     #[test]
