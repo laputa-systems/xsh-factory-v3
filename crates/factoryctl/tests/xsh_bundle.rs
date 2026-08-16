@@ -5,6 +5,8 @@ mod xsh_bundle;
 
 use std::path::PathBuf;
 
+use factory_protocol::ThinkingLevelV2;
+
 #[test]
 fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
     let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../applications/xsh");
@@ -34,6 +36,14 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
             .assignment_role_profiles
             .iter()
             .all(|profile| profile.model.output_token_limit <= 8_192)
+    );
+    assert!(
+        first
+            .application
+            .bundle
+            .assignment_role_profiles
+            .iter()
+            .all(|profile| profile.model.thinking_level == ThinkingLevelV2::Low)
     );
     assert!(!first.canonical_bundle.contains(&b'\n'));
     assert!(!first.canonical_bundle.contains(&b'\r'));
