@@ -18,7 +18,7 @@ use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
-const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -156,7 +156,7 @@ async fn run() -> Result<(), String> {
 }
 
 fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
-    Duration::from_millis((wall_limit_millis / 4).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
+    Duration::from_millis((wall_limit_millis / 6).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
 }
 
 async fn verify_packet(
@@ -545,7 +545,11 @@ mod tests {
 
     #[test]
     fn provider_request_timeout_is_capped_below_assignment_wall() {
-        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(60));
-        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(30));
+        assert_eq!(
+            provider_request_timeout(1_800_000),
+            Duration::from_secs(300)
+        );
+        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(150));
+        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(20));
     }
 }
