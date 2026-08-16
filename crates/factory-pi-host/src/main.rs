@@ -20,6 +20,7 @@ use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1_200);
+const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_PROVIDER_RETRIES: u32 = 1;
 
 fn main() -> ExitCode {
@@ -47,6 +48,9 @@ async fn run() -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .with_max_tokens(u64::from(admission.packet.model.output_token_limit))
             .with_request_timeout(provider_request_timeout(
+                admission.packet.limits.wall_limit_millis,
+            ))
+            .with_stall_timeout(provider_stall_timeout(
                 admission.packet.limits.wall_limit_millis,
             ))
             .with_retry_policy(provider_retry_policy()),
@@ -159,6 +163,10 @@ async fn run() -> Result<(), String> {
 
 fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
     Duration::from_millis((wall_limit_millis / 3).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
+}
+
+fn provider_stall_timeout(wall_limit_millis: u64) -> Duration {
+    Duration::from_millis((wall_limit_millis / 12).max(1)).min(MAX_PROVIDER_STALL_TIMEOUT)
 }
 
 fn provider_retry_policy() -> RetryPolicy {
@@ -541,7 +549,10 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{packet_verification_error, provider_request_timeout, provider_retry_policy};
+    use super::{
+        packet_verification_error, provider_request_timeout, provider_retry_policy,
+        provider_stall_timeout,
+    };
     use pi_agent_protocol::JsonValue;
     use std::time::Duration;
 
@@ -583,5 +594,13 @@ mod tests {
     #[test]
     fn provider_retry_policy_allows_one_replay_safe_retry() {
         assert_eq!(provider_retry_policy().max_retries(), 1);
+    }
+
+    #[test]
+    fn provider_stall_timeout_is_bounded_within_assignment_wall() {
+        assert_eq!(provider_stall_timeout(1_800_000), Duration::from_secs(120));
+        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(75));
+        assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(10));
+        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(120));
     }
 }
