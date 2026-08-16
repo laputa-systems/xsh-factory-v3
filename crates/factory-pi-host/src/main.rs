@@ -20,7 +20,10 @@ use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1_200);
-const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
+// OpenRouter is used in finite-response mode: a partial JSON body can pause
+// while the model continues generating. Keep this below the request timeout,
+// but give long Product generations several minutes before declaring a stall.
+const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_PROVIDER_RETRIES: u32 = 2;
 
 fn main() -> ExitCode {
@@ -166,7 +169,7 @@ fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
 }
 
 fn provider_stall_timeout(wall_limit_millis: u64) -> Duration {
-    Duration::from_millis((wall_limit_millis / 12).max(1)).min(MAX_PROVIDER_STALL_TIMEOUT)
+    Duration::from_millis((wall_limit_millis / 4).max(1)).min(MAX_PROVIDER_STALL_TIMEOUT)
 }
 
 fn provider_retry_policy() -> RetryPolicy {
@@ -598,9 +601,9 @@ mod tests {
 
     #[test]
     fn provider_stall_timeout_is_bounded_within_assignment_wall() {
-        assert_eq!(provider_stall_timeout(1_800_000), Duration::from_secs(120));
-        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(75));
-        assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(10));
-        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(120));
+        assert_eq!(provider_stall_timeout(1_800_000), Duration::from_secs(450));
+        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(225));
+        assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(30));
+        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(600));
     }
 }
