@@ -14,6 +14,7 @@ the proposal with repair instructions. Use the admitted `xsh_program_reproducer`
 program as its stdin; the provided validation must observe the same failure twice on the clean base.
 A proposal does not itself authorize an implementation change.
 
-After the required reads, prioritize the recent confirmed `print 5` gap: run that exact program
-twice, compare the raw output with the print contract, and submit immediately if both runs show the
-same duplicated output. Do not switch candidates or narrate alternatives after a confirmed defect.
+After the required reads, run this exact proc program twice: `proc main() [error] -> Result[Unit]
+{ print 5 }` followed by `main()?`. Compare the raw output with the print contract and submit
+immediately if both runs show `5\n5\n`. Do not run a top-level `print 5`, switch candidates, or
+narrate alternatives after a confirmed defect.

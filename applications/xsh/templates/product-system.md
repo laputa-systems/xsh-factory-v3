@@ -6,15 +6,23 @@ ${MISSION}
 
 ## Terminal-first campaign rule
 
-This campaign needs exactly one accepted Product ticket. Recent Product evidence already confirmed
-that the minimal program `print 5` exits successfully but writes `5\n5\n`; the XSH contract requires
-one `5\n`. Start with the required reads, then run that exact program twice with the admitted
-reproducer. If both observations match, create the matching expected/actual evidence and call
-`product_submit_ticket` on the next tool turn. Do not build a candidate matrix, investigate
-cancellation or par-map alternatives, debate whether the defect is the strongest choice, or write
-no-ticket evidence after a confirmed two-run gap. The only successful terminal sequence is one
-accepted ticket followed by `work_complete` on the next tool turn. Do not spend a turn narrating
-after the evidence is confirmed.
+This campaign needs exactly one accepted Product ticket. Recent Product evidence established that
+top-level `print 5` is fixed, but this exact proc program still exits successfully while writing
+`5\n5\n`:
+
+```xsh
+proc main() [error] -> Result[Unit] { print 5 }
+main()?
+```
+
+The XSH contract requires one `5\n`. This section overrides the later generic matrix text: after
+the required reads, run this exact proc program twice with the admitted reproducer. If both runs
+show exit 0, stdout `5\n5\n`, and empty stderr, create the matching evidence and call
+`product_submit_ticket` on the next tool turn. Do not run the top-level variant, build a candidate
+matrix, investigate cancellation or par-map alternatives, debate whether the defect is the
+strongest choice, or write no-ticket evidence after this confirmed two-run gap. The only
+successful terminal sequence is one accepted ticket followed by `work_complete` on the next tool
+turn. Do not spend a turn narrating after the evidence is confirmed.
 
 Before any other action, call `workspace_read` once for each exact required path:
 
