@@ -29,6 +29,10 @@
    reproducer plus focused check. This is candidate hygiene, not a validation
    waiver: broad rewrites remain forbidden, and a passing candidate is not yet
    delivered.
+   The host enforces the Engineering phase order independently of prompt prose:
+   required reads and bounded discovery precede the checkpoint, shell/write/edit
+   operations are unavailable before it, and the run stops at controller-owned
+   checkpoint and submission deadlines with phase diagnostics.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery

@@ -233,6 +233,46 @@ impl fmt::Display for DaemonError {
 
 impl std::error::Error for DaemonError {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EngineeringPhase {
+    Disabled,
+    AwaitingCheckpoint,
+    Implementing,
+    Submitted,
+    Deadline,
+}
+
+impl EngineeringPhase {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::AwaitingCheckpoint => "awaiting_checkpoint",
+            Self::Implementing => "implementing",
+            Self::Submitted => "submitted",
+            Self::Deadline => "deadline",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct EngineeringProgressState {
+    phase: EngineeringPhase,
+    checkpoint_deadline: u32,
+    submission_deadline: u32,
+    deadline_reached: bool,
+}
+
+impl Default for EngineeringProgressState {
+    fn default() -> Self {
+        Self {
+            phase: EngineeringPhase::Disabled,
+            checkpoint_deadline: 0,
+            submission_deadline: 0,
+            deadline_reached: false,
+        }
+    }
+}
+
 /// Monotonic command context minted by the admitted daemon session.
 #[derive(Clone, Debug)]
 pub struct CommandContext {
@@ -240,6 +280,7 @@ pub struct CommandContext {
     session_revision: Arc<AtomicU64>,
     next_command_id: Arc<AtomicU64>,
     product_submission_rejected: Arc<AtomicBool>,
+    engineering: Arc<Mutex<EngineeringProgressState>>,
 }
 
 impl CommandContext {
@@ -249,7 +290,105 @@ impl CommandContext {
             session_revision: Arc::new(AtomicU64::new(session_revision)),
             next_command_id: Arc::new(AtomicU64::new(0)),
             product_submission_rejected: Arc::new(AtomicBool::new(false)),
+            engineering: Arc::new(Mutex::new(EngineeringProgressState::default())),
         }
+    }
+
+    pub(crate) fn configure_engineering(&self, turn_limit: u32) {
+        let Ok(mut state) = self.engineering.lock() else {
+            return;
+        };
+        let limit = turn_limit.max(1);
+        let checkpoint_deadline = limit.saturating_add(2) / 3;
+        let submission_deadline = limit
+            .saturating_mul(3)
+            .checked_div(4)
+            .unwrap_or(limit)
+            .max(checkpoint_deadline.saturating_add(1))
+            .min(limit);
+        *state = EngineeringProgressState {
+            phase: EngineeringPhase::AwaitingCheckpoint,
+            checkpoint_deadline,
+            submission_deadline,
+            deadline_reached: false,
+        };
+    }
+
+    pub(crate) fn record_engineering_checkpoint(&self) -> Result<(), &'static str> {
+        let mut state = self
+            .engineering
+            .lock()
+            .map_err(|_| "Engineering phase state is unavailable")?;
+        if state.phase != EngineeringPhase::AwaitingCheckpoint {
+            return Err("Engineering checkpoint is not the next required phase");
+        }
+        state.phase = EngineeringPhase::Implementing;
+        Ok(())
+    }
+
+    pub(crate) fn record_engineering_submission(&self) -> Result<(), &'static str> {
+        let mut state = self
+            .engineering
+            .lock()
+            .map_err(|_| "Engineering phase state is unavailable")?;
+        if state.phase != EngineeringPhase::Implementing {
+            return Err("Engineering candidate submission is outside the active phase");
+        }
+        state.phase = EngineeringPhase::Submitted;
+        Ok(())
+    }
+
+    pub(crate) fn engineering_should_stop_after_turn(&self, completed_turns: u32) -> bool {
+        let Ok(mut state) = self.engineering.lock() else {
+            return true;
+        };
+        match state.phase {
+            EngineeringPhase::AwaitingCheckpoint
+                if completed_turns >= state.checkpoint_deadline || state.deadline_reached =>
+            {
+                state.phase = EngineeringPhase::Deadline;
+                state.deadline_reached = true;
+                true
+            }
+            EngineeringPhase::Implementing
+                if completed_turns >= state.submission_deadline || state.deadline_reached =>
+            {
+                state.phase = EngineeringPhase::Deadline;
+                state.deadline_reached = true;
+                true
+            }
+            EngineeringPhase::Submitted => true,
+            EngineeringPhase::Deadline => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn engineering_diagnostics(&self) -> (EngineeringPhase, bool) {
+        self.engineering
+            .lock()
+            .map(|state| (state.phase, state.deadline_reached))
+            .unwrap_or((EngineeringPhase::Deadline, true))
+    }
+
+    pub(crate) fn require_engineering_checkpoint_before(
+        &self,
+        tool: ToolName,
+    ) -> Result<(), &'static str> {
+        let state = self
+            .engineering
+            .lock()
+            .map_err(|_| "Engineering phase state is unavailable")?;
+        if state.phase == EngineeringPhase::AwaitingCheckpoint
+            && matches!(
+                tool,
+                ToolName::WorkspaceWrite | ToolName::WorkspaceEdit | ToolName::Shell
+            )
+        {
+            return Err(
+                "Engineering must call candidate_checkpoint_regression before shell, write, or edit",
+            );
+        }
+        Ok(())
     }
 
     /// Return the latest daemon aggregate revision observed by this actor.
@@ -558,6 +697,11 @@ where
                 message: "The previous Product ticket submission was rejected. Repair and resubmit a valid proposal or continue the investigation; work_complete is not available yet.".into(),
             });
         }
+        self.command_context
+            .require_engineering_checkpoint_before(name)
+            .map_err(|message| CapabilityError::Execution {
+                message: message.to_owned(),
+            })?;
         if name.defers_without_daemon() {
             self.terminal
                 .defer(name, payload)
@@ -594,6 +738,20 @@ where
             }
             if name == ToolName::ProductSubmitTicket {
                 self.command_context.clear_product_submission_rejected();
+            }
+            if name == ToolName::CandidateCheckpointRegression {
+                self.command_context
+                    .record_engineering_checkpoint()
+                    .map_err(|message| CapabilityError::Execution {
+                        message: message.to_owned(),
+                    })?;
+            }
+            if name == ToolName::CandidateSubmit {
+                self.command_context
+                    .record_engineering_submission()
+                    .map_err(|message| CapabilityError::Execution {
+                        message: message.to_owned(),
+                    })?;
             }
             if matches!(
                 operation,
@@ -1483,5 +1641,64 @@ mod tests {
         assert!(context.product_submission_rejected());
         context.clear_product_submission_rejected();
         assert!(!context.product_submission_rejected());
+    }
+
+    #[test]
+    fn engineering_phase_requires_checkpoint_before_mutation() {
+        let context = CommandContext::new(1);
+        context.configure_engineering(12);
+
+        assert_eq!(
+            context.engineering_diagnostics(),
+            (EngineeringPhase::AwaitingCheckpoint, false)
+        );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
+        );
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::Shell),
+            Err(
+                "Engineering must call candidate_checkpoint_regression before shell, write, or edit"
+            )
+        );
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceEdit),
+            Err(
+                "Engineering must call candidate_checkpoint_regression before shell, write, or edit"
+            )
+        );
+
+        assert!(context.engineering_should_stop_after_turn(4));
+        assert_eq!(
+            context.engineering_diagnostics(),
+            (EngineeringPhase::Deadline, true)
+        );
+    }
+
+    #[test]
+    fn engineering_phase_allows_implementation_then_requires_submission() {
+        let context = CommandContext::new(1);
+        context.configure_engineering(12);
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+
+        assert_eq!(
+            context.engineering_diagnostics(),
+            (EngineeringPhase::Implementing, false)
+        );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::Shell)
+                .is_ok()
+        );
+        assert!(!context.engineering_should_stop_after_turn(8));
+        assert!(context.engineering_should_stop_after_turn(9));
+        assert_eq!(
+            context.engineering_diagnostics(),
+            (EngineeringPhase::Deadline, true)
+        );
     }
 }

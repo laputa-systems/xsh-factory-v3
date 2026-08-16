@@ -88,10 +88,12 @@ async fn run() -> Result<(), String> {
         }
     };
     eprintln!(
-        "factory-pi-host execution: turns_started={} turn_limit={} turn_limit_reached={} stop_reason={:?} terminal={} cost_known={}",
+        "factory-pi-host execution: turns_started={} turn_limit={} turn_limit_reached={} engineering_phase={} engineering_phase_deadline_reached={} stop_reason={:?} terminal={} cost_known={}",
         result.diagnostics.turns_started,
         result.diagnostics.turn_limit,
         result.diagnostics.turn_limit_reached,
+        result.diagnostics.engineering_phase,
+        result.diagnostics.engineering_phase_deadline_reached,
         result.stop_reason(),
         result.terminal.is_some(),
         result.cost_micro_usd.is_some(),
@@ -120,6 +122,8 @@ async fn run() -> Result<(), String> {
         "completed"
     } else if result.cost_micro_usd.is_none() {
         "unknown_cost"
+    } else if result.diagnostics.engineering_phase_deadline_reached {
+        "deadline"
     } else {
         stop_reason(result.stop_reason())
     };
@@ -298,6 +302,14 @@ fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, Strin
         (
             "turn_limit_reached",
             JsonValue::Bool(diagnostics.turn_limit_reached),
+        ),
+        (
+            "engineering_phase",
+            JsonValue::String(diagnostics.engineering_phase.clone()),
+        ),
+        (
+            "engineering_phase_deadline_reached",
+            JsonValue::Bool(diagnostics.engineering_phase_deadline_reached),
         ),
     ])
     .to_json_string()

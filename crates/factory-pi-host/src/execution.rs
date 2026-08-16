@@ -8,7 +8,7 @@
 use crate::Admission;
 use crate::agent_host::{AgentHostError, BareAgentHost};
 use crate::tool_bridge::{
-    FactoryCapability, FramedDaemon, TerminalDeferral, ToolName, bind_policy,
+    CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolName, bind_policy,
 };
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
@@ -79,6 +79,8 @@ pub struct ExecutionInput {
     pub handler_limits: HandlerLimits,
     /// Optional provider-owned cost snapshot.
     pub cost_reader: Option<CostReader>,
+    /// Shared host state for revision identity and bounded assignment phases.
+    pub command_context: CommandContext,
 }
 
 impl fmt::Debug for ExecutionInput {
@@ -196,7 +198,14 @@ impl ExecutionInput {
         let model = snapshot
             .model
             .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
-        let turn_budget = Arc::new(TurnBudget::new(self.admission.packet.limits.turn_limit));
+        if self.admission.packet.assignment_role == "engineering" {
+            self.command_context
+                .configure_engineering(self.admission.packet.limits.turn_limit);
+        }
+        let turn_budget = Arc::new(TurnBudget::new(
+            self.admission.packet.limits.turn_limit,
+            self.command_context.clone(),
+        ));
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
             .model(model)
@@ -237,14 +246,16 @@ struct TurnBudget {
     limit: u32,
     completed_turns: AtomicU32,
     reached: AtomicBool,
+    command_context: CommandContext,
 }
 
 impl TurnBudget {
-    fn new(limit: u32) -> Self {
+    fn new(limit: u32, command_context: CommandContext) -> Self {
         Self {
             limit,
             completed_turns: AtomicU32::new(0),
             reached: AtomicBool::new(false),
+            command_context,
         }
     }
 
@@ -255,10 +266,10 @@ impl TurnBudget {
             .saturating_add(1);
         if completed >= self.limit {
             self.reached.store(true, Ordering::Release);
-            true
-        } else {
-            false
         }
+        self.command_context
+            .engineering_should_stop_after_turn(completed)
+            || completed >= self.limit
     }
 
     fn diagnostics(&self, events: &[AgentEvent]) -> ExecutionDiagnostics {
@@ -266,10 +277,14 @@ impl TurnBudget {
             .iter()
             .filter(|event| matches!(event.kind, AgentEventKind::TurnStart { .. }))
             .count() as u32;
+        let (engineering_phase, engineering_phase_deadline_reached) =
+            self.command_context.engineering_diagnostics();
         ExecutionDiagnostics {
             turn_limit: self.limit,
             turns_started,
             turn_limit_reached: self.reached.load(Ordering::Acquire),
+            engineering_phase: engineering_phase.name().to_owned(),
+            engineering_phase_deadline_reached,
         }
     }
 }
@@ -408,7 +423,7 @@ where
     let capability = Arc::new(FactoryCapability::new(
         daemon,
         bound,
-        command_context,
+        command_context.clone(),
         Arc::clone(&terminal),
         local,
     ));
@@ -422,6 +437,7 @@ where
         policy_limits,
         handler_limits,
         cost_reader,
+        command_context,
     })
 }
 
@@ -500,6 +516,10 @@ pub struct ExecutionDiagnostics {
     pub turns_started: u32,
     /// Whether the run stopped at the admitted turn boundary.
     pub turn_limit_reached: bool,
+    /// Controller-owned Engineering phase at terminal reconciliation.
+    pub engineering_phase: String,
+    /// Whether the controller stopped an Engineering run at a phase deadline.
+    pub engineering_phase_deadline_reached: bool,
 }
 
 impl ExecutionResult {
@@ -855,7 +875,7 @@ mod tests {
 
     #[test]
     fn turn_budget_stops_after_the_admitted_number_of_turns() {
-        let turn_budget = Arc::new(TurnBudget::new(2));
+        let turn_budget = Arc::new(TurnBudget::new(2, CommandContext::new(1)));
         let hooks = turn_limited_hook_set(
             Arc::new(pi_agent_core::hooks::NoHooks),
             Arc::clone(&turn_budget),

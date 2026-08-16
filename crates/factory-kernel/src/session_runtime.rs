@@ -472,13 +472,35 @@ struct SessionRpcState {
     quality: QualitySessionState,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EngineeringPhase {
+    AwaitingCheckpoint,
+    CheckpointInFlight,
+    Implementing,
+    SubmissionInFlight,
+    Submitted,
+}
+
+impl Default for EngineeringPhase {
+    fn default() -> Self {
+        Self::AwaitingCheckpoint
+    }
+}
+
 struct EngineeringSessionState {
-    checkpoint_in_flight: bool,
-    submission_in_flight: bool,
-    submitted: bool,
+    phase: EngineeringPhase,
     authority: Option<ResolvedEngineeringCandidateAuthority>,
     checkpoint: Option<RegressionCheckpoint>,
+}
+
+impl Default for EngineeringSessionState {
+    fn default() -> Self {
+        Self {
+            phase: EngineeringPhase::default(),
+            authority: None,
+            checkpoint: None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -492,12 +514,12 @@ struct QualitySessionState {
 
 impl EngineeringSessionState {
     fn begin_checkpoint(&mut self) -> Result<(), &'static str> {
-        if self.checkpoint.is_some() || self.checkpoint_in_flight || self.submitted {
+        if self.phase != EngineeringPhase::AwaitingCheckpoint {
             return Err(
                 "the Engineering session already has a regression checkpoint or candidate submission",
             );
         }
-        self.checkpoint_in_flight = true;
+        self.phase = EngineeringPhase::CheckpointInFlight;
         Ok(())
     }
 
@@ -506,20 +528,30 @@ impl EngineeringSessionState {
         authority: ResolvedEngineeringCandidateAuthority,
         checkpoint: RegressionCheckpoint,
     ) {
-        self.checkpoint_in_flight = false;
+        self.phase = EngineeringPhase::Implementing;
         self.authority = Some(authority);
         self.checkpoint = Some(checkpoint);
     }
 
     fn abandon_checkpoint(&mut self) {
-        self.checkpoint_in_flight = false;
+        if self.phase == EngineeringPhase::CheckpointInFlight {
+            self.phase = EngineeringPhase::AwaitingCheckpoint;
+        }
     }
 
     fn begin_submission(
         &mut self,
     ) -> Result<(ResolvedEngineeringCandidateAuthority, RegressionCheckpoint), &'static str> {
-        if self.submitted || self.submission_in_flight {
+        if matches!(
+            self.phase,
+            EngineeringPhase::Submitted | EngineeringPhase::SubmissionInFlight
+        ) {
             return Err("the Engineering session already submitted its candidate");
+        }
+        if self.phase != EngineeringPhase::Implementing {
+            return Err(
+                "an accepted regression checkpoint is required before candidate submission",
+            );
         }
         let authority = self
             .authority
@@ -529,17 +561,22 @@ impl EngineeringSessionState {
             .checkpoint
             .clone()
             .ok_or("an accepted regression checkpoint is required before candidate submission")?;
-        self.submission_in_flight = true;
+        self.phase = EngineeringPhase::SubmissionInFlight;
         Ok((authority, checkpoint))
     }
 
     fn abandon_submission(&mut self) {
-        self.submission_in_flight = false;
+        if self.phase == EngineeringPhase::SubmissionInFlight {
+            self.phase = EngineeringPhase::Implementing;
+        }
     }
 
     fn complete_submission(&mut self) {
-        self.submission_in_flight = false;
-        self.submitted = true;
+        self.phase = EngineeringPhase::Submitted;
+    }
+
+    fn submitted(&self) -> bool {
+        self.phase == EngineeringPhase::Submitted
     }
 }
 
@@ -1719,7 +1756,7 @@ impl KernelSessionRpc {
                 invalid_rpc("session.submit_terminal", "session RPC state is poisoned")
             })?;
             match operation {
-                Some(TerminalOperationV2::CandidateSubmit) if !state.engineering.submitted => {
+                Some(TerminalOperationV2::CandidateSubmit) if !state.engineering.submitted() => {
                     return Err(invalid_rpc(
                         "session.submit_terminal",
                         "candidate terminal completion requires this session's candidate submission",
@@ -2822,7 +2859,7 @@ mod tests {
             state.begin_submission(),
             Err("an accepted regression checkpoint is required before candidate submission")
         ));
-        assert!(!state.submission_in_flight);
+        assert_eq!(state.phase, EngineeringPhase::AwaitingCheckpoint);
 
         state.begin_checkpoint().expect("first checkpoint begins");
         assert_eq!(
@@ -2832,7 +2869,8 @@ mod tests {
             )
         );
         state.abandon_checkpoint();
-        assert!(!state.checkpoint_in_flight);
+        assert_eq!(state.phase, EngineeringPhase::AwaitingCheckpoint);
+        assert!(!state.submitted());
     }
 
     #[test]
@@ -2857,8 +2895,10 @@ mod tests {
     fn unavailable_candidate_quality_authority_rejects_before_session_mutation() {
         let state = SessionRpcState::default();
         assert!(require_candidate_quality_runtime(None).is_err());
-        assert!(!state.engineering.checkpoint_in_flight);
-        assert!(!state.engineering.submission_in_flight);
+        assert_eq!(
+            state.engineering.phase,
+            EngineeringPhase::AwaitingCheckpoint
+        );
         assert!(!state.quality.full_suite_in_flight);
         assert!(!state.quality.review_in_flight);
     }

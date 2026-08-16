@@ -1,45 +1,15 @@
-Complete the XSH implementation assignment ${ASSIGNMENT_ID}.
+Complete XSH Engineering assignment ${ASSIGNMENT_ID}.
 
-Execution guardrails: required reads and sealed evidence come first, then one targeted search and
-the regression checkpoint. Do not spend turns repeating a source search or explaining the same
-hypothesis. After the first confirmed reproduction, edit the nearest owner immediately. Keep the
-change narrow, run the exact reproducer plus one focused check, and call `candidate_submit` by turn
-16; a passing check is the handoff point, not a reason to keep investigating.
-
-For this ticket, the narrow owner is the automatic top-level `main` dispatch. Check whether the
-root-main predicates recognize an explicit zero-argument `main()?`; it must not trigger a second
-automatic `main(args)` call. Preserve the existing argument and spread forms, then edit and test
-that dispatch path rather than repeatedly tracing general Result propagation.
-
-Do not broaden the investigation. After the required reads, call `candidate_checkpoint_regression`,
-then update both `compact_is_main_at_args_expr` and `construct_is_main_at_args_expr` so an empty
-argument list is accepted alongside the existing `args` and spread forms. Run the exact
-reproducer, one focused runtime check, and call `candidate_submit` by turn 16.
-
-Trusted target and evidence map:
+The sealed assignment target and evidence are authoritative:
 
 ${TARGET}
 
-The assigned contract and base snapshot are immutable. Do not broaden, rewrite, or substitute the
-problem. Keep the regression checkpoint free of an implementation fix. Make the smallest root fix
-and any required canonical documentation update. Your final `candidate_submit` supplies only the
-normalized commit message and regression test identity; the provided tooling derives the worktree,
-patch, completion record, and risks record from controller-owned evidence. Do not commit, change
-HEAD, invoke pre-commit, or contact a Git remote. A bounded `xsht fmt` or `xsht lint --fix` pass
-on files changed by this ticket is allowed when required for candidate hygiene; do not run either
-command repository-wide.
-
-If validation exposes a flaky test unrelated to the assigned contract, follow the bounded flaky-test
-policy in the Engineering system instructions: spend at most ten minutes and two focused reruns
-trying to repair it, then use one narrow reversible named disable only if the test passes in
-isolation. Never delete the test or its assertions. Include the failing command, isolated pass,
-timebox, diagnosis, and any disable rationale in the candidate evidence and normalized commit
-message. A target-related or unexplained disable is not permitted.
-
-For `candidate_checkpoint_regression`, use these exact fixed values:
+Use `candidate_checkpoint_regression` before any edit with:
 
 - `regression_command`: `${REGRESSION_COMMAND}`
 - `expected_failure`: `${REGRESSION_EXPECTED_FAILURE}`
 
-`regression_command` is an assigned identity, not a shell command. Use that same value as
-`regression_test_identity` in the final `candidate_submit`.
+Then make the smallest root fix, add the nearest durable regression test, run the sealed
+reproducer and one focused relevant check, and call `candidate_submit` once with
+`regression_test_identity` set to `${REGRESSION_COMMAND}`. The controller owns hard validation,
+commit construction, and delivery; do not commit or push.
