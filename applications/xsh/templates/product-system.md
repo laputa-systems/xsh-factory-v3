@@ -87,6 +87,10 @@ admitted `cargo run --quiet --locked --bin xsh -- /dev/stdin` command in the bac
 second raw observation. Then perform the same two-run signal check for `run sleep 300 ?` only if
 the first cancellation path is conforming. Do not substitute `run.status false`, a short
 successful command, or another already-covered status case for this cancellation row.
+After the two cancellation observations confirm the defect, do not begin another discovery turn:
+seal the final cancellation evidence and call `product_submit_ticket` on the next tool turn. Keep
+the proposal narrative and evidence concise; the terminal submission is more important than
+additional explanation.
 Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and status/stream/error
 interactions over baseline examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
