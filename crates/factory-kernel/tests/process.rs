@@ -770,7 +770,7 @@ fn minimal_bundle_json(
         ticket_policy: TicketPolicyWireV2 {
             low_water: 1,
             target: 1,
-            maximum: 1,
+            maximum: Some(1),
             proposal_maximum: 1,
             ticket_bounds: TicketBoundsWireV2 {
                 narrative_byte_limit: 1,

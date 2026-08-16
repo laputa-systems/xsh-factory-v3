@@ -295,7 +295,7 @@ impl KernelStore {
             repository_id,
             i32::from(ticket_policy.low_water),
             i32::from(ticket_policy.target),
-            i32::from(ticket_policy.maximum),
+            ticket_policy.maximum.map(i32::from),
             i32::from(ticket_policy.proposal_maximum),
             i32::try_from(ticket_policy.ticket_bounds.narrative_byte_limit)
                 .map_err(|_| StoreError::RevisionOutOfRange)?,

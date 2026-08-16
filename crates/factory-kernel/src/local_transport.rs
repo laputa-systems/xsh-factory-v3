@@ -2492,7 +2492,7 @@ mod tests {
                         downstream_evidence: None,
                         ready_low_water: 1,
                         ready_target: 2,
-                        ready_maximum: 3,
+                        ready_maximum: Some(3),
                         proposal_maximum: 2,
                         oldest_sponsored_ticket_revision_id: Some(11),
                         oldest_sponsored_ticket_revision: Some(5),

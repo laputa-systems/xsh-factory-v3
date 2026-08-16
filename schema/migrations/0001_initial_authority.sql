@@ -78,7 +78,11 @@ CREATE TABLE factory.application_revisions (
     repository_id BIGINT NOT NULL REFERENCES factory.repositories (id),
     ticket_low_water INTEGER NOT NULL CHECK (ticket_low_water > 0),
     ticket_target INTEGER NOT NULL CHECK (ticket_target >= ticket_low_water),
-    ticket_maximum INTEGER NOT NULL CHECK (ticket_maximum >= ticket_target),
+    -- NULL is the explicit application-policy value for an unrestricted
+    -- ready-ticket backlog. A bounded policy must still be at least its
+    -- target; this schema is intentionally fresh-only, so no legacy shape is
+    -- migrated in place.
+    ticket_maximum INTEGER CHECK (ticket_maximum IS NULL OR ticket_maximum >= ticket_target),
     proposal_maximum INTEGER NOT NULL CHECK (proposal_maximum > 0),
     ticket_narrative_byte_limit INTEGER NOT NULL CHECK (ticket_narrative_byte_limit > 0),
     ticket_acceptance_criteria_limit INTEGER NOT NULL CHECK (ticket_acceptance_criteria_limit > 0),

@@ -1,6 +1,6 @@
 //! Deterministic ticket-buffer composition.
 //!
-//! This module turns a bounded, read-only [`TicketBufferStatus`] into the one
+//! This module turns a read-only [`TicketBufferStatus`] into the one
 //! next daemon action. It does not launch an actor or persist polling state.
 //! A returned engineering action carries both aggregate revisions, so an old
 //! read can only become a typed, fenced claim through [`TicketStore`].
@@ -162,11 +162,15 @@ impl TicketScheduler {
                 maximum: IN_FLIGHT_TICKET_MAXIMUM,
             });
         }
-        if status.ready_count > status.maximum {
-            return SchedulerNextAction::Blocked(SchedulerConstraint::ReadyBufferMaximumExceeded {
-                ready_count: status.ready_count,
-                maximum: status.maximum,
-            });
+        if let Some(maximum) = status.maximum {
+            if status.ready_count > maximum {
+                return SchedulerNextAction::Blocked(
+                    SchedulerConstraint::ReadyBufferMaximumExceeded {
+                        ready_count: status.ready_count,
+                        maximum,
+                    },
+                );
+            }
         }
         if status.proposed_count > status.proposal_maximum {
             return SchedulerNextAction::Blocked(
@@ -296,7 +300,7 @@ mod tests {
             paid_session_active: false,
             low_water: 2,
             target: 3,
-            maximum: 5,
+            maximum: Some(5),
             proposal_maximum: 3,
             oldest_sponsored_ticket: None,
         }
@@ -686,6 +690,17 @@ mod tests {
         assert!(matches!(
             TicketScheduler::decide(&overfull),
             SchedulerNextAction::Blocked(SchedulerConstraint::ReadyBufferMaximumExceeded { .. })
+        ));
+
+        let unrestricted = TicketBufferStatus {
+            maximum: None,
+            ready_count: 6,
+            oldest_sponsored_ticket: Some(ready_ticket(2, 1)),
+            ..status()
+        };
+        assert!(matches!(
+            TicketScheduler::decide(&unrestricted),
+            SchedulerNextAction::ClaimReadyTicket(_)
         ));
     }
 }

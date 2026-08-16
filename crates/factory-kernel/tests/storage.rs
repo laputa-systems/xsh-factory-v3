@@ -59,6 +59,20 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
             table_count, 36,
             "the schema adds the small, concrete institutional, publication, and harness record set"
         );
+        let ticket_maximum_nullable: String = sqlx::query_scalar(
+            "SELECT is_nullable
+             FROM information_schema.columns
+             WHERE table_schema = 'factory'
+               AND table_name = 'application_revisions'
+               AND column_name = 'ticket_maximum'",
+        )
+        .fetch_one(&inspection)
+        .await
+        .expect("ticket maximum nullability inspection");
+        assert_eq!(
+            ticket_maximum_nullable, "YES",
+            "an unrestricted ready-ticket backlog is represented explicitly as NULL"
+        );
         let candidate_ref_constraint: String = sqlx::query_scalar(
             "SELECT pg_get_constraintdef(oid)
              FROM pg_constraint
@@ -1108,7 +1122,7 @@ fn application_bundle_json(
         ticket_policy: TicketPolicyWireV2 {
             low_water: 1,
             target: 1,
-            maximum: 2,
+            maximum: Some(2),
             proposal_maximum: 1,
             ticket_bounds: TicketBoundsWireV2 {
                 narrative_byte_limit: 1,

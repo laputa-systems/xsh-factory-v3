@@ -310,7 +310,7 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         ticket_policy: wire::TicketPolicyWireV2 {
             low_water: 1,
             target: 2,
-            maximum: 3,
+            maximum: Some(3),
             proposal_maximum: 1,
             ticket_bounds: wire::TicketBoundsWireV2 {
                 narrative_byte_limit: 4096,

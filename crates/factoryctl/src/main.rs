@@ -511,7 +511,7 @@ fn print_campaign_status(status: &CampaignStatusResponse, json: bool) {
             downstream_evidence_json(status.downstream_evidence.as_ref()),
             status.ready_low_water,
             status.ready_target,
-            status.ready_maximum,
+            optional_u32(status.ready_maximum),
             status.proposal_maximum,
             optional_i64(status.oldest_sponsored_ticket_revision_id),
             optional_u64(status.oldest_sponsored_ticket_revision),
@@ -1175,6 +1175,10 @@ fn print_forum_search(response: &ForumSearchResponseV2, json: bool) {
     }
 }
 fn optional_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn optional_u32(value: Option<u32>) -> String {
     value.map_or_else(|| "null".to_owned(), |value| value.to_string())
 }
 

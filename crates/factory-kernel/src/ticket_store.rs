@@ -291,7 +291,10 @@ pub struct TicketBufferStatus {
     pub paid_session_active: bool,
     pub low_water: u32,
     pub target: u32,
-    pub maximum: u32,
+    /// `None` is the admitted application's explicit unrestricted backlog
+    /// policy. The scheduler therefore never blocks on ready-ticket count in
+    /// that mode.
+    pub maximum: Option<u32>,
     pub proposal_maximum: u32,
     /// The bounded FIFO head, including the exact optimistic-concurrency
     /// revision that a later claim must present. A scheduler read may race;
@@ -872,7 +875,7 @@ impl TicketStore {
         require_expected(command.expected_ticket_revision, status.revision)?;
         require_ticket_state(TicketState::Proposed, status.state)?;
         let application = sqlx::query!(
-            "SELECT application_key, ticket_maximum
+            "SELECT application_key, ticket_maximum AS \"ticket_maximum?\"
              FROM factory.application_revisions WHERE id = $1 FOR SHARE",
             status.application_revision_id.get()
         )
@@ -888,7 +891,10 @@ impl TicketStore {
             TICKET_SPONSORED,
         )
         .await?;
-        if sponsored_count >= i64::from(application.ticket_maximum) {
+        if application
+            .ticket_maximum
+            .is_some_and(|maximum| sponsored_count >= i64::from(maximum))
+        {
             return Err(StoreError::ReadyTicketBufferFull);
         }
         let next = status.revision.next()?;
@@ -1389,7 +1395,7 @@ impl TicketStore {
         };
         if ticket_state == TICKET_SPONSORED {
             let application = sqlx::query!(
-                "SELECT application_key, ticket_maximum
+                "SELECT application_key, ticket_maximum AS \"ticket_maximum?\"
                  FROM factory.application_revisions WHERE id = $1 FOR SHARE",
                 attempt.ticket.application_revision_id.get()
             )
@@ -1405,7 +1411,10 @@ impl TicketStore {
                 TICKET_SPONSORED,
             )
             .await?;
-            if ready >= i64::from(application.ticket_maximum) {
+            if application
+                .ticket_maximum
+                .is_some_and(|maximum| ready >= i64::from(maximum))
+            {
                 return Err(StoreError::ReadyTicketBufferFull);
             }
         }
@@ -1744,7 +1753,10 @@ impl TicketStore {
             paid_session_active,
             low_water: u32_from_sql(i64::from(campaign.ticket_low_water), "low water")?,
             target: u32_from_sql(i64::from(campaign.ticket_target), "ticket target")?,
-            maximum: u32_from_sql(i64::from(campaign.ticket_maximum), "ticket maximum")?,
+            maximum: campaign
+                .ticket_maximum
+                .map(|maximum| u32_from_sql(i64::from(maximum), "ticket maximum"))
+                .transpose()?,
             proposal_maximum: u32_from_sql(
                 i64::from(campaign.proposal_maximum),
                 "proposal maximum",

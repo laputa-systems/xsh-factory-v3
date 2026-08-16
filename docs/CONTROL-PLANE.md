@@ -11,7 +11,10 @@
    canonical status-only manifest so host-specific stdout/stderr cannot make a
    repeat irreproducible; the raw streams remain sealed diagnostic artifacts.
 4. The external Architect sponsors one proposed ticket revision. This is the
-   first human judgement gate.
+   first human judgement gate. Product proposals do not auto-promote: the
+   scheduler enters `AwaitArchitectDecision` and leaves the immutable proposal
+   in place until the Architect explicitly sponsors, rejects, or otherwise
+   closes it through the kernel.
 5. Engineering receives that ticket and an isolated worktree. It must obtain a
    kernel-captured failing regression checkpoint before the implementation fix.
    A ticket's already-sealed Product reproducer may validly checkpoint the

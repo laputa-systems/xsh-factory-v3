@@ -20,6 +20,7 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
     );
     assert_eq!(first.application.bundle.format_version, 2);
     assert_eq!(first.application.bundle.application_key.as_str(), "xsh");
+    assert_eq!(first.application.bundle.ticket_policy.maximum, None);
     assert!(
         first
             .application

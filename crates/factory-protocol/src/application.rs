@@ -610,17 +610,23 @@ impl SessionLimitsV2 {
 pub struct TicketPolicyV2 {
     pub low_water: u16,
     pub target: u16,
-    pub maximum: u16,
+    /// The ready-ticket buffer limit. `None` means the application admits an
+    /// unrestricted backlog; the low-water and target remain scheduling
+    /// hints, not a cap.
+    pub maximum: Option<u16>,
     pub proposal_maximum: u16,
     pub ticket_bounds: TicketBoundsV2,
 }
 
 impl TicketPolicyV2 {
     fn validate(&self) -> Result<(), ContractError> {
-        if self.low_water == 0 || self.low_water > self.target || self.target > self.maximum {
+        if self.low_water == 0
+            || self.low_water > self.target
+            || self.maximum.is_some_and(|maximum| self.target > maximum)
+        {
             return Err(bundle_error(
                 "ticket buffer",
-                "expected 0 < low_water <= target <= maximum",
+                "expected 0 < low_water <= target <= maximum when maximum is bounded",
             ));
         }
         if self.proposal_maximum == 0 {

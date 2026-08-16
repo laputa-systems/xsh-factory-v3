@@ -120,7 +120,7 @@ fn bundle() -> ApplicationBundleV2 {
         ticket_policy: TicketPolicyV2 {
             low_water: 1,
             target: 2,
-            maximum: 3,
+            maximum: Some(3),
             proposal_maximum: 1,
             ticket_bounds: TicketBoundsV2 {
                 narrative_byte_limit: 1,

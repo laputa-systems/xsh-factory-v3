@@ -1405,7 +1405,8 @@ pub struct CampaignStatusResponse {
     pub downstream_evidence: Option<DownstreamEvidenceResponse>,
     pub ready_low_water: u32,
     pub ready_target: u32,
-    pub ready_maximum: u32,
+    /// `null` means the application's ready-ticket backlog is unrestricted.
+    pub ready_maximum: Option<u32>,
     pub proposal_maximum: u32,
     pub oldest_sponsored_ticket_revision_id: Option<i64>,
     pub oldest_sponsored_ticket_revision: Option<u64>,
@@ -2323,7 +2324,7 @@ pub struct LimitsWireV2 {
 pub struct TicketPolicyWireV2 {
     pub low_water: u16,
     pub target: u16,
-    pub maximum: u16,
+    pub maximum: Option<u16>,
     pub proposal_maximum: u16,
     pub ticket_bounds: TicketBoundsWireV2,
 }
@@ -2693,7 +2694,7 @@ fn canonical_ticket_policy(value: &TicketPolicyWireV2) -> String {
     format!(
         "{{\"low_water\":{},\"maximum\":{},\"proposal_maximum\":{},\"target\":{},\"ticket_bounds\":{{\"acceptance_criteria_limit\":{},\"contract_read_limit\":{},\"narrative_byte_limit\":{}}}}}",
         value.low_water,
-        value.maximum,
+        value.maximum.map_or_else(|| "null".to_owned(), |maximum| maximum.to_string()),
         value.proposal_maximum,
         value.target,
         value.ticket_bounds.acceptance_criteria_limit,

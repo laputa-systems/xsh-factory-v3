@@ -125,7 +125,7 @@ fn bundle() -> ApplicationBundleV2 {
         ticket_policy: TicketPolicyV2 {
             low_water: 1,
             target: 1,
-            maximum: 2,
+            maximum: Some(2),
             proposal_maximum: 1,
             ticket_bounds: TicketBoundsV2 {
                 narrative_byte_limit: 1024,
@@ -214,6 +214,13 @@ fn compiler_rejects_undeclared_and_mismatched_source() {
     let mut files = source_files();
     files[0] = source("templates/mission.md", b"wrong bytes");
     assert!(ApplicationCompilerV2::compile(bundle(), files).is_err());
+}
+
+#[test]
+fn ticket_policy_accepts_an_unrestricted_ready_backlog() {
+    let mut application = bundle();
+    application.ticket_policy.maximum = None;
+    assert!(ApplicationCompilerV2::compile(application, source_files()).is_ok());
 }
 
 #[test]
