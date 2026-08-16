@@ -37,12 +37,24 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
             .iter()
             .all(|profile| profile.model.output_token_limit <= 32_768)
     );
+    assert_eq!(
+        first
+            .application
+            .bundle
+            .assignment_role_profiles
+            .first()
+            .expect("Product profile")
+            .model
+            .thinking_level,
+        ThinkingLevelV2::None
+    );
     assert!(
         first
             .application
             .bundle
             .assignment_role_profiles
             .iter()
+            .skip(1)
             .all(|profile| profile.model.thinking_level == ThinkingLevelV2::Low)
     );
     assert!(!first.canonical_bundle.contains(&b'\n'));
