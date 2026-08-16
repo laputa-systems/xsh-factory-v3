@@ -18,6 +18,8 @@ use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
+const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 fn main() -> ExitCode {
     match smol::block_on(run()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -42,8 +44,8 @@ async fn run() -> Result<(), String> {
         OpenRouterConfig::try_new(api_key, admission.packet.model.model_id.clone())
             .map_err(|e| e.to_string())?
             .with_max_tokens(u64::from(admission.packet.model.output_token_limit))
-            .with_request_timeout(Duration::from_millis(
-                (admission.packet.limits.wall_limit_millis / 4).max(1),
+            .with_request_timeout(provider_request_timeout(
+                admission.packet.limits.wall_limit_millis,
             )),
     ));
     let accounting_provider = Arc::clone(&provider);
@@ -151,6 +153,10 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
+    Duration::from_millis((wall_limit_millis / 4).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
 }
 
 async fn verify_packet(
@@ -512,8 +518,9 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::packet_verification_error;
+    use super::{packet_verification_error, provider_request_timeout};
     use pi_agent_protocol::JsonValue;
+    use std::time::Duration;
 
     #[test]
     fn packet_verification_error_preserves_daemon_rejection() {
@@ -534,5 +541,11 @@ mod tests {
                 "daemon rejected the admitted assignment packet: session_rejected: packet bytes differ from daemon admission"
             )
         );
+    }
+
+    #[test]
+    fn provider_request_timeout_is_capped_below_assignment_wall() {
+        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(60));
+        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(30));
     }
 }
