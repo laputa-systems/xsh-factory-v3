@@ -10,6 +10,7 @@ use factory_protocol::{
     ArtifactReceiptResponse, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
     OP_SESSION_VERIFY_PACKET,
 };
+use pi_agent_core::provider::RetryPolicy;
 use pi_agent_core::provider::openrouter::{OpenRouterConfig, OpenRouterProvider};
 use pi_agent_core::scheduler::ModelProvider;
 use pi_agent_core::state::StopReason;
@@ -18,7 +19,8 @@ use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
-const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
+const MAX_PROVIDER_RETRIES: u32 = 1;
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -46,7 +48,8 @@ async fn run() -> Result<(), String> {
             .with_max_tokens(u64::from(admission.packet.model.output_token_limit))
             .with_request_timeout(provider_request_timeout(
                 admission.packet.limits.wall_limit_millis,
-            )),
+            ))
+            .with_retry_policy(provider_retry_policy()),
     ));
     let accounting_provider = Arc::clone(&provider);
     let cost_reader: CostReader = Arc::new(move || provider_cost(&accounting_provider));
@@ -156,7 +159,15 @@ async fn run() -> Result<(), String> {
 }
 
 fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
-    Duration::from_millis((wall_limit_millis / 6).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
+    Duration::from_millis((wall_limit_millis / 3).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
+}
+
+fn provider_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(
+        MAX_PROVIDER_RETRIES,
+        Duration::from_millis(250),
+        Duration::from_secs(8),
+    )
 }
 
 async fn verify_packet(
@@ -518,7 +529,7 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{packet_verification_error, provider_request_timeout};
+    use super::{packet_verification_error, provider_request_timeout, provider_retry_policy};
     use pi_agent_protocol::JsonValue;
     use std::time::Duration;
 
@@ -547,9 +558,18 @@ mod tests {
     fn provider_request_timeout_is_capped_below_assignment_wall() {
         assert_eq!(
             provider_request_timeout(1_800_000),
-            Duration::from_secs(300)
+            Duration::from_secs(600)
         );
-        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(150));
-        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(20));
+        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(300));
+        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(40));
+        assert_eq!(
+            provider_request_timeout(3_600_000),
+            Duration::from_secs(900)
+        );
+    }
+
+    #[test]
+    fn provider_retry_policy_allows_one_replay_safe_retry() {
+        assert_eq!(provider_retry_policy().max_retries(), 1);
     }
 }
