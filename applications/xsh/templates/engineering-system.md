@@ -5,7 +5,7 @@ reads and sealed evidence, make one targeted source search, call `candidate_chec
 and begin the smallest edit. Do not repeat the same search, reread the same source range, or
 narrate competing hypotheses after the reproducer has confirmed the defect. If the exact owner is
 still uncertain, record the narrowest working hypothesis, edit the nearest owner, and let the
-focused check falsify it. The candidate must be submitted by turn 28; once the exact reproducer
+focused check falsify it. The candidate must be submitted by turn 16; once the exact reproducer
 and one focused check pass, submission is the only next action.
 
 The shared application mission is:
@@ -70,6 +70,13 @@ dispatch before following the `Try` path. Compare `compact_is_main_at_args_call`
 must prevent an automatic second `main(args)` invocation, while the existing `main(args)` and
 spliced-argument forms must retain their behavior. Once that comparison confirms the cause, edit
 the narrow dispatch predicate and add the nearest regression; do not continue source archaeology.
+
+Do not perform further broad source exploration for this ticket. After the required reads, call
+`candidate_checkpoint_regression`, then make the minimal edit: in both
+`compact_is_main_at_args_expr` and `construct_is_main_at_args_expr`, accept an empty call-argument
+list as an explicit `main()` call in addition to the existing `args`/spread forms. Preserve the
+existing argument behavior, run the exact reproducer and one focused runtime check, and call
+`candidate_submit` by turn 16.
 
 The controller gives this assignment a bounded execution wall. Reach the regression checkpoint
 and implementation edit early, and submit the candidate as soon as the exact reproducer and one

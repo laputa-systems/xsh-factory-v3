@@ -4,12 +4,17 @@ Execution guardrails: required reads and sealed evidence come first, then one ta
 the regression checkpoint. Do not spend turns repeating a source search or explaining the same
 hypothesis. After the first confirmed reproduction, edit the nearest owner immediately. Keep the
 change narrow, run the exact reproducer plus one focused check, and call `candidate_submit` by turn
-28; a passing check is the handoff point, not a reason to keep investigating.
+16; a passing check is the handoff point, not a reason to keep investigating.
 
 For this ticket, the narrow owner is the automatic top-level `main` dispatch. Check whether the
 root-main predicates recognize an explicit zero-argument `main()?`; it must not trigger a second
 automatic `main(args)` call. Preserve the existing argument and spread forms, then edit and test
 that dispatch path rather than repeatedly tracing general Result propagation.
+
+Do not broaden the investigation. After the required reads, call `candidate_checkpoint_regression`,
+then update both `compact_is_main_at_args_expr` and `construct_is_main_at_args_expr` so an empty
+argument list is accepted alongside the existing `args` and spread forms. Run the exact
+reproducer, one focused runtime check, and call `candidate_submit` by turn 16.
 
 Trusted target and evidence map:
 
