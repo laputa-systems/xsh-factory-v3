@@ -58,6 +58,17 @@ passing result. Add the regression at the nearest existing OS/runtime test bound
 exact sealed program exits with the documented status and diagnostic after the fix. If the literal
 diagnostic is not present, do not keep searching for that string: trace the structured error path.
 
+For the assigned `while true { time.sleep(10s)? }` SIGTERM ticket specifically, inspect
+`src/runtime/eval.rs::service_pending_signal` and the `RuntimeOp::TimeSleep` branch in
+`src/runtime/eval/lowered_run.rs` first. The sleep loop already calls `service_pending_signal`; a
+fast path that returns before reading `signal_snapshot()` when there are no hooks or process
+handles will therefore hide a no-hook cancellation request. Repair that narrow guard so pending
+primary and escalation signals are serviced without changing hook behavior, process-group
+forwarding, or the documented status-3 error shape. Add the nearest regression in
+`tests/runtime/process.rs` or `tests/runtime/os.rs`, using the existing subprocess/signal test
+helpers, and then run the exact sealed reproducer. Do not spend turns searching for a diagnostic
+literal that the source does not contain.
+
 For a lowered collection or worker-propagation ticket, trace the ordinary direct-call control case
 and the lowered worker boundary, preserving propagated errors as errors rather than in-band values.
 For a receiver-method ticket, trace both receiver classification and method dispatch. These are
