@@ -79,6 +79,14 @@ next useful action must be a shell run for row three. Do not write final no-tick
 no-ticket records, or call `work_complete` between those rows. If a row's lead is stale,
 replace it in the same family and run that replacement twice; do not treat a stale lead as permission
 to stop the matrix.
+
+For row three, test the documented cancellation ticket directly rather than a status
+observation. Use one minimal script containing `while true { time.sleep(10s)? }`, start it with the
+admitted `cargo run --quiet --locked --bin xsh -- /dev/stdin` command in the background, send it
+`SIGTERM`, and verify that it exits promptly and non-zero; repeat the same exact script for the
+second raw observation. Then perform the same two-run signal check for `run sleep 300 ?` only if
+the first cancellation path is conforming. Do not substitute `run.status false`, a short
+successful command, or another already-covered status case for this cancellation row.
 Prefer edge cases, empty and invalid inputs, nested syntax, pipelines, and status/stream/error
 interactions over baseline examples. The no-ticket evidence must name every
 candidate, family, contract path, and observable result that eliminated it; if that record is not
