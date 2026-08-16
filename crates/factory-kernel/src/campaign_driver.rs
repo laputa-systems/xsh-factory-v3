@@ -35,6 +35,11 @@ use crate::{
 };
 
 const DRIVER_PRINCIPAL: &str = "factoryd-campaign-driver";
+const MAX_PRODUCT_ASSIGNMENTS_PER_CAMPAIGN: u32 = 3;
+
+fn product_retry_available(assignments: u32) -> bool {
+    assignments < MAX_PRODUCT_ASSIGNMENTS_PER_CAMPAIGN
+}
 
 /// The result of one durable driver pass. Non-actionable outcomes are values,
 /// not errors, so a resident daemon can wait without manufacturing a polling
@@ -48,6 +53,9 @@ pub enum CampaignDriverOutcome {
         /// the transition so callers can distinguish a rejected packet from a
         /// completed-but-unsuccessful actor without opening SQL.
         failure_detail: String,
+    },
+    ProductRetryScheduled {
+        campaign_id: CampaignId,
     },
     TicketAttemptFailed {
         campaign_id: CampaignId,
@@ -396,7 +404,7 @@ impl CampaignDriver {
             Err(error) => {
                 let reason = failure_reason(action, &error.to_string());
                 return self
-                    .terminalize_failed_launch(campaign_id, target, &reason)
+                    .terminalize_failed_launch(campaign_id, target, &reason, false)
                     .await;
             }
         };
@@ -436,11 +444,9 @@ impl CampaignDriver {
                         .await?;
                     if !Self::product_assignment_made_progress(&buffer) {
                         let reason = "product assignment completed without a ticket proposal";
-                        self.fail_running_campaign(campaign_id, reason).await?;
-                        return Ok(CampaignDriverOutcome::CampaignFailed {
-                            campaign_id,
-                            failure_detail: reason.to_owned(),
-                        });
+                        return self
+                            .retry_or_fail_product(campaign_id, reason)
+                            .await;
                     }
                 }
                 Ok(CampaignDriverOutcome::Assignment(assignment))
@@ -448,21 +454,22 @@ impl CampaignDriver {
             Ok(_) => {
                 let reason =
                     failure_reason(action, "session reached a non-succeeded terminal state");
-                self.terminalize_failed_launch(campaign_id, target, &reason)
+                self.terminalize_failed_launch(campaign_id, target, &reason, true)
                     .await
             }
             Err(error) => {
                 let reason = failure_reason(action, &error.to_string());
-                self.terminalize_failed_launch(campaign_id, target, &reason)
+                self.terminalize_failed_launch(campaign_id, target, &reason, false)
                     .await
             }
         }
     }
 
     /// A successful Product session must either create a proposal or leave
-    /// already-admitted work for the scheduler to advance. An empty Product
-    /// completion is terminal for this bounded delivery campaign; treating it
-    /// as replenishable work would spend indefinitely on an unchanged request.
+    /// already-admitted work for the scheduler to advance. Empty or incomplete
+    /// Product turns are retried only within the durable assignment bound;
+    /// `retry_or_fail_product` closes the campaign after that bound rather than
+    /// spending indefinitely on an unchanged request.
     fn product_assignment_made_progress(buffer: &crate::ticket_store::TicketBufferStatus) -> bool {
         buffer.proposed_count > 0
             || buffer.ready_count > 0
@@ -475,9 +482,13 @@ impl CampaignDriver {
         campaign_id: CampaignId,
         target: DurableAssignmentTarget,
         reason: &str,
+        retry_product: bool,
     ) -> Result<CampaignDriverOutcome, CampaignDriverError> {
         match target {
             DurableAssignmentTarget::Product => {
+                if retry_product {
+                    return self.retry_or_fail_product(campaign_id, reason).await;
+                }
                 self.fail_running_campaign(campaign_id, reason).await?;
                 Ok(CampaignDriverOutcome::CampaignFailed {
                     campaign_id,
@@ -514,6 +525,26 @@ impl CampaignDriver {
                 Err(error) => Err(error),
             },
         }
+    }
+
+    async fn retry_or_fail_product(
+        &self,
+        campaign_id: CampaignId,
+        reason: &str,
+    ) -> Result<CampaignDriverOutcome, CampaignDriverError> {
+        let assignments = self
+            .store
+            .process_store()
+            .product_assignment_count(campaign_id)
+            .await?;
+        if product_retry_available(assignments) {
+            return Ok(CampaignDriverOutcome::ProductRetryScheduled { campaign_id });
+        }
+        self.fail_running_campaign(campaign_id, reason).await?;
+        Ok(CampaignDriverOutcome::CampaignFailed {
+            campaign_id,
+            failure_detail: reason.to_owned(),
+        })
     }
 
     async fn fail_running_campaign(
@@ -705,6 +736,14 @@ mod tests {
             candidate_id: CandidateId::new(11).expect("positive candidate"),
             candidate_revision: AggregateRevision::from_persisted(5),
         }
+    }
+
+    #[test]
+    fn product_retries_are_durably_bounded() {
+        assert!(product_retry_available(0));
+        assert!(product_retry_available(2));
+        assert!(!product_retry_available(3));
+        assert!(!product_retry_available(u32::MAX));
     }
 
     #[test]

@@ -38,7 +38,7 @@ use crate::{
         ArchitectTransitionFuture, ArchitectTransitionResolutionError, ArchitectTransitionResolver,
         ResolvedCandidateDecisionTransition, ResolvedReleaseTransition,
     },
-    product_runtime::product_observation_manifest_bytes_with_streams,
+    product_runtime::product_observation_manifest_bytes_for_receipt,
     scheduler::ClaimReadyTicketAction,
     session_runtime::{
         CandidateQualityAuthorityFuture, CandidateQualityAuthorityResolutionError,
@@ -2294,11 +2294,7 @@ async fn seal_command_observation_manifest(
         )
         .await
         .map_err(|error| format!("could not seal current-head stderr: {error}"))?;
-    let bytes = product_observation_manifest_bytes_with_streams(
-        &receipt.terminal(),
-        receipt.stdout(),
-        receipt.stderr(),
-    );
+    let bytes = product_observation_manifest_bytes_for_receipt(receipt);
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,

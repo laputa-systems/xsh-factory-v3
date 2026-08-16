@@ -439,11 +439,7 @@ async fn seal_observation(
         receipt.stderr(),
     )
     .await?;
-    let manifest = product_observation_manifest_bytes_with_streams(
-        &receipt.terminal(),
-        receipt.stdout(),
-        receipt.stderr(),
-    );
+    let manifest = product_observation_manifest_bytes_for_receipt(receipt);
     let (_, manifest_receipt) = process
         .adopt_and_register_kernel_bytes(
             cas,
@@ -499,6 +495,42 @@ pub(crate) fn product_observation_manifest_bytes_with_streams(
         Some(stdout),
         Some(stderr),
     )
+}
+
+/// Build the status-only replay identity from a command receipt while removing
+/// the approved executable's process-local absolute path from the stream
+/// digests. Raw stdout/stderr remain sealed separately for diagnosis; the
+/// canonical manifest must survive replay in a different worktree root.
+pub(crate) fn product_observation_manifest_bytes_for_receipt(
+    receipt: &CommandReceipt,
+) -> Vec<u8> {
+    let executable = receipt.executable().to_string_lossy();
+    let stdout = canonicalize_executable_path(receipt.stdout(), executable.as_bytes());
+    let stderr = canonicalize_executable_path(receipt.stderr(), executable.as_bytes());
+    product_observation_manifest_bytes_with_streams(&receipt.terminal(), &stdout, &stderr)
+}
+
+fn canonicalize_executable_path(bytes: &[u8], executable: &[u8]) -> Vec<u8> {
+    if executable.is_empty() || !bytes.windows(executable.len()).any(|window| window == executable) {
+        return bytes.to_vec();
+    }
+    let replacement = b"<approved-executable>";
+    let mut canonical = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        let Some(relative) = bytes[cursor..]
+            .windows(executable.len())
+            .position(|window| window == executable)
+        else {
+            canonical.extend_from_slice(&bytes[cursor..]);
+            break;
+        };
+        let start = cursor + relative;
+        canonical.extend_from_slice(&bytes[cursor..start]);
+        canonical.extend_from_slice(replacement);
+        cursor = start + executable.len();
+    }
+    canonical
 }
 
 fn product_observation_manifest_bytes_with_optional_streams(
@@ -590,7 +622,7 @@ mod tests {
     use factory_protocol::ArtifactId;
 
     use super::{
-        persisted_discovery_observations, product_expected_streams,
+        canonicalize_executable_path, persisted_discovery_observations, product_expected_streams,
         product_observation_manifest_bytes, product_observation_manifest_bytes_with_streams,
     };
 
@@ -639,5 +671,23 @@ mod tests {
         );
 
         assert_ne!(expected, actual);
+    }
+
+    #[test]
+    fn canonicalizes_process_local_executable_paths_only_for_replay_identity() {
+        let first = canonicalize_executable_path(
+            b"executable: /tmp/worktree-a/target/debug/xsh\n",
+            b"/tmp/worktree-a/target/debug/xsh",
+        );
+        let second = canonicalize_executable_path(
+            b"executable: /Users/josh/d/xsh/target/debug/xsh\n",
+            b"/Users/josh/d/xsh/target/debug/xsh",
+        );
+        assert_eq!(first, second);
+        assert_eq!(first, b"executable: <approved-executable>\n");
+        assert_ne!(
+            canonicalize_executable_path(b"expected: first\n", b"/tmp/xsh"),
+            canonicalize_executable_path(b"expected: second\n", b"/tmp/xsh"),
+        );
     }
 }

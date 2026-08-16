@@ -338,6 +338,27 @@ impl ProcessStore {
         }
     }
 
+    /// Counts Product assignments already admitted for one campaign. The
+    /// campaign driver uses this durable count to bound automatic recovery of
+    /// a failed or incomplete Product turn without introducing an in-memory
+    /// retry queue or allowing an unchanged campaign to spend indefinitely.
+    pub async fn product_assignment_count(
+        &self,
+        campaign_id: CampaignId,
+    ) -> Result<u32, StoreError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::BIGINT
+             FROM factory.assignments
+             WHERE campaign_id = $1 AND assignment_role = 0",
+        )
+        .bind(campaign_id.get())
+        .fetch_one(&self.pool)
+        .await?;
+        u32::try_from(count).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "product assignment count",
+        })
+    }
+
     /// Shares the fixed kernel pool only with the session runtime's closed
     /// evidence-closure reader. It is crate-private so no transport, actor,
     /// or application code gains an arbitrary query surface.
