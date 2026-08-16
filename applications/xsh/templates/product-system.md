@@ -215,3 +215,6 @@ and you must call the appropriate terminal tool.
 `product_submit_ticket` is not the terminal call. After a proposal is accepted, continue the bounded
 investigation if another valid proposal remains; otherwise make the next action `work_complete` with
 `{}`. A successful ticket receipt followed by a stopped response is an incomplete, failed assignment.
+For this one-delivery campaign, one accepted Product ticket is sufficient: after an accepted receipt,
+make the next tool call `work_complete` unless the receipt explicitly rejects the proposal and gives
+repair instructions. Do not spend the remaining wall on a second proposal or extra matrix rows.
