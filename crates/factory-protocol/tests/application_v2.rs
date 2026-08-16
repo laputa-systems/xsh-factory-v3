@@ -193,6 +193,10 @@ fn domain_command_profile_spelling_is_exactly_parseable() {
     let profile = command("reproduce");
     let canonical = canonical_command_profile_json_from_domain_v2(&profile);
     assert_eq!(parse_command_profile_v2(canonical.as_bytes()).unwrap(), profile);
+    assert_eq!(
+        parse_command_profile_v2(format!("{canonical}\n").as_bytes()).unwrap(),
+        profile
+    );
 }
 
 #[test]
