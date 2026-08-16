@@ -85,7 +85,6 @@ fn profile(
             capability_flags: vec![],
         },
         limits: SessionLimitsV2 {
-            turn_limit: 2,
             wall_limit: DurationMillis::new(1000),
             output_byte_limit: 4096,
         },

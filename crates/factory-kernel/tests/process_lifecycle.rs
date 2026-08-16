@@ -991,7 +991,6 @@ impl Fixture {
                 capability_flags: Vec::new(),
             },
             limits: SessionLimitsV2 {
-                turn_limit: 1,
                 wall_limit: factory_protocol::DurationMillis::new(10_000),
                 output_byte_limit: 10_000,
             },
@@ -1208,7 +1207,6 @@ fn wire_packet(
             capability_flags: Vec::new(),
         },
         limits: factory_protocol::AssignmentLimitsWireV2 {
-            turn_limit: packet.limits.turn_limit,
             wall_limit_millis: packet.limits.wall_limit.get(),
             output_byte_limit: packet.limits.output_byte_limit,
         },
@@ -1535,7 +1533,6 @@ fn minimal_bundle_json(
                 capability_flags: Vec::new(),
             },
             limits: LimitsWireV2 {
-                turn_limit: 1,
                 wall_limit_millis: 10_000,
                 output_byte_limit: 4096,
             },

@@ -27,7 +27,6 @@ use pi_agent_luau::{LuaPolicy, LuaPolicyHookSet, PolicyError, PolicyLimits};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// A caller-owned sealed policy source.  The host accepts bytes, never a path, and verifies the
 /// caller's expected CAS digest before evaluating Luau.
@@ -105,7 +104,7 @@ pub struct PreparedExecution {
     agent: Agent,
     terminal: Arc<TerminalDeferral>,
     cost_reader: Option<CostReader>,
-    turn_budget: Arc<TurnBudget>,
+    command_context: CommandContext,
     _policy: Arc<LuaPolicy>,
 }
 
@@ -115,7 +114,7 @@ impl fmt::Debug for PreparedExecution {
             .field("assignment_id", &self.admission.packet.assignment_id)
             .field("has_model_provider", &self.agent.has_model_provider())
             .field("tools", &self.agent.tool_definitions())
-            .field("turn_budget", &self.turn_budget)
+            .field("command_context", &self.command_context)
             .finish_non_exhaustive()
     }
 }
@@ -199,22 +198,17 @@ impl ExecutionInput {
             .model
             .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
         if self.admission.packet.assignment_role == "engineering" {
-            self.command_context
-                .configure_engineering(self.admission.packet.limits.turn_limit);
+            self.command_context.configure_engineering();
         }
-        let turn_budget = Arc::new(TurnBudget::new(
-            self.admission.packet.limits.turn_limit,
-            self.command_context.clone(),
-        ));
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
             .model(model)
             .thinking_level(snapshot.thinking_level)
             .tools(registry)
             .model_provider(self.provider)
-            .hooks(turn_limited_hook_set(
+            .hooks(phase_hook_set(
                 factory_hook_set(Arc::clone(&policy)),
-                Arc::clone(&turn_budget),
+                self.command_context.clone(),
             ));
         for message in snapshot.host_messages {
             builder = builder.host_message(message);
@@ -224,7 +218,7 @@ impl ExecutionInput {
             agent: builder.build(),
             terminal: self.terminal,
             cost_reader: self.cost_reader,
-            turn_budget,
+            command_context: self.command_context,
             _policy: policy,
         })
     }
@@ -234,67 +228,19 @@ fn factory_hook_set(policy: Arc<LuaPolicy>) -> Arc<dyn HookSet> {
     Arc::new(LuaPolicyHookSet::new(policy, Arc::new(OpenAiContextHook)))
 }
 
-fn turn_limited_hook_set(
-    inner: Arc<dyn HookSet>,
-    turn_budget: Arc<TurnBudget>,
-) -> Arc<dyn HookSet> {
-    Arc::new(TurnLimitHookSet { inner, turn_budget })
+fn phase_hook_set(inner: Arc<dyn HookSet>, command_context: CommandContext) -> Arc<dyn HookSet> {
+    Arc::new(PhaseHookSet {
+        inner,
+        command_context,
+    })
 }
 
-#[derive(Debug)]
-struct TurnBudget {
-    limit: u32,
-    completed_turns: AtomicU32,
-    reached: AtomicBool,
+struct PhaseHookSet {
+    inner: Arc<dyn HookSet>,
     command_context: CommandContext,
 }
 
-impl TurnBudget {
-    fn new(limit: u32, command_context: CommandContext) -> Self {
-        Self {
-            limit,
-            completed_turns: AtomicU32::new(0),
-            reached: AtomicBool::new(false),
-            command_context,
-        }
-    }
-
-    fn after_turn(&self) -> bool {
-        let completed = self
-            .completed_turns
-            .fetch_add(1, Ordering::AcqRel)
-            .saturating_add(1);
-        if completed >= self.limit {
-            self.reached.store(true, Ordering::Release);
-        }
-        self.command_context
-            .engineering_should_stop_after_turn(completed)
-            || completed >= self.limit
-    }
-
-    fn diagnostics(&self, events: &[AgentEvent]) -> ExecutionDiagnostics {
-        let turns_started = events
-            .iter()
-            .filter(|event| matches!(event.kind, AgentEventKind::TurnStart { .. }))
-            .count() as u32;
-        let (engineering_phase, engineering_phase_deadline_reached) =
-            self.command_context.engineering_diagnostics();
-        ExecutionDiagnostics {
-            turn_limit: self.limit,
-            turns_started,
-            turn_limit_reached: self.reached.load(Ordering::Acquire),
-            engineering_phase: engineering_phase.name().to_owned(),
-            engineering_phase_deadline_reached,
-        }
-    }
-}
-
-struct TurnLimitHookSet {
-    inner: Arc<dyn HookSet>,
-    turn_budget: Arc<TurnBudget>,
-}
-
-impl HookSet for TurnLimitHookSet {
+impl HookSet for PhaseHookSet {
     fn before_tool_call(
         &self,
         call: &ToolCall,
@@ -328,7 +274,8 @@ impl HookSet for TurnLimitHookSet {
         &self,
         context: &ContextEnvelope,
     ) -> Result<bool, pi_agent_core::error::HookError> {
-        Ok(self.turn_budget.after_turn() || self.inner.should_stop_after_turn(context)?)
+        Ok(self.command_context.engineering_should_stop_after_turn()
+            || self.inner.should_stop_after_turn(context)?)
     }
 
     fn prepare_next_turn(
@@ -383,8 +330,10 @@ impl HookSet for TurnLimitHookSet {
         let inner = self
             .inner
             .should_stop_after_turn_async(context, cancellation);
-        let turn_budget = Arc::clone(&self.turn_budget);
-        Box::pin(async move { Ok(turn_budget.after_turn() || inner.await?) })
+        let command_context = self.command_context.clone();
+        Box::pin(
+            async move { Ok(command_context.engineering_should_stop_after_turn() || inner.await?) },
+        )
     }
 
     fn prepare_next_turn_async<'a>(
@@ -468,12 +417,9 @@ impl PreparedExecution {
         let snapshot = handle.snapshot();
         let events = handle.events();
         if let Err(error) = drive_result {
-            let diagnostics = self.turn_budget.diagnostics(&events);
             eprintln!(
-                "factory-pi-host execution failure: turns_started={} turn_limit={} turn_limit_reached={} phase={:?} event_count={} error={error}",
-                diagnostics.turns_started,
-                diagnostics.turn_limit,
-                diagnostics.turn_limit_reached,
+                "factory-pi-host execution failure: engineering_phase={:?} core_phase={:?} event_count={} error={error}",
+                self.command_context.engineering_diagnostics(),
                 snapshot.phase,
                 events.len(),
             );
@@ -484,7 +430,7 @@ impl PreparedExecution {
             events,
             self.terminal.pending(),
             self.cost_reader.as_ref().and_then(|reader| reader()),
-            &self.turn_budget,
+            &self.command_context,
         ))
     }
 }
@@ -510,16 +456,10 @@ pub struct ExecutionResult {
 /// Observable limits and progress for one prepared actor run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutionDiagnostics {
-    /// Admitted maximum number of model turns.
-    pub turn_limit: u32,
     /// Number of core turn-start events emitted by the run.
     pub turns_started: u32,
-    /// Whether the run stopped at the admitted turn boundary.
-    pub turn_limit_reached: bool,
     /// Controller-owned Engineering phase at terminal reconciliation.
     pub engineering_phase: String,
-    /// Whether the controller stopped an Engineering run at a phase deadline.
-    pub engineering_phase_deadline_reached: bool,
 }
 
 impl ExecutionResult {
@@ -528,10 +468,17 @@ impl ExecutionResult {
         events: Vec<AgentEvent>,
         terminal: Option<crate::tool_bridge::DeferredTerminal>,
         cost_micro_usd: Option<u64>,
-        turn_budget: &TurnBudget,
+        command_context: &CommandContext,
     ) -> Self {
         let usage = UsageSummary::from_events(&events);
-        let diagnostics = turn_budget.diagnostics(&events);
+        let turns_started = events
+            .iter()
+            .filter(|event| matches!(event.kind, AgentEventKind::TurnStart { .. }))
+            .count() as u32;
+        let diagnostics = ExecutionDiagnostics {
+            turns_started,
+            engineering_phase: command_context.engineering_diagnostics().name().to_owned(),
+        };
         Self {
             events,
             run,
@@ -874,11 +821,15 @@ mod tests {
     }
 
     #[test]
-    fn turn_budget_stops_after_the_admitted_number_of_turns() {
-        let turn_budget = Arc::new(TurnBudget::new(2, CommandContext::new(1)));
-        let hooks = turn_limited_hook_set(
+    fn phase_hooks_do_not_stop_for_turn_count() {
+        let command_context = CommandContext::new(1);
+        command_context.configure_engineering();
+        command_context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+        let hooks = phase_hook_set(
             Arc::new(pi_agent_core::hooks::NoHooks),
-            Arc::clone(&turn_budget),
+            command_context.clone(),
         );
         let context = ContextEnvelope {
             version: 1,
@@ -886,20 +837,20 @@ mod tests {
             host_messages: Vec::new(),
         };
 
-        assert!(
-            !smol::block_on(
-                hooks.should_stop_after_turn_async(&context, CancellationToken::new(),)
-            )
-            .expect("first turn remains within the budget")
-        );
+        for _ in 0..128 {
+            assert!(
+                !smol::block_on(
+                    hooks.should_stop_after_turn_async(&context, CancellationToken::new(),)
+                )
+                .expect("turn count does not stop an active engineering phase")
+            );
+        }
+        command_context
+            .record_engineering_submission()
+            .expect("submission advances the phase");
         assert!(
             smol::block_on(hooks.should_stop_after_turn_async(&context, CancellationToken::new(),))
-                .expect("second turn reaches the budget")
+                .expect("submission stops the phase hook")
         );
-        assert!(
-            smol::block_on(hooks.should_stop_after_turn_async(&context, CancellationToken::new(),))
-                .expect("the budget remains exhausted")
-        );
-        assert!(turn_budget.reached.load(Ordering::Acquire));
     }
 }

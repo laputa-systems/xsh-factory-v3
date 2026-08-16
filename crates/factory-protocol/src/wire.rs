@@ -1917,8 +1917,7 @@ fn validate_assignment_packet_wire_v2(
     if packet.model.context_token_limit == 0 || packet.model.output_token_limit == 0 {
         return packet_error("model limits", "must be positive");
     }
-    if packet.limits.turn_limit == 0
-        || packet.limits.wall_limit_millis == 0
+    if packet.limits.wall_limit_millis == 0
         || packet.limits.output_byte_limit == 0
         || u64::from(packet.limits.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
     {
@@ -2301,7 +2300,6 @@ pub struct ModelWireV2 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LimitsWireV2 {
-    pub turn_limit: u32,
     pub wall_limit_millis: u64,
     pub output_byte_limit: u32,
 }
@@ -2589,8 +2587,8 @@ fn canonical_model(value: &ModelWireV2) -> String {
 
 fn canonical_limits(value: &LimitsWireV2) -> String {
     format!(
-        "{{\"output_byte_limit\":{},\"turn_limit\":{},\"wall_limit_millis\":{}}}",
-        value.output_byte_limit, value.turn_limit, value.wall_limit_millis
+        "{{\"output_byte_limit\":{},\"wall_limit_millis\":{}}}",
+        value.output_byte_limit, value.wall_limit_millis
     )
 }
 
@@ -2923,7 +2921,6 @@ impl ModelWireV2 {
 impl LimitsWireV2 {
     fn into_domain(self) -> Result<SessionLimitsV2, String> {
         Ok(SessionLimitsV2 {
-            turn_limit: self.turn_limit,
             wall_limit: DurationMillis::new(self.wall_limit_millis),
             output_byte_limit: self.output_byte_limit,
         })

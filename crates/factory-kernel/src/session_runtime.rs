@@ -2774,7 +2774,6 @@ mod tests {
                 capability_flags: Vec::new(),
             },
             limits: SessionLimitsV2 {
-                turn_limit: 1,
                 wall_limit: DurationMillis::new(1),
                 output_byte_limit: 1,
             },

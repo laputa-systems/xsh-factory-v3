@@ -86,7 +86,6 @@ fn assignment_role_profile(
             capability_flags: vec![],
         },
         limits: SessionLimitsV2 {
-            turn_limit: 1,
             wall_limit: DurationMillis::new(1),
             output_byte_limit: 1,
         },

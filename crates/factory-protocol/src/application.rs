@@ -587,15 +587,13 @@ pub enum ThinkingLevelV2 {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionLimitsV2 {
-    pub turn_limit: u32,
     pub wall_limit: DurationMillis,
     pub output_byte_limit: u32,
 }
 
 impl SessionLimitsV2 {
     fn validate(&self) -> Result<(), ContractError> {
-        if self.turn_limit == 0
-            || self.wall_limit.get() == 0
+        if self.wall_limit.get() == 0
             || self.output_byte_limit == 0
             || u64::from(self.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
         {

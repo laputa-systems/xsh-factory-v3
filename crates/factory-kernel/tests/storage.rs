@@ -1084,7 +1084,6 @@ fn application_bundle_json(
                     capability_flags: Vec::new(),
                 },
                 limits: LimitsWireV2 {
-                    turn_limit: 1,
                     wall_limit_millis: 1,
                     output_byte_limit: 4096,
                 },

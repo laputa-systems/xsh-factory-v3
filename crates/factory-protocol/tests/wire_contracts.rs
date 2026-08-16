@@ -269,7 +269,6 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
         capability_flags: vec![],
     };
     let limits = || wire::LimitsWireV2 {
-        turn_limit: 1,
         wall_limit_millis: 1,
         output_byte_limit: 4096,
     };

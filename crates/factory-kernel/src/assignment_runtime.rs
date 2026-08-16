@@ -1273,7 +1273,6 @@ fn assignment_wire(
                 .collect(),
         },
         limits: AssignmentLimitsWireV2 {
-            turn_limit: profile.limits.turn_limit,
             wall_limit_millis: profile.limits.wall_limit.get(),
             output_byte_limit: profile.limits.output_byte_limit,
         },

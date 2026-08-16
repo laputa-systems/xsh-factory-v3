@@ -1238,14 +1238,14 @@ impl ProcessStore {
                  model_provider, model_id, thinking_level, context_token_limit, output_token_limit,
                  input_price_micro_usd_per_million, output_price_micro_usd_per_million,
                  cache_read_price_micro_usd_per_million, cache_write_price_micro_usd_per_million,
-                 turn_limit, wall_limit_millis, output_byte_limit, terminal_operations_mask,
+                 wall_limit_millis, output_byte_limit, terminal_operations_mask,
                  remaining_campaign_allowance_micro_usd, attempt_ordinal, lifecycle, revision
              ) OVERRIDING SYSTEM VALUE VALUES (
                  $1, $2, (SELECT id FROM factory.kernel_builds WHERE build_digest = $3), $4,
                  (SELECT id FROM factory.offices
                     WHERE application_revision_id = $4 AND assignment_role = $5),
                  $5, $6, $7, $8,
-                 $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, 0, 0)",
+                 $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, 0, 0)",
             id,
             command.packet.campaign_id.get(),
             &command.packet.kernel_build_id.digest().as_bytes()[..],
@@ -1268,7 +1268,6 @@ impl ProcessStore {
             i64::try_from(model.price_output_micro_usd_per_million_tokens.get()).map_err(|_| StoreError::InvalidProcessCommand { field: "output price" })?,
             i64::try_from(model.price_cache_read_micro_usd_per_million_tokens.get()).map_err(|_| StoreError::InvalidProcessCommand { field: "cache read price" })?,
             i64::try_from(model.price_cache_write_micro_usd_per_million_tokens.get()).map_err(|_| StoreError::InvalidProcessCommand { field: "cache write price" })?,
-            i32::try_from(command.packet.limits.turn_limit).map_err(|_| StoreError::InvalidProcessCommand { field: "turn limit" })?,
             i64::try_from(command.packet.limits.wall_limit.get()).map_err(|_| StoreError::InvalidProcessCommand { field: "wall limit" })?,
             i32::try_from(command.packet.limits.output_byte_limit).map_err(|_| StoreError::InvalidProcessCommand { field: "output limit" })?,
             operation_mask(&command.packet.terminal_operations),
@@ -2420,8 +2419,7 @@ fn verify_wire_domain_mapping(
     {
         return Err(StoreError::PacketIdentityMismatch);
     }
-    if wire.limits.turn_limit != packet.limits.turn_limit
-        || wire.limits.wall_limit_millis != packet.limits.wall_limit.get()
+    if wire.limits.wall_limit_millis != packet.limits.wall_limit.get()
         || wire.limits.output_byte_limit != packet.limits.output_byte_limit
         || wire.runtime.host_executable != packet.runtime.host_executable.as_str()
         || wire.runtime.core_head != packet.runtime.core_head
@@ -2619,7 +2617,6 @@ fn assignment_packet_from_wire(
             capability_flags,
         },
         limits: SessionLimitsV2 {
-            turn_limit: wire.limits.turn_limit,
             wall_limit: DurationMillis::new(wire.limits.wall_limit_millis),
             output_byte_limit: wire.limits.output_byte_limit,
         },

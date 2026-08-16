@@ -332,7 +332,6 @@ CREATE TABLE factory.assignments (
     output_price_micro_usd_per_million BIGINT NOT NULL CHECK (output_price_micro_usd_per_million >= 0),
     cache_read_price_micro_usd_per_million BIGINT NOT NULL CHECK (cache_read_price_micro_usd_per_million >= 0),
     cache_write_price_micro_usd_per_million BIGINT NOT NULL CHECK (cache_write_price_micro_usd_per_million >= 0),
-    turn_limit INTEGER NOT NULL CHECK (turn_limit > 0),
     wall_limit_millis BIGINT NOT NULL CHECK (wall_limit_millis > 0),
     output_byte_limit INTEGER NOT NULL CHECK (output_byte_limit > 0),
     terminal_operations_mask BIGINT NOT NULL CHECK (terminal_operations_mask > 0),
@@ -858,7 +857,7 @@ BEGIN
            NEW.thinking_level, NEW.context_token_limit, NEW.output_token_limit,
            NEW.input_price_micro_usd_per_million, NEW.output_price_micro_usd_per_million,
            NEW.cache_read_price_micro_usd_per_million, NEW.cache_write_price_micro_usd_per_million,
-           NEW.turn_limit, NEW.wall_limit_millis, NEW.output_byte_limit,
+           NEW.wall_limit_millis, NEW.output_byte_limit,
            NEW.terminal_operations_mask, NEW.remaining_campaign_allowance_micro_usd,
            NEW.attempt_ordinal)
        IS DISTINCT FROM
@@ -870,7 +869,7 @@ BEGIN
            OLD.thinking_level, OLD.context_token_limit, OLD.output_token_limit,
            OLD.input_price_micro_usd_per_million, OLD.output_price_micro_usd_per_million,
            OLD.cache_read_price_micro_usd_per_million, OLD.cache_write_price_micro_usd_per_million,
-           OLD.turn_limit, OLD.wall_limit_millis, OLD.output_byte_limit,
+           OLD.wall_limit_millis, OLD.output_byte_limit,
            OLD.terminal_operations_mask, OLD.remaining_campaign_allowance_micro_usd,
            OLD.attempt_ordinal) THEN
         RAISE EXCEPTION 'assignment packet identity is immutable' USING ERRCODE = 'check_violation';
@@ -1105,7 +1104,7 @@ BEGIN
            NEW.thinking_level, NEW.context_token_limit, NEW.output_token_limit,
            NEW.input_price_micro_usd_per_million, NEW.output_price_micro_usd_per_million,
            NEW.cache_read_price_micro_usd_per_million, NEW.cache_write_price_micro_usd_per_million,
-           NEW.turn_limit, NEW.wall_limit_millis, NEW.output_byte_limit,
+           NEW.wall_limit_millis, NEW.output_byte_limit,
            NEW.terminal_operations_mask, NEW.remaining_campaign_allowance_micro_usd,
            NEW.attempt_ordinal)
        IS DISTINCT FROM
@@ -1118,7 +1117,7 @@ BEGIN
            OLD.thinking_level, OLD.context_token_limit, OLD.output_token_limit,
            OLD.input_price_micro_usd_per_million, OLD.output_price_micro_usd_per_million,
            OLD.cache_read_price_micro_usd_per_million, OLD.cache_write_price_micro_usd_per_million,
-           OLD.turn_limit, OLD.wall_limit_millis, OLD.output_byte_limit,
+           OLD.wall_limit_millis, OLD.output_byte_limit,
            OLD.terminal_operations_mask, OLD.remaining_campaign_allowance_micro_usd,
            OLD.attempt_ordinal) THEN
         RAISE EXCEPTION 'assignment packet identity is immutable' USING ERRCODE = 'check_violation';

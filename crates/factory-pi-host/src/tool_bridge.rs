@@ -239,7 +239,6 @@ pub(crate) enum EngineeringPhase {
     AwaitingCheckpoint,
     Implementing,
     Submitted,
-    Deadline,
 }
 
 impl EngineeringPhase {
@@ -249,7 +248,6 @@ impl EngineeringPhase {
             Self::AwaitingCheckpoint => "awaiting_checkpoint",
             Self::Implementing => "implementing",
             Self::Submitted => "submitted",
-            Self::Deadline => "deadline",
         }
     }
 }
@@ -257,18 +255,12 @@ impl EngineeringPhase {
 #[derive(Debug)]
 struct EngineeringProgressState {
     phase: EngineeringPhase,
-    checkpoint_deadline: u32,
-    submission_deadline: u32,
-    deadline_reached: bool,
 }
 
 impl Default for EngineeringProgressState {
     fn default() -> Self {
         Self {
             phase: EngineeringPhase::Disabled,
-            checkpoint_deadline: 0,
-            submission_deadline: 0,
-            deadline_reached: false,
         }
     }
 }
@@ -294,23 +286,12 @@ impl CommandContext {
         }
     }
 
-    pub(crate) fn configure_engineering(&self, turn_limit: u32) {
+    pub(crate) fn configure_engineering(&self) {
         let Ok(mut state) = self.engineering.lock() else {
             return;
         };
-        let limit = turn_limit.max(1);
-        let checkpoint_deadline = limit.saturating_add(2) / 3;
-        let submission_deadline = limit
-            .saturating_mul(3)
-            .checked_div(4)
-            .unwrap_or(limit)
-            .max(checkpoint_deadline.saturating_add(1))
-            .min(limit);
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
-            checkpoint_deadline,
-            submission_deadline,
-            deadline_reached: false,
         };
     }
 
@@ -338,36 +319,21 @@ impl CommandContext {
         Ok(())
     }
 
-    pub(crate) fn engineering_should_stop_after_turn(&self, completed_turns: u32) -> bool {
-        let Ok(mut state) = self.engineering.lock() else {
+    pub(crate) fn engineering_should_stop_after_turn(&self) -> bool {
+        let Ok(state) = self.engineering.lock() else {
             return true;
         };
         match state.phase {
-            EngineeringPhase::AwaitingCheckpoint
-                if completed_turns >= state.checkpoint_deadline || state.deadline_reached =>
-            {
-                state.phase = EngineeringPhase::Deadline;
-                state.deadline_reached = true;
-                true
-            }
-            EngineeringPhase::Implementing
-                if completed_turns >= state.submission_deadline || state.deadline_reached =>
-            {
-                state.phase = EngineeringPhase::Deadline;
-                state.deadline_reached = true;
-                true
-            }
             EngineeringPhase::Submitted => true,
-            EngineeringPhase::Deadline => true,
             _ => false,
         }
     }
 
-    pub(crate) fn engineering_diagnostics(&self) -> (EngineeringPhase, bool) {
+    pub(crate) fn engineering_diagnostics(&self) -> EngineeringPhase {
         self.engineering
             .lock()
-            .map(|state| (state.phase, state.deadline_reached))
-            .unwrap_or((EngineeringPhase::Deadline, true))
+            .map(|state| state.phase)
+            .unwrap_or(EngineeringPhase::Disabled)
     }
 
     pub(crate) fn require_engineering_checkpoint_before(
@@ -1646,11 +1612,11 @@ mod tests {
     #[test]
     fn engineering_phase_requires_checkpoint_before_mutation() {
         let context = CommandContext::new(1);
-        context.configure_engineering(12);
+        context.configure_engineering();
 
         assert_eq!(
             context.engineering_diagnostics(),
-            (EngineeringPhase::AwaitingCheckpoint, false)
+            EngineeringPhase::AwaitingCheckpoint
         );
         assert!(
             context
@@ -1670,35 +1636,34 @@ mod tests {
             )
         );
 
-        assert!(context.engineering_should_stop_after_turn(4));
-        assert_eq!(
-            context.engineering_diagnostics(),
-            (EngineeringPhase::Deadline, true)
-        );
+        assert!(!context.engineering_should_stop_after_turn());
     }
 
     #[test]
     fn engineering_phase_allows_implementation_then_requires_submission() {
         let context = CommandContext::new(1);
-        context.configure_engineering(12);
+        context.configure_engineering();
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
 
         assert_eq!(
             context.engineering_diagnostics(),
-            (EngineeringPhase::Implementing, false)
+            EngineeringPhase::Implementing
         );
         assert!(
             context
                 .require_engineering_checkpoint_before(ToolName::Shell)
                 .is_ok()
         );
-        assert!(!context.engineering_should_stop_after_turn(8));
-        assert!(context.engineering_should_stop_after_turn(9));
+        assert!(!context.engineering_should_stop_after_turn());
+        context
+            .record_engineering_submission()
+            .expect("submission advances the phase");
+        assert!(context.engineering_should_stop_after_turn());
         assert_eq!(
             context.engineering_diagnostics(),
-            (EngineeringPhase::Deadline, true)
+            EngineeringPhase::Submitted
         );
     }
 }

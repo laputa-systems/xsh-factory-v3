@@ -863,7 +863,6 @@ impl Fixture {
             staging_root: AbsoluteHostPath::parse(staging.to_str().unwrap()).unwrap(),
             model: model(),
             limits: SessionLimitsV2 {
-                turn_limit: 1,
                 wall_limit: DurationMillis::new(10_000),
                 output_byte_limit: 4_096,
             },
@@ -1340,7 +1339,6 @@ fn packet_wire(
             capability_flags: Vec::new(),
         },
         limits: AssignmentLimitsWireV2 {
-            turn_limit: packet.limits.turn_limit,
             wall_limit_millis: packet.limits.wall_limit.get(),
             output_byte_limit: packet.limits.output_byte_limit,
         },
@@ -1419,7 +1417,6 @@ fn bundle_json(
                 capability_flags: Vec::new(),
             },
             limits: LimitsWireV2 {
-                turn_limit: 1,
                 wall_limit_millis: 10_000,
                 output_byte_limit: 4_096,
             },

@@ -123,7 +123,6 @@ pub struct AssignmentModelWireV2 {
 
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
 pub struct AssignmentLimitsWireV2 {
-    pub turn_limit: u32,
     pub wall_limit_millis: u64,
     pub output_byte_limit: u32,
 }
@@ -552,8 +551,7 @@ impl AssignmentPacketV2 {
                 reason: "must be 1 through 4096 bytes without NUL",
             });
         }
-        if self.limits.turn_limit == 0
-            || self.limits.wall_limit.get() == 0
+        if self.limits.wall_limit.get() == 0
             || self.limits.output_byte_limit == 0
             || u64::from(self.limits.output_byte_limit) > MAX_SESSION_OUTPUT_BYTES
         {

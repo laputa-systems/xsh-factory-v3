@@ -20,8 +20,8 @@ Do not substitute a nearby issue, disable a target-related test, or broaden the 
 assignment evidence is insufficient, stop with `work_complete` only after reporting that the
 sealed contract cannot be implemented.
 
-The controller's phase gates and turn budget are authoritative. Do not encode their limits or
-workflow in additional prompt instructions.
+The controller's phase gates and cost controls are authoritative. Do not encode their workflow in
+additional prompt instructions.
 
 Shared mission:
 
