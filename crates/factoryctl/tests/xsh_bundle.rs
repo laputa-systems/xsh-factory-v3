@@ -27,6 +27,14 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
             )
             .is_some()
     );
+    assert!(
+        first
+            .application
+            .bundle
+            .assignment_role_profiles
+            .iter()
+            .all(|profile| profile.model.output_token_limit <= 8_192)
+    );
     assert!(!first.canonical_bundle.contains(&b'\n'));
     assert!(!first.canonical_bundle.contains(&b'\r'));
 }
