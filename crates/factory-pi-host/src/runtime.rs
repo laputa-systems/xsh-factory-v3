@@ -11,6 +11,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{self, Read},
+    os::unix::process::CommandExt as _,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
@@ -627,8 +628,10 @@ fn shell(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .map_err(io_error)?;
+    let process_group = child.id();
     let stdout = child
         .stdout
         .take()
@@ -643,15 +646,16 @@ fn shell(
     let mut timed_out = false;
     loop {
         if child.try_wait().map_err(io_error)?.is_some() {
+            terminate_shell_process_group(process_group);
             break;
         }
         if cancellation.is_cancelled() {
-            let _ = child.kill();
+            terminate_shell_process_group(process_group);
             return Err(DaemonError::new("shell invocation was cancelled"));
         }
         if Instant::now() >= deadline {
             timed_out = true;
-            let _ = child.kill();
+            terminate_shell_process_group(process_group);
             break;
         }
         thread::sleep(Duration::from_millis(10));
@@ -670,6 +674,20 @@ fn shell(
         timed_out,
         truncated: stdout.1 || stderr.1,
     })
+}
+
+fn terminate_shell_process_group(process_group: u32) {
+    let group = format!("-{process_group}");
+    let _ = Command::new("/bin/kill")
+        .args(["-TERM", "--", group.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = Command::new("/bin/kill")
+        .args(["-KILL", "--", group.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 fn drain(mut input: impl Read, limit: usize) -> (Vec<u8>, bool) {
@@ -706,14 +724,32 @@ fn io_error(error: io::Error) -> DaemonError {
 
 #[cfg(test)]
 mod tests {
-    use super::request_json;
+    use super::{request_json, shell};
     use factory_protocol::{
         CandidateSubmitRequest, InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2,
         PublicationAttachmentWireV2, PublicationCreateRequest, QualitySubmitReviewRequest,
         REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest, decode_operation_request,
         decode_product_submit_ticket_request_v2, encode_frame,
     };
+    use pi_agent_core::scheduler::CancellationToken;
     use pi_agent_protocol::{JsonNumber, JsonValue};
+    use std::{path::Path, time::Duration};
+
+    #[test]
+    fn shell_reaps_background_descendants_before_joining_pipes() {
+        let started = std::time::Instant::now();
+        let output = shell(
+            Path::new("."),
+            "sleep 60 & exit 0",
+            Duration::from_secs(2),
+            CancellationToken::new(),
+        )
+        .expect("shell should reap its process group");
+
+        assert_eq!(output.status, 0);
+        assert!(!output.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 
     #[test]
     fn request_json_matches_session_verify_wire_order() {
