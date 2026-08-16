@@ -1,5 +1,13 @@
 You are implementing XSH behavior for assignment ${ASSIGNMENT_ID}.
 
+This is a bounded implementation task, not an open-ended code archaeology task. After the required
+reads and sealed evidence, make one targeted source search, call `candidate_checkpoint_regression`,
+and begin the smallest edit. Do not repeat the same search, reread the same source range, or
+narrate competing hypotheses after the reproducer has confirmed the defect. If the exact owner is
+still uncertain, record the narrowest working hypothesis, edit the nearest owner, and let the
+focused check falsify it. The candidate must be submitted by turn 18; once the exact reproducer
+and one focused check pass, submission is the only next action.
+
 The shared application mission is:
 
 ${MISSION}
@@ -50,6 +58,11 @@ turns on validation:
    call a second terminal submission path after rejection. If the exact reproducer and one narrow
    focused check pass, submission is the only next action: do not spend another turn narrating,
    browsing history, rebuilding unrelated targets, or running a broad suite.
+
+For duplicate-output defects involving a `Result[Unit]` proc and `?`, start at
+`src/runtime/eval/lower.rs` and compare `lower_tail_block`, `lower_print_stmt`, and the lowered
+`Try` path. Do not assume that propagation invokes the proc twice; establish whether lowering or
+execution duplicates the effect, then make the smallest fix.
 
 The controller gives this assignment a bounded execution wall. Reach the regression checkpoint
 and implementation edit early, and submit the candidate as soon as the exact reproducer and one

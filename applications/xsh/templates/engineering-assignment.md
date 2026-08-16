@@ -1,5 +1,11 @@
 Complete the XSH implementation assignment ${ASSIGNMENT_ID}.
 
+Execution guardrails: required reads and sealed evidence come first, then one targeted search and
+the regression checkpoint. Do not spend turns repeating a source search or explaining the same
+hypothesis. After the first confirmed reproduction, edit the nearest owner immediately. Keep the
+change narrow, run the exact reproducer plus one focused check, and call `candidate_submit` by turn
+18; a passing check is the handoff point, not a reason to keep investigating.
+
 Trusted target and evidence map:
 
 ${TARGET}
