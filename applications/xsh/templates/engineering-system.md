@@ -22,146 +22,51 @@ unrelated ignored test.
 
 ## Bounded implementation sequence
 
-Keep every shell source-inspection response under 8 KiB. Start with one `rg -n` for the behavior or
-test named by the sealed contract, then read only one small line-numbered range at a time. Do not
-dump a module family, combine distant ranges, or turn this into repository archaeology. Read the
-nearest contract and the smallest source/test surface necessary to explain the two-run failure.
+Use the sealed ticket as the source of truth and keep each source-inspection response under 8 KiB.
+Work in this order, spending no more than roughly eight turns on discovery and no more than eight
+turns on validation:
 
-Before making an implementation edit, create the smallest regression checkpoint that expresses the
-assigned failure and submit it through `candidate_checkpoint_regression`. The prior sealed
-reproducer may validly checkpoint the pristine tree, so do not invent a nonempty test-only patch;
-the final candidate must still add or strengthen the appropriate durable regression coverage. Make
-the smallest root fix that changes the observed public behavior without broad cleanup, dependency
-changes, repository-wide formatters or autofixers, pre-commit hooks, remote Git commands, commits,
-merges, or pushes. A bounded source-hygiene repair on files changed by this ticket is explicitly
-allowed below.
+1. Call the required reads, read every sealed evidence entry, and record the exact command, stdin,
+   expected observation, and two actual observations.
+2. Run one targeted `rg -n` for the contract's behavior, symbol, or named test. Read only the
+   nearest small source and test ranges. Do not search the whole repository repeatedly, dump a
+   module family, or investigate an unrelated historical defect.
+3. Call `candidate_checkpoint_regression` before the implementation edit. Use the assigned
+   regression identity and preserve the sealed failure identity; the checkpoint may be the
+   pristine-tree reproduction when the existing test is the correct regression surface.
+4. Make the smallest root fix and add or strengthen the nearest durable regression test. Do not
+   change dependencies, invoke repository-wide formatters, run pre-commit hooks, commit, merge, or
+   push. If the contract is a process or signal defect, inspect the process substrate, evaluator
+   checkpoint, signal handling, and nearest OS-facing test; do not stop at a string search for the
+   expected error message.
+5. Run the exact sealed command with the exact approved argv and sealed stdin from the final
+   worktree. A timeout, wrapper success, stale binary, nested XSH invocation, or different stdin is
+   not the expected passing observation. Then run one narrow ticket-relevant native check. Do not
+   run the full integration suite; hard validation and Quality own that gate.
+6. If a focused check fails, inspect only the smallest additional range that explains it, repair
+   the root cause, and rerun the exact reproducer plus focused check. Do not submit a red candidate.
+7. Before submission, inspect the raw exit status, stdout, and stderr. Call `candidate_submit` once
+   by turn 28 with a concise normalized commit message and the assigned regression identity. Never
+   call a second terminal submission path after rejection.
 
-After the root fix, run the exact sealed reproducer and confirm its expected passing observation.
-The sealed command is authoritative: execute its approved tool and argv exactly, with the sealed
-stdin artifact, from the final worktree. Do not substitute a stale `target/debug` binary, a nested
-`xsh` invocation, or a different temporary input. Then run one focused ticket-relevant native check
-that covers the changed behavior and its nearest boundary. Do not run `cargo test --locked --test
-integration` or another broad suite in Engineering: hard validation and the independent review run
-that suite from clean candidate worktrees. If a focused check exposes a concrete failure, inspect
-only the smallest additional source range needed to explain it, repair the root cause, and rerun
-the exact reproducer plus that focused check. A regression test that still asserts the old behavior
-is a real focused-check failure: repair its assertion to express the sealed contract rather than
-submitting with a red check.
+For a cancellation or signal ticket involving `time.sleep`, SIGTERM, or a canceled runtime error,
+start with one targeted search such as `rg -n 'time\.sleep|checkpoint|SIGTERM|signal|canceled'
+src/runtime tests`. Follow the signal path from registration or delivery through evaluator
+checkpoints, process waiting, and final error construction. The contract requires prompt non-zero
+termination, so a process that stays alive until the supervisor's SIGKILL is not an acceptable
+passing result. Add the regression at the nearest existing OS/runtime test boundary and verify the
+exact sealed program exits with the documented status and diagnostic after the fix. If the literal
+diagnostic is not present, do not keep searching for that string: trace the structured error path.
 
-For this lowered `par-map` ticket, the nearest durable regression is
-`tests/xsh/par-map-result.xsh::test_par_map_collect_all`. It currently treats a `safe_div` worker
-that returns `Err(TestError.DivisionByZero(...))` as a successful four-item collection. That is the
-old behavior being corrected: inspect this test and update its assertion to require propagation of
-the worker error through the par-map boundary. Preserve the test and its failure identity; do not
-delete it, ignore it, weaken it to a success-only smoke test, or add only a disconnected new test.
-Before `candidate_submit`, run the nearest native coverage check that exercises this file (the
-`runtime::coverage::xsh_native_tests` integration test or its narrowest supported filter) and make
-it pass, in addition to the sealed exact reproducer. A full hard-validation run will reject a
-candidate that leaves this old success assertion unchanged.
+For a lowered collection or worker-propagation ticket, trace the ordinary direct-call control case
+and the lowered worker boundary, preserving propagated errors as errors rather than in-band values.
+For a receiver-method ticket, trace both receiver classification and method dispatch. These are
+conditional investigation branches, not instructions to modify unrelated code.
 
-Do not make the native test itself execute the failing par-map directly: the native harness marks
-that child failure as a failed test. Convert `test_par_map_collect_all` to the established
-subprocess-assertion pattern used by `test.run_script` in `tests/xsh/stdlib/test.xsh` (add the
-required `ctx: TestContext` parameter and follow the local signature). Run a small embedded script
-containing `safe_div` and the fallible par-map, capture its returned status/stdout/stderr, and
-assert status `3`, empty stdout, and stderr containing `DivisionByZero` or `division by zero`.
-Use the corpus lint's membership syntax for those checks, for example
-`test.ok("DivisionByZero" in result.stderr or "division by zero" in result.stderr, result.stderr)?`;
-do not use method-style `.contains(...)`, which makes the full integration suite fail on a lint
-warning.
-Preserve the canonical multiline formatting of the embedded script; do not compress its procedure
-bodies or the `test.run_script` call onto single lines. Use this exact assertion shape after the
-script so the source remains formatter-clean:
-
-```xsh
-proc test_par_map_collect_all(ctx: TestContext) [error] {
-  let failed = test.run_script(
-    ctx,
-    """
-error TestError = DivisionByZero(message: Str) : InvalidData
-
-proc safe_div(x: Int) [error] -> Result[Int] {
-  if x == 0 {
-    return Err(TestError.DivisionByZero("division by zero"))
-  }
-
-  Ok(100 / x)
-}
-
-proc main() [error] -> Result[Unit] {
-  let values = [10, 20, 0, 40]
-  let results = values |> par-map { |x| safe_div(x)? }
-  print $results.len()
-}
-
-main()?
-""",
-  )?
-
-  test.ok(! failed.success, failed.stderr)?
-  test.eq(failed.status, 3)?
-  test.eq(failed.stdout, "")?
-  test.ok("DivisionByZero" in failed.stderr or "division by zero" in failed.stderr, failed.stderr)?
-}
-```
-The parent native test must pass because it expects the child failure; printing the result, removing
-the assertions, or leaving a directly failing par-map body is not a valid regression.
-
-There is exactly one candidate gate: call `candidate_submit` at most once, and only after the final
-exact reproducer has passed. Immediately before that call, inspect and record the raw process exit
-status, stdout, and stderr. For the lowered `par-map` ticket, readiness specifically requires exit
-status `3`, empty stdout, and stderr containing `bad-one`; an observation of exit `0` with
-`2\n2\n` is proof that the candidate is not ready, not a reason to submit or to claim that the
-patched path was skipped. A successful Cargo/build wrapper is not proof of the XSH observation.
-If the raw result or focused check is wrong, do not submit; continue tracing and repairing until
-both pass. Treat the sealed ticket contract and its authoritative contract reads as the source of
-truth; do not "fix" behavior that the contract explicitly specifies. A hard-validation rejection
-does not authorize a second submission: inspect the rejection, but never call another terminal
-submission path in that session.
-
-Before `candidate_submit`, perform one bounded source-hygiene pass on the XSH files changed by this
-ticket. The product repository's general advice to leave formatting and autofixes to the user does
-not apply to this narrow pass: run `xsht fmt <changed .xsh files>` to normalize only those files,
-then run `xsht lint --fix <changed .xsh files>` only for safe diagnostics on those same files. Do
-not pass a directory or the whole repository to either command. Verify with `xsht fmt --check
-<changed .xsh files>` and `xsht lint <changed .xsh files>`, then rerun the exact sealed reproducer
-and the focused native check. Formatting or lint diagnostics in changed files are repairable
-candidate hygiene, not a reason to reject the Product ticket; do not weaken the regression or
-submit until the bounded repair and its checks pass. Unrelated pre-existing hygiene findings are
-not grounds to reject this ticket, but must not be hidden by broad rewrites.
-
-For a receiver-method defect, trace both the call-classification path and the method-dispatch path
-before editing. Adding a method branch alone is not a fix if the receiver is rejected earlier.
-For a lowered `par-map` failure, compare the ordinary direct-call control case with
-`eval_indexed_par_map_item` and the lowered return/statement-flow path before editing. Preserve an
-unsuccessful `Result[Unit]` from a nested branch as `StmtFlow::Propagate` until the lowered stream
-boundary, then convert that flow through the same runtime-error path as the direct call; do not
-unwrap it into an in-band mapped value, change process exit-status policy, or hide the error in a
-worker sentinel. The boundary invariant is exact: `StmtFlow::Return(value)` may become
-`Ok(ControlFlow::Break(value))`, but `StmtFlow::Propagate(value)` must become `Err(runtime_error)`
-with the propagated error message. Replacing the latter with
-`Ok(ControlFlow::Break(value))` is the original bug and must never be left in the candidate. If a
-focused regression fails because it still asserts successful `2\n2\n` output, repair that test to
-assert exit `3`, empty stdout, and `bad-one` stderr; do not weaken the production fix. Once the
-exact reproducer first passes, freeze the production path and only repair test assertions or
-validation mechanics. For this exact reproducer, also inspect the value after
-`eval_indexed_expr`: the tail `worker(value)?` commonly arrives as
-`ControlFlow::Break(LoweredValue::ResultErr(error))` after the statement block returns normally.
-That `ResultErr` must also become `Err(runtime_error)` before the item is unwrapped; treating it as
-an ordinary mapped value is the observed bug. A patch that changes only the `StmtFlow` arm while
-leaving `ControlFlow::Break(ResultErr)` in-band is incomplete, and an exact run that still prints
-`2\n2\n` is definitive proof to continue tracing rather than submit. Keep the fix narrow and add
-the native regression at the lowered stream boundary.
-
-For this ticket, the sealed command's argv is exactly `cargo run --quiet --locked --bin xsh --
-/dev/stdin`; the tokens after Cargo's `--` are only `/dev/stdin`. Never run `cargo ... -- run
---quiet ...`, invoke a nested XSH command, or treat that wrapper error as the reproducer result.
-Read the sealed stdin artifact before the first validation run and verify that it contains the
-same `worker(value)?` program named by the ticket, including `error.fail("bad-one")` and
-`$values.len()`. If the artifact instead contains `build()`, `_`, or another simplified program,
-the Product evidence is malformed: do not submit a candidate from it. The raw gate is valid only
-when the exact command and exact sealed stdin together produce exit `3`, empty stdout, and stderr
-identifying `bad-one`.
+Formatting and lint diagnostics in changed files are bounded candidate hygiene, not grounds to
+reject the Product ticket. If needed, run the narrow formatter or lint repair only on changed files
+and rerun the exact reproducer plus focused check. Unrelated pre-existing findings are not grounds
+to reject this ticket and must not trigger a repository-wide rewrite.
 
 ## Bounded flaky-test remediation
 
@@ -177,11 +82,9 @@ and diagnosis in the normalized candidate message.
 
 If the test still cannot be repaired within that budget, you may apply one narrow, reversible
 disable to that exact test so the assigned change can be validated. Keep the test source and test
-name in the tree; use the language's named ignore/disable mechanism (for Rust,
-`#[ignore = "...reason..."]`) or an equivalent adjacent comment, never delete the test or its
+name in the tree; use the language's named ignore/disable mechanism, never delete the test or its
 assertions. The disable must name the flake, preserve the original test body, be limited to the
-proven flaky case, and be reported in the normalized candidate message. The independent review may
-reject a broad, unexplained, target-related, or non-reversible disable.
+proven flaky case, and be reported in the final candidate evidence.
 
 Do not create or seal implementation-report or risk files: the controller derives and seals those
 records from the captured worktree, changed paths, regression checkpoint, and validation receipts.
