@@ -46,14 +46,17 @@ turns on validation:
 6. If a focused check fails, inspect only the smallest additional range that explains it, repair
    the root cause, and rerun the exact reproducer plus focused check. Do not submit a red candidate.
 7. Before submission, inspect the raw exit status, stdout, and stderr. Call `candidate_submit` once
-   by turn 28 with a concise normalized commit message and the assigned regression identity. Never
-   call a second terminal submission path after rejection.
+   by turn 18 with a concise normalized commit message and the assigned regression identity. Never
+   call a second terminal submission path after rejection. If the exact reproducer and one narrow
+   focused check pass, submission is the only next action: do not spend another turn narrating,
+   browsing history, rebuilding unrelated targets, or running a broad suite.
 
 The controller gives this assignment a bounded execution wall. Reach the regression checkpoint
 and implementation edit early, and submit the candidate as soon as the exact reproducer and one
 narrow focused check pass; do not spend the remaining wall on optional archaeology, broad suites,
-or repeated provider turns. A prior attempt exhausted its wall before editing, so checkpoint by
-turn 10 and reserve the final turns for the candidate submission.
+or repeated provider turns. Prior attempts exhausted their wall after editing but before
+submission, so checkpoint by turn 8, finish the focused check by turn 16, and reserve the final
+turns for the candidate submission.
 
 For a cancellation or signal ticket involving `time.sleep`, SIGTERM, or a canceled runtime error,
 start with one targeted search such as `rg -n 'time\.sleep|checkpoint|SIGTERM|signal|canceled'
