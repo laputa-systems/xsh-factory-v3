@@ -16,7 +16,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -75,6 +75,51 @@ factoryd-serve:
 		--database-url "$$FACTORY_DATABASE_URL" \
 		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
 		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
+
+factory-reset:
+	test "$(FACTORY_RESET_CONFIRM)" = "WIPE_FACTORY"
+	test -n "$$FACTORY_DATABASE_URL"
+	test -n "$$FACTORY_RUNTIME_ROOT"
+	command -v dropdb >/dev/null
+	command -v createdb >/dev/null
+	command -v psql >/dev/null
+	@set -eu; \
+	 database_url="$$FACTORY_DATABASE_URL"; \
+	 database_name="$${database_url##*/}"; \
+	 database_name="$${database_name%%\?*}"; \
+	 case "$$database_name" in factory_*) ;; *) \
+		printf '%s\n' 'factory-reset: database name must start with factory_' >&2; exit 1 ;; \
+	 esac; \
+	 if case "$$database_url" in postgresql://*) true ;; *) false ;; esac; then \
+		connection_authority="$${database_url#postgresql://}"; \
+		connection_authority="$${connection_authority%%/*}"; \
+		connection_user=""; \
+		case "$$connection_authority" in *@*) connection_user="$${connection_authority%@*}"; connection_authority="$${connection_authority#*@}" ;; esac; \
+		connection_host="$${connection_authority%%:*}"; \
+		connection_port="$${connection_authority##*:}"; \
+		test -n "$$connection_host"; \
+		if test "$$connection_port" = "$$connection_authority"; then connection_port=5432; fi; \
+		PGHOST="$$connection_host" PGPORT="$$connection_port"; export PGHOST PGPORT; \
+	 if test -n "$$connection_user"; then PGUSER="$$connection_user"; export PGUSER; fi; \
+	 fi; \
+	 runtime_root="$$FACTORY_RUNTIME_ROOT"; \
+	 case "$$runtime_root" in /tmp/*|/private/tmp/*|"$(CURDIR)"/var/*) ;; *) \
+		printf '%s\n' 'factory-reset: runtime root must be under /tmp, /private/tmp, or this checkout var/' >&2; exit 1 ;; \
+	 esac; \
+	 if ps -axo command= | grep -E '[/]factoryd serve|(^| )factoryd serve' >/dev/null 2>&1; then \
+		printf '%s\n' 'factory-reset: stop all factoryd daemons before resetting factory state' >&2; exit 1; \
+	 fi; \
+	 for factory_database in $$(psql -d postgres -Atqc "select datname from pg_database where datname like 'factory_%' order by datname"); do \
+		dropdb --if-exists --force "$$factory_database"; \
+	 done; \
+	 rm -rf -- "$$runtime_root" "$(CURDIR)/var"; \
+	 for factory_runtime in /tmp/factory-* /private/tmp/factory-*; do \
+		test -e "$$factory_runtime" || continue; \
+		rm -rf -- "$$factory_runtime"; \
+	 done; \
+	createdb "$$database_name"; \
+	mkdir -p "$(CURDIR)/var"; \
+	printf 'factory-reset: wiped all factory_* databases and runtime state; recreated %s\n' "$$database_name"
 
 # Admit one provider-backed campaign whose terminal objective is exactly one
 # locally delivered XSH commit. Product discovery, Architect sponsorship,
