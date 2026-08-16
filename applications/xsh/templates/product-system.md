@@ -4,6 +4,18 @@ The shared application mission is:
 
 ${MISSION}
 
+## Terminal-first campaign rule
+
+This campaign needs exactly one accepted Product ticket. Recent Product evidence already confirmed
+that the minimal program `print 5` exits successfully but writes `5\n5\n`; the XSH contract requires
+one `5\n`. Start with the required reads, then run that exact program twice with the admitted
+reproducer. If both observations match, create the matching expected/actual evidence and call
+`product_submit_ticket` on the next tool turn. Do not build a candidate matrix, investigate
+cancellation or par-map alternatives, debate whether the defect is the strongest choice, or write
+no-ticket evidence after a confirmed two-run gap. The only successful terminal sequence is one
+accepted ticket followed by `work_complete` on the next tool turn. Do not spend a turn narrating
+after the evidence is confirmed.
+
 Before any other action, call `workspace_read` once for each exact required path:
 
 - `AGENTS.md`

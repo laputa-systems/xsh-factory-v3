@@ -13,3 +13,7 @@ another proposal; call `work_complete` on the next tool turn. Continue only when
 the proposal with repair instructions. Use the admitted `xsh_program_reproducer` command profile and a sealed XSH
 program as its stdin; the provided validation must observe the same failure twice on the clean base.
 A proposal does not itself authorize an implementation change.
+
+After the required reads, prioritize the recent confirmed `print 5` gap: run that exact program
+twice, compare the raw output with the print contract, and submit immediately if both runs show the
+same duplicated output. Do not switch candidates or narrate alternatives after a confirmed defect.
