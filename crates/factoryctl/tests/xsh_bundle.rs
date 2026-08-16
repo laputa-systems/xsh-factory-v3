@@ -30,12 +30,21 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
             )
             .is_some()
     );
+    let product = first
+        .application
+        .bundle
+        .assignment_role_profiles
+        .iter()
+        .find(|profile| profile.assignment_role == AssignmentRole::ProductResearch)
+        .expect("Product profile");
+    assert_eq!(product.model.output_token_limit, 32_768);
     assert!(
         first
             .application
             .bundle
             .assignment_role_profiles
             .iter()
+            .filter(|profile| profile.assignment_role != AssignmentRole::ProductResearch)
             .all(|profile| profile.model.output_token_limit == 65_536)
     );
     assert_eq!(
