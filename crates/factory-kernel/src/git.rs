@@ -522,7 +522,7 @@ pub struct LocalDeliveryReceipt {
 }
 
 /// The generic kernel's physical Git authority.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GitCustody {
     executable: PathBuf,
     runtime_root: PathBuf,
@@ -531,7 +531,7 @@ pub struct GitCustody {
     candidate_ref_scope: ContentDigest,
     stream_limit: u64,
     deadline: Duration,
-    next_index: AtomicU64,
+    next_index: Arc<AtomicU64>,
 }
 
 impl GitCustody {
@@ -571,7 +571,7 @@ impl GitCustody {
             candidate_ref_scope,
             stream_limit,
             deadline,
-            next_index: AtomicU64::new(1),
+            next_index: Arc::new(AtomicU64::new(1)),
         })
     }
 

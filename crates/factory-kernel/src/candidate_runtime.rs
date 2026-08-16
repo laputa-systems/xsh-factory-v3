@@ -461,7 +461,8 @@ pub async fn checkpoint_regression(
         runner,
         std::slice::from_ref(authority.regression.command),
         ValidationInvocation::Candidate,
-    )?;
+    )
+    .await?;
     match receipt.status() {
         ValidationStatus::Passed => return Err(CandidateRuntimeError::RegressionCheckpointPassed),
         ValidationStatus::TreeChanged => {
@@ -574,7 +575,8 @@ pub async fn submit_candidate(
         runner,
         &commands,
         ValidationInvocation::Candidate,
-    );
+    )
+    .await;
     let (hard_result, hard_evidence) = match hard_execution {
         Ok(receipt) => {
             let result = if whitespace.is_clean() {
@@ -757,7 +759,8 @@ pub async fn resume_candidate_hard_validation(
         runner,
         &commands,
         ValidationInvocation::Candidate,
-    );
+    )
+    .await;
     let (result, evidence) = match execution {
         Ok(receipt) => {
             let result = if whitespace.is_clean() {
@@ -913,7 +916,8 @@ pub async fn run_quality_full_suite(
         runner,
         authority.validation.full_suite,
         ValidationInvocation::Quality,
-    );
+    )
+    .await;
     let (result, evidence) = match execution {
         Ok(receipt) => {
             let result = validation_result(receipt.status());
@@ -1280,7 +1284,34 @@ fn validate_commit_message_policy(
     Ok(())
 }
 
-fn run_validation_in_fresh_worktree(
+async fn run_validation_in_fresh_worktree(
+    git: &GitCustody,
+    repository: &QualifiedRepository,
+    tree: GitTreeId,
+    name: WorktreeName,
+    runner: &CommandRunner,
+    commands: &[DeterministicCommand],
+    invocation: ValidationInvocation,
+) -> Result<CommandValidationReceipt, CandidateRuntimeError> {
+    let git = git.clone();
+    let repository = repository.clone();
+    let runner = runner.clone();
+    let commands = commands.to_owned();
+    smol::unblock(move || {
+        run_validation_in_fresh_worktree_blocking(
+            &git,
+            &repository,
+            tree,
+            name,
+            &runner,
+            &commands,
+            invocation,
+        )
+    })
+    .await
+}
+
+fn run_validation_in_fresh_worktree_blocking(
     git: &GitCustody,
     repository: &QualifiedRepository,
     tree: GitTreeId,

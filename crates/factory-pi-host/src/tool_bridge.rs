@@ -769,7 +769,16 @@ where
                 });
             }
             if name == ToolName::ProductSubmitTicket {
+                // Product submission is durable success even though its wire operation is
+                // nonterminal. Queue the admitted work-complete receipt before terminating the
+                // core turn so the actor cannot exit with an accepted ticket but no assignment
+                // settlement.
                 self.command_context.clear_product_submission_rejected();
+                self.terminal
+                    .defer(ToolName::WorkComplete, JsonValue::Object(BTreeMap::new()))
+                    .map_err(|error| CapabilityError::Execution {
+                        message: error.to_string(),
+                    })?;
             }
             if name == ToolName::CandidateCheckpointRegression {
                 self.command_context
@@ -827,7 +836,11 @@ where
             }
         };
         Ok(CapabilityResponse {
-            value: capability_result(name, value)
+            value: capability_result_with_termination(
+                name,
+                value,
+                name.is_terminal() || name == ToolName::ProductSubmitTicket,
+            )
                 .map_err(|message| CapabilityError::Execution { message })?,
         })
     }
@@ -962,6 +975,14 @@ pub fn model_visible_tool_result(name: ToolName, value: JsonValue) -> JsonValue 
 }
 
 fn capability_result(name: ToolName, value: JsonValue) -> Result<JsonValue, String> {
+    capability_result_with_termination(name, value, name.is_terminal())
+}
+
+fn capability_result_with_termination(
+    name: ToolName,
+    value: JsonValue,
+    terminate: bool,
+) -> Result<JsonValue, String> {
     let visible = model_visible_tool_result(name, value);
     let details_json = visible
         .to_json_string()
@@ -971,7 +992,7 @@ fn capability_result(name: ToolName, value: JsonValue) -> Result<JsonValue, Stri
         ("content", JsonValue::String(content)),
         ("details_json", JsonValue::String(details_json)),
         ("is_error", JsonValue::Bool(false)),
-        ("terminate", JsonValue::Bool(name.is_terminal())),
+        ("terminate", JsonValue::Bool(terminate)),
     ]))
 }
 
@@ -1476,6 +1497,27 @@ fn json_type_matches(kind: &str, value: &JsonValue) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pi_agent_core::scheduler::CancellationToken;
+    use pi_agent_core::state::ToolCallId;
+    use pi_agent_core::tool::ToolUpdateSink;
+    use pi_agent_luau::tool_handler::{CapabilityRequest, LuauCapability};
+
+    struct ProductSubmissionDaemon;
+
+    impl FramedDaemon for ProductSubmissionDaemon {
+        fn call<'a>(&'a self, operation: &'static str, _payload: JsonValue) -> DaemonFuture<'a> {
+            Box::pin(async move {
+                assert_eq!(operation, "product.submit_ticket");
+                Ok(object([
+                    ("audit_id", JsonValue::Number(JsonNumber::Unsigned(7))),
+                    (
+                        "aggregate_revision",
+                        JsonValue::Number(JsonNumber::Unsigned(2)),
+                    ),
+                ]))
+            })
+        }
+    }
 
     fn object(values: impl IntoIterator<Item = (&'static str, JsonValue)>) -> JsonValue {
         JsonValue::Object(
@@ -1617,6 +1659,45 @@ mod tests {
             Err(TerminalError::Duplicate)
         );
         assert_eq!(gate.take().unwrap().tool, ToolName::CandidateSubmit);
+    }
+
+    #[test]
+    fn accepted_product_submission_defers_work_complete_and_terminates() {
+        let terminal = Arc::new(TerminalDeferral::new([ToolName::WorkComplete]));
+        let capability = FactoryCapability::new(
+            Arc::new(ProductSubmissionDaemon),
+            vec![BoundTool {
+                name: ToolName::ProductSubmitTicket,
+                description: "Submit one proposal".to_owned(),
+                schema: object([
+                    ("type", JsonValue::String("object".to_owned())),
+                    ("additionalProperties", JsonValue::Bool(false)),
+                ]),
+                execution_mode: "sequential".to_owned(),
+            }],
+            CommandContext::new(1),
+            Arc::clone(&terminal),
+            None,
+        );
+        let request = CapabilityRequest {
+            call_id: ToolCallId::new("product-submit").expect("test call ID is non-empty"),
+            tool_name: ToolName::ProductSubmitTicket.as_str().to_owned(),
+            capability: FACTORY_CAPABILITY.to_owned(),
+            method: ToolName::ProductSubmitTicket.capability_method().to_owned(),
+            arguments: object([]),
+            updates: ToolUpdateSink::disabled(),
+        };
+
+        let response = smol::block_on(capability.invoke(request, CancellationToken::new()))
+            .expect("accepted Product submission should succeed");
+        assert_eq!(
+            response.value.get("terminate").and_then(JsonValue::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            terminal.pending().map(|pending| pending.tool),
+            Some(ToolName::WorkComplete)
+        );
     }
 
     #[test]
