@@ -15,7 +15,7 @@ use std::{
     ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::{Command, ExitCode, Stdio},
 };
 
 use factory_kernel::installed_runtime::{
@@ -79,6 +79,25 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
                 .probe(status_request_id())
                 .await?;
             println!("{}", daemon_status_output(&status, connection.json));
+        }
+        CliCommand::DaemonStop(connection) => {
+            let shutdown = OperatorClient::new(connection.socket_path)
+                .shutdown(shutdown_request_id())
+                .await?;
+            if connection.json {
+                println!(
+                    "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"{}\",\"state\":\"{}\"}}",
+                    shutdown.protocol_version,
+                    shutdown.request_id,
+                    shutdown.operation,
+                    shutdown.state,
+                );
+            } else {
+                println!("daemon: {}", shutdown.state);
+            }
+        }
+        CliCommand::DaemonStart(command) => {
+            smol::unblock(move || spawn_factoryd(&command)).await?;
         }
         CliCommand::Sponsor {
             base,
@@ -1279,6 +1298,8 @@ enum CliCommand {
     BuildIdentity(BuildIdentityArgs),
     BackupRestore(backup_restore::BackupRestoreArguments),
     DaemonStatus(ConnectionArgs),
+    DaemonStop(ConnectionArgs),
+    DaemonStart(DaemonStartArgs),
     Sponsor {
         base: ArchitectBaseArgs,
         ticket_revision_id: i64,
@@ -1359,6 +1380,16 @@ struct BuildIdentityArgs {
     json: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DaemonStartArgs {
+    factoryd: PathBuf,
+    database_url: String,
+    runtime_root: PathBuf,
+    pid_file: PathBuf,
+    log_file: PathBuf,
+    operation_deadline_ms: u64,
+}
+
 fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
     let mut values = arguments.into_iter();
     match values.next().as_deref() {
@@ -1377,7 +1408,9 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
         },
         Some("daemon") => match values.next().as_deref() {
             Some("status") => parse_status(values.collect()),
-            _ => Err("expected `daemon status`".to_owned()),
+            Some("stop") => parse_daemon_stop(values.collect()),
+            Some("start") => parse_daemon_start(values.collect()),
+            _ => Err("expected `daemon start|status|stop`".to_owned()),
         },
         Some("ticket") => match values.next().as_deref() {
             Some("list") => parse_ticket_list(values.collect()).map(CliCommand::TicketList),
@@ -1846,6 +1879,65 @@ fn spawn_factoryd_init(command: &InitCommand) -> Result<(), io::Error> {
     }
 }
 
+fn spawn_factoryd(command: &DaemonStartArgs) -> Result<(), io::Error> {
+    let factoryd = exact_regular_file("--factoryd", &command.factoryd)?;
+    fs::create_dir_all(&command.runtime_root)?;
+    if let Some(parent) = command.pid_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = command.log_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&command.log_file)?;
+    let log_stderr = log.try_clone()?;
+    let mut process = Command::new(&factoryd);
+    process
+        .args([
+            OsString::from("serve"),
+            OsString::from("--database-url"),
+            OsString::from(&command.database_url),
+            OsString::from("--runtime-root"),
+            command.runtime_root.as_os_str().to_owned(),
+            OsString::from("--operation-deadline-ms"),
+            OsString::from(command.operation_deadline_ms.to_string()),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_stderr))
+        .env_remove("OPENROUTER_API_KEY");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        process.process_group(0);
+    }
+    let child = process.spawn().map_err(|source| {
+        io::Error::new(
+            source.kind(),
+            format!("cannot start factoryd serve {factoryd:?}: {source}"),
+        )
+    })?;
+    let pid = child.id();
+    let record = format!(
+        "pid={pid}\npgid={pid}\nsocket={}\n",
+        command
+            .runtime_root
+            .join("factoryd.operator.sock")
+            .display()
+    );
+    fs::write(&command.pid_file, record)?;
+    println!(
+        "factoryd started: pid={pid} process_group={pid} socket={}",
+        command
+            .runtime_root
+            .join("factoryd.operator.sock")
+            .display()
+    );
+    Ok(())
+}
+
 fn qualified_build_identity(
     command: &BuildIdentityArgs,
 ) -> Result<String, Box<dyn std::error::Error>> {
@@ -1999,6 +2091,67 @@ fn parse_status(arguments: Vec<String>) -> Result<CliCommand, String> {
     Ok(CliCommand::DaemonStatus(ConnectionArgs {
         socket_path: socket_path.ok_or_else(|| "--socket is required".to_owned())?,
         json,
+    }))
+}
+
+fn parse_daemon_stop(arguments: Vec<String>) -> Result<CliCommand, String> {
+    parse_status(arguments).map(|command| match command {
+        CliCommand::DaemonStatus(connection) => CliCommand::DaemonStop(connection),
+        _ => unreachable!("parse_status only returns daemon status"),
+    })
+}
+
+fn parse_daemon_start(arguments: Vec<String>) -> Result<CliCommand, String> {
+    let mut values = arguments.into_iter();
+    let mut factoryd = None;
+    let mut database_url = None;
+    let mut runtime_root = None;
+    let mut pid_file = None;
+    let mut log_file = None;
+    let mut operation_deadline_ms = 900_000_u64;
+    while let Some(flag) = values.next() {
+        match flag.as_str() {
+            "--factoryd" => set_absolute_path(
+                &mut factoryd,
+                next_value(&mut values, "--factoryd")?,
+                "--factoryd",
+            )?,
+            "--database-url" => set_once(
+                &mut database_url,
+                next_value(&mut values, "--database-url")?,
+                "--database-url",
+            )?,
+            "--runtime-root" => set_absolute_path(
+                &mut runtime_root,
+                next_value(&mut values, "--runtime-root")?,
+                "--runtime-root",
+            )?,
+            "--pid-file" => set_absolute_path(
+                &mut pid_file,
+                next_value(&mut values, "--pid-file")?,
+                "--pid-file",
+            )?,
+            "--log-file" => set_absolute_path(
+                &mut log_file,
+                next_value(&mut values, "--log-file")?,
+                "--log-file",
+            )?,
+            "--operation-deadline-ms" => {
+                operation_deadline_ms = positive_u64(
+                    &next_value(&mut values, "--operation-deadline-ms")?,
+                    "--operation-deadline-ms",
+                )?;
+            }
+            _ => return Err(format!("unknown flag {flag}")),
+        }
+    }
+    Ok(CliCommand::DaemonStart(DaemonStartArgs {
+        factoryd: factoryd.ok_or_else(|| "--factoryd is required".to_owned())?,
+        database_url: database_url.ok_or_else(|| "--database-url is required".to_owned())?,
+        runtime_root: runtime_root.ok_or_else(|| "--runtime-root is required".to_owned())?,
+        pid_file: pid_file.ok_or_else(|| "--pid-file is required".to_owned())?,
+        log_file: log_file.ok_or_else(|| "--log-file is required".to_owned())?,
+        operation_deadline_ms,
     }))
 }
 
@@ -2730,8 +2883,20 @@ fn nonnegative_u64(value: &str, field: &str) -> Result<u64, String> {
         .map_err(|_| format!("{field} must be a nonnegative integer"))
 }
 
+fn positive_u64(value: &str, field: &str) -> Result<u64, String> {
+    let parsed = nonnegative_u64(value, field)?;
+    if parsed == 0 {
+        return Err(format!("{field} must be positive"));
+    }
+    Ok(parsed)
+}
+
 fn status_request_id() -> String {
     format!("factoryctl-status-{}", std::process::id())
+}
+
+fn shutdown_request_id() -> String {
+    format!("factoryctl-shutdown-{}", std::process::id())
 }
 
 fn architect_request_id(operation: &str) -> String {
@@ -2759,7 +2924,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl <init|build identity|daemon|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
+    "usage:\n  factoryctl <init|build identity|daemon start|daemon status|daemon stop|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
 }
 
 #[cfg(test)]
@@ -2890,6 +3055,38 @@ mod tests {
             parsed,
             CliCommand::DaemonStatus(ConnectionArgs { json: true, .. })
         ));
+    }
+
+    #[test]
+    fn daemon_stop_uses_the_same_explicit_socket_guard() {
+        let parsed = parse_args(vec![
+            "daemon".to_owned(),
+            "stop".to_owned(),
+            "--socket".to_owned(),
+            "/tmp/factory.sock".to_owned(),
+        ])
+        .expect("valid stop command");
+        assert!(matches!(parsed, CliCommand::DaemonStop(_)));
+    }
+
+    #[test]
+    fn daemon_start_requires_tracked_runtime_paths() {
+        let parsed = parse_args(vec![
+            "daemon".to_owned(),
+            "start".to_owned(),
+            "--factoryd".to_owned(),
+            "/tmp/factoryd".to_owned(),
+            "--database-url".to_owned(),
+            "postgresql://factory@localhost/factory_v3".to_owned(),
+            "--runtime-root".to_owned(),
+            "/tmp/factory-runtime".to_owned(),
+            "--pid-file".to_owned(),
+            "/tmp/factory-runtime/factoryd.pid".to_owned(),
+            "--log-file".to_owned(),
+            "/tmp/factory-runtime/factoryd.log".to_owned(),
+        ])
+        .expect("valid start command");
+        assert!(matches!(parsed, CliCommand::DaemonStart(_)));
     }
 
     #[test]

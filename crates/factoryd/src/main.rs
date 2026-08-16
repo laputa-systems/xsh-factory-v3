@@ -186,9 +186,17 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
     });
     tracing::info!(socket = %daemon.operator_socket_path().display(), "factoryd ready on local Unix socket");
     let served = daemon.serve().await;
+    let active_sessions = daemon.cancel_active_sessions().await;
     let _ = driver_task.cancel().await;
+    let shutdown = match Arc::try_unwrap(daemon) {
+        Ok(daemon) => daemon.shutdown().await,
+        Err(_) => Err(io::Error::other("factoryd driver retained daemon ownership").into()),
+    };
     store.close().await;
-    served.map_err(Into::into)
+    served
+        .and(active_sessions)
+        .and(shutdown)
+        .map_err(Into::into)
 }
 
 /// The pure, provider-free startup gate. Keeping it separate from socket bind

@@ -130,6 +130,20 @@ impl ActiveSessionCancellationRegistry {
             .await
             .map_err(|_| SessionRuntimeError::CancellationReconciliationClosed { session_id })
     }
+
+    pub(crate) async fn cancel_all_and_wait(&self) -> Result<(), SessionRuntimeError> {
+        let session_ids = self
+            .entries
+            .lock()
+            .map_err(|_| SessionRuntimeError::CancellationRegistryPoisoned)?
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            self.cancel_and_wait(session_id).await?;
+        }
+        Ok(())
+    }
 }
 
 struct ActiveSessionCancellationCompletion {

@@ -36,11 +36,12 @@ use factory_protocol::{
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
-    OperatorPublicationCreateRequest, OperatorStartCampaignRequest, OperatorStatusRequest,
-    OperatorStatusResponse, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V2, PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES,
-    RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId, TicketListResponse, TicketShowResponse,
-    decode_frame, decode_json_frame, decode_routing_envelope, encode_frame, encode_json_frame,
+    OperatorPublicationCreateRequest, OperatorShutdownRequest, OperatorShutdownResponse,
+    OperatorStartCampaignRequest, OperatorStatusRequest, OperatorStatusResponse,
+    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2,
+    PublicationReceiptResponse, REQUEST_FRAME_MAX_BYTES, RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope,
+    SessionId, TicketListResponse, TicketShowResponse, decode_frame, decode_json_frame,
+    decode_routing_envelope, encode_frame, encode_json_frame,
 };
 use miniserde::{Serialize, json};
 use rustix::{
@@ -87,6 +88,8 @@ pub const RUNTIME_LOCK_FILENAME: &str = "factoryd.lock";
 pub const OPERATOR_SOCKET_FILENAME: &str = "factoryd.operator.sock";
 /// A read-only transport status operation independent from Architect commands.
 pub const OPERATOR_STATUS_OPERATION: &str = factory_protocol::OP_FACTORYD_STATUS;
+/// An orderly local-operator shutdown request.
+pub const OPERATOR_SHUTDOWN_OPERATION: &str = factory_protocol::OP_FACTORYD_SHUTDOWN;
 
 const DEFAULT_READ_DEADLINE: Duration = Duration::from_secs(5);
 const DEFAULT_OPERATION_DEADLINE: Duration = Duration::from_secs(30);
@@ -548,6 +551,57 @@ impl OperatorClient {
             return Err(LocalTransportError::OperatorRequestIdMismatch);
         }
         if response.state != "ready" {
+            return Err(LocalTransportError::UnexpectedOperatorState {
+                actual: response.state,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Requests an orderly daemon shutdown over the authenticated local
+    /// operator socket. The daemon acknowledges before stopping its listener.
+    pub async fn shutdown(
+        &self,
+        request_id: String,
+    ) -> Result<OperatorShutdownResponse, LocalTransportError> {
+        validate_request_id(&request_id)?;
+        if self.read_deadline.is_zero() {
+            return Err(LocalTransportError::ZeroReadDeadline);
+        }
+        if self.write_deadline.is_zero() {
+            return Err(LocalTransportError::ZeroWriteDeadline);
+        }
+        let mut stream = UnixStream::connect(&self.socket_path).await?;
+        let request = OperatorShutdownRequest {
+            protocol_version: PROTOCOL_VERSION_V2,
+            request_id,
+            operation: OPERATOR_SHUTDOWN_OPERATION.to_owned(),
+        };
+        let expected_request_id = request.request_id.clone();
+        let frame = encode_json_frame(&request, REQUEST_FRAME_MAX_BYTES)?;
+        write_frame_bytes(&mut stream, &frame, self.write_deadline).await?;
+        let response = read_stream_frame(&mut stream, RESPONSE_FRAME_MAX_BYTES, self.read_deadline)
+            .await?
+            .ok_or(LocalTransportError::ResponseDisconnected)?;
+        let response: OperatorShutdownResponse = decode_json_frame(
+            &response,
+            RESPONSE_FRAME_MAX_BYTES,
+            OPERATOR_SHUTDOWN_OPERATION,
+        )?;
+        if response.protocol_version != PROTOCOL_VERSION_V2 {
+            return Err(LocalTransportError::UnsupportedOperatorProtocol(
+                response.protocol_version,
+            ));
+        }
+        if response.operation != OPERATOR_SHUTDOWN_OPERATION {
+            return Err(LocalTransportError::UnexpectedOperatorOperation {
+                actual: response.operation,
+            });
+        }
+        if response.request_id != expected_request_id {
+            return Err(LocalTransportError::OperatorRequestIdMismatch);
+        }
+        if response.state != "shutting_down" {
             return Err(LocalTransportError::UnexpectedOperatorState {
                 actual: response.state,
             });
@@ -1088,6 +1142,8 @@ pub struct LocalDaemon {
     forum_rpc: Option<OperatorForumRpc>,
     publication_rpc: Option<OperatorPublicationRpc>,
     active_sessions: ActiveSessionCancellationRegistry,
+    shutdown_sender: smol::channel::Sender<()>,
+    shutdown_receiver: smol::channel::Receiver<()>,
 }
 
 impl LocalDaemon {
@@ -1100,6 +1156,7 @@ impl LocalDaemon {
     ) -> Result<Self, LocalTransportError> {
         let runtime = RuntimeSocket::bind(config)?;
         let daemon_lock = store.acquire_daemon_lock().await?;
+        let (shutdown_sender, shutdown_receiver) = smol::channel::bounded(1);
         Ok(Self {
             runtime,
             daemon_lock: Some(daemon_lock),
@@ -1112,6 +1169,8 @@ impl LocalDaemon {
             forum_rpc: None,
             publication_rpc: None,
             active_sessions: ActiveSessionCancellationRegistry::default(),
+            shutdown_sender,
+            shutdown_receiver,
         })
     }
 
@@ -1295,7 +1354,21 @@ impl LocalDaemon {
     /// are supplied only as daemon-created socketpairs instead.
     pub async fn serve(&self) -> Result<(), LocalTransportError> {
         loop {
-            let (stream, _) = self.runtime.listener.accept().await?;
+            let accepted = async {
+                self.runtime
+                    .listener
+                    .accept()
+                    .await
+                    .map(Some)
+                    .map_err(LocalTransportError::from)
+            };
+            let shutdown = async {
+                let _ = self.shutdown_receiver.clone().recv().await;
+                Ok(None)
+            };
+            let Some((stream, _)) = smol::future::race(accepted, shutdown).await? else {
+                break Ok(());
+            };
             let deadline = self.runtime.config.read_deadline;
             let operation_deadline = self.runtime.config.operation_deadline;
             let write_deadline = self.runtime.config.write_deadline;
@@ -1307,6 +1380,7 @@ impl LocalDaemon {
             let forum_router = self.forum_rpc.clone();
             let publication_router = self.publication_rpc.clone();
             let status_store = self.status_store.clone();
+            let shutdown_sender = self.shutdown_sender.clone();
             smol::spawn(async move {
                 if let Err(error) = serve_operator_connection(
                     stream,
@@ -1321,6 +1395,7 @@ impl LocalDaemon {
                     artifact_router,
                     forum_router,
                     publication_router,
+                    Some(shutdown_sender),
                 )
                 .await
                 {
@@ -1348,13 +1423,24 @@ impl LocalDaemon {
             self.artifact_rpc.clone(),
             self.forum_rpc.clone(),
             self.publication_rpc.clone(),
+            Some(self.shutdown_sender.clone()),
         )
         .await
     }
 
     /// Releases the PostgreSQL lock on the orderly shutdown path. Dropping the
     /// returned value then removes only the socket inode this daemon created.
+    pub async fn cancel_active_sessions(&self) -> Result<(), LocalTransportError> {
+        self.active_sessions
+            .cancel_all_and_wait()
+            .await
+            .map_err(|error| LocalTransportError::ActiveSessionShutdown {
+                message: error.to_string(),
+            })
+    }
+
     pub async fn shutdown(mut self) -> Result<(), LocalTransportError> {
+        self.cancel_active_sessions().await?;
         let daemon_lock = self
             .daemon_lock
             .take()
@@ -1471,6 +1557,9 @@ pub enum LocalTransportError {
 
     #[error("daemon advisory lock was already released")]
     DaemonLockAlreadyReleased,
+
+    #[error("active session shutdown failed: {message}")]
+    ActiveSessionShutdown { message: String },
 }
 
 impl From<OperatorRpcError> for LocalTransportError {
@@ -1711,6 +1800,7 @@ async fn serve_operator_connection(
     artifact_rpc: Option<OperatorArtifactRpc>,
     forum_rpc: Option<OperatorForumRpc>,
     publication_rpc: Option<OperatorPublicationRpc>,
+    shutdown_sender: Option<smol::channel::Sender<()>>,
 ) -> Result<(), LocalTransportError> {
     let request = read_stream_frame(&mut stream, REQUEST_FRAME_MAX_BYTES, read_deadline)
         .await?
@@ -1729,6 +1819,30 @@ async fn serve_operator_connection(
         ));
     }
     match envelope.operation.as_str() {
+        OPERATOR_SHUTDOWN_OPERATION => {
+            let request: OperatorShutdownRequest = decode_json_frame(
+                &request,
+                REQUEST_FRAME_MAX_BYTES,
+                OPERATOR_SHUTDOWN_OPERATION,
+            )?;
+            let response = OperatorShutdownResponse {
+                protocol_version: PROTOCOL_VERSION_V2,
+                request_id: request.request_id,
+                operation: OPERATOR_SHUTDOWN_OPERATION.to_owned(),
+                state: "shutting_down".to_owned(),
+            };
+            write_stream_frame_json(
+                &mut stream,
+                &response,
+                RESPONSE_FRAME_MAX_BYTES,
+                write_deadline,
+            )
+            .await?;
+            if let Some(sender) = shutdown_sender {
+                let _ = sender.send(()).await;
+            }
+            Ok(())
+        }
         OPERATOR_STATUS_OPERATION => {
             let request: OperatorStatusRequest =
                 decode_json_frame(&request, REQUEST_FRAME_MAX_BYTES, OPERATOR_STATUS_OPERATION)?;
@@ -2161,6 +2275,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                 )
                 .await
             });
@@ -2172,6 +2287,45 @@ mod tests {
             assert_eq!(status.request_id, "status-1");
             assert_eq!(status.current_kernel_build_id, None);
             assert_eq!(status.aggregate_revision, 0);
+            server.await.expect("server response");
+            fs::remove_file(root.join(RUNTIME_LOCK_FILENAME)).expect("remove test lock");
+            fs::remove_dir(root).expect("remove test root");
+        });
+    }
+
+    #[test]
+    fn operator_shutdown_acknowledges_before_signalling_the_listener() {
+        smol::block_on(async {
+            let root = test_runtime_root("operator-shutdown");
+            let runtime = RuntimeSocket::bind(LocalTransportConfig::new(root.clone()))
+                .expect("runtime socket");
+            let path = runtime.socket_path().to_path_buf();
+            let (shutdown_sender, shutdown_receiver) = smol::channel::bounded(1);
+            let server = smol::spawn(async move {
+                let (stream, _) = runtime.listener.accept().await?;
+                serve_operator_connection(
+                    stream,
+                    runtime.config.read_deadline,
+                    runtime.config.operation_deadline,
+                    runtime.config.write_deadline,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(shutdown_sender),
+                )
+                .await
+            });
+            let response = OperatorClient::new(path)
+                .shutdown("shutdown-1".to_owned())
+                .await
+                .expect("shutdown response");
+            assert_eq!(response.state, "shutting_down");
+            shutdown_receiver.recv().await.expect("shutdown signal");
             server.await.expect("server response");
             fs::remove_file(root.join(RUNTIME_LOCK_FILENAME)).expect("remove test lock");
             fs::remove_dir(root).expect("remove test root");

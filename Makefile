@@ -5,6 +5,11 @@ PI_AGENT_CORE_MANIFEST := $(PI_AGENT_CORE_ROOT)/Cargo.toml
 FACTORY_OPERATION_DEADLINE_MS ?= 900000
 FACTORYCTL ?= $(CURDIR)/target/release/factoryctl
 FACTORY_PAID_CYCLE_PRINCIPAL ?= grand-architect
+FACTORY_START_PRINCIPAL ?= grand-architect
+FACTORY_START_WAIT_SECONDS ?= 30
+FACTORY_START_SOCKET ?= $(FACTORY_RUNTIME_ROOT)/factoryd.operator.sock
+FACTORY_START_PID_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.pid
+FACTORY_START_LOG_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.log
 
 # The factory keeps Clippy's correctness and default quality groups strict.
 # Pedantic documentation/style heuristics and these boundary-shape
@@ -16,7 +21,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -75,6 +80,116 @@ factoryd-serve:
 		--database-url "$$FACTORY_DATABASE_URL" \
 		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
 		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
+
+factory-start:
+	test -x "$(FACTORYCTL)"
+	test -n "$$FACTORY_DATABASE_URL"
+	test -n "$$FACTORY_RUNTIME_ROOT"
+	test -d "$(CURDIR)/applications/xsh"
+	test -f "$(CURDIR)/applications/xsh/bundle.v2.json"
+	test -d "$(CURDIR)/../xsh"
+	test -z "$$(git -C "$(CURDIR)/../xsh" status --porcelain)"
+	$(MAKE) release-build
+	@set -eu; \
+	 runtime_root="$$FACTORY_RUNTIME_ROOT"; \
+	 socket="$(FACTORY_START_SOCKET)"; \
+	 expected_json="$$($(FACTORYCTL) build identity \
+	  --installation-root "$(CURDIR)" \
+	  --factoryd "$(CURDIR)/target/release/factoryd" \
+	  --format json)"; \
+	 expected_build="$$(printf '%s\n' "$$expected_json" | sed -n 's/.*"kernel_build_id":"\([^"]*\)".*/\1/p')"; \
+	 test -n "$$expected_build"; \
+	 daemon_ready=0; \
+	 if test -S "$$socket"; then \
+	  if live_json="$$($(FACTORYCTL) daemon status --socket "$$socket" --format json 2>/dev/null)"; then \
+	   live_build="$$(printf '%s\n' "$$live_json" | sed -n 's/.*"current_kernel_build_id":"\([^"]*\)".*/\1/p')"; \
+	   test "$$live_build" = "$$expected_build" || { printf 'factory-start: live daemon build %s differs from release build %s; stop it and choose a fresh runtime/database pair\n' "$$live_build" "$$expected_build" >&2; exit 1; }; \
+	   daemon_ready=1; \
+	  else \
+	   printf 'factory-start: stale socket detected; daemon start will reclaim it under the runtime lock\n' >&2; \
+	  fi; \
+	 fi; \
+	 if test "$$daemon_ready" != 1; then \
+	  "$(FACTORYCTL)" init \
+	   --installation-root "$(CURDIR)" \
+	   --factoryd "$(CURDIR)/target/release/factoryd" \
+	   --database-url "$$FACTORY_DATABASE_URL" \
+	   --runtime-root "$$runtime_root" \
+	   --provider-credential-environment openrouter=OPENROUTER_API_KEY; \
+	  "$(FACTORYCTL)" daemon start \
+	   --factoryd "$(CURDIR)/target/release/factoryd" \
+	   --database-url "$$FACTORY_DATABASE_URL" \
+	   --runtime-root "$$runtime_root" \
+	   --pid-file "$(FACTORY_START_PID_FILE)" \
+	   --log-file "$(FACTORY_START_LOG_FILE)" \
+	   --operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"; \
+	  ready=0; \
+	  for attempt in $$(seq 1 "$(FACTORY_START_WAIT_SECONDS)"); do \
+	   if test -S "$$socket" && "$(FACTORYCTL)" daemon status --socket "$$socket" >/dev/null 2>&1; then ready=1; break; fi; \
+	   sleep 1; \
+	  done; \
+	  test "$$ready" = 1 || { printf 'factory-start: daemon did not become ready; inspect %s\n' "$(FACTORY_START_LOG_FILE)" >&2; exit 1; }; \
+	 fi; \
+	 status_json="$$($(FACTORYCTL) daemon status --socket "$$socket" --format json)"; \
+	 kernel_revision="$$(printf '%s\n' "$$status_json" | sed -n 's/.*"aggregate_revision":\([0-9][0-9]*\).*/\1/p')"; \
+	 test -n "$$kernel_revision"; \
+	 if app_json="$$($(FACTORYCTL) application show xsh --socket "$$socket" --format json 2>/dev/null)"; then \
+	  :; \
+	 else \
+	  app_json="$$($(FACTORYCTL) application register \
+	   --socket "$$socket" --format json \
+	   --client-command-id factory-start-register-xsh-$$expected_build \
+	   --expected-revision 0 \
+	   --expected-kernel-build-revision "$$kernel_revision" \
+	   --kernel-build-id "$$expected_build" \
+	   --source-root "$(CURDIR)/applications/xsh" \
+	   --bundle-relative-path bundle.v2.json \
+	   --principal "$(FACTORY_START_PRINCIPAL)")"; \
+	  app_json="$$($(FACTORYCTL) application show xsh --socket "$$socket" --format json)"; \
+	 fi; \
+	 active="$$(printf '%s\n' "$$app_json" | sed -n 's/.*"is_active":\(true\|false\).*/\1/p')"; \
+	 if test "$$active" != true; then \
+	  app_revision="$$(printf '%s\n' "$$app_json" | sed -n 's/.*"application_revision_id":\([0-9][0-9]*\).*/\1/p')"; \
+	  app_expected_revision="$$(printf '%s\n' "$$app_json" | sed -n 's/.*"aggregate_revision":\([0-9][0-9]*\).*/\1/p')"; \
+	  rationale_root="$$runtime_root/operator"; rationale_file="$$rationale_root/factory-start-xsh.txt"; mkdir -p "$$rationale_root"; \
+	  printf 'Grand Architect startup selected XSH application revision %s for the qualified release build %s.\n' "$$app_revision" "$$expected_build" >"$$rationale_file"; \
+	  seal_json="$$($(FACTORYCTL) artifact seal \
+	   --socket "$$socket" --format json \
+	   --client-command-id factory-start-seal-xsh-rationale-$$expected_build \
+	   --expected-kernel-build-revision "$$kernel_revision" \
+	   --source-root "$$rationale_root" \
+	   --source-relative-path factory-start-xsh.txt \
+	   --principal "$(FACTORY_START_PRINCIPAL)")"; \
+	  rationale_id="$$(printf '%s\n' "$$seal_json" | sed -n 's/.*"artifact_id":\([0-9][0-9]*\).*/\1/p')"; \
+	  rationale_digest="$$(printf '%s\n' "$$seal_json" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')"; \
+	  rationale_bytes="$$(printf '%s\n' "$$seal_json" | sed -n 's/.*"byte_length":\([0-9][0-9]*\).*/\1/p')"; \
+	  test -n "$$rationale_id"; test -n "$$rationale_digest"; test -n "$$rationale_bytes"; \
+	  "$(FACTORYCTL)" application activate xsh "$$app_revision" \
+	   --socket "$$socket" --format json \
+	   --client-command-id factory-start-activate-xsh-$$expected_build \
+	   --expected-revision "$$app_expected_revision" \
+	   --rationale-artifact-id "$$rationale_id" \
+	   --rationale-digest "$$rationale_digest" \
+	   --rationale-byte-length "$$rationale_bytes" \
+	   --principal "$(FACTORY_START_PRINCIPAL)" >/dev/null; \
+	 fi; \
+	 printf 'factory-start: ready on %s with qualified build %s and active XSH application\n' "$$socket" "$$expected_build"
+
+factory-stop:
+	test -n "$$FACTORY_RUNTIME_ROOT"
+	@set -eu; \
+	 socket="$(FACTORY_START_SOCKET)"; \
+	 if test ! -S "$$socket"; then printf 'factory-stop: already stopped (%s)\n' "$$socket"; exit 0; fi; \
+	 test -x "$(FACTORYCTL)"; \
+	 "$(FACTORYCTL)" daemon stop --socket "$$socket" --format json; \
+	 stopped=0; \
+	 for attempt in $$(seq 1 "$(FACTORY_START_WAIT_SECONDS)"); do \
+	  if test ! -e "$$socket"; then stopped=1; break; fi; \
+	  sleep 1; \
+	 done; \
+	 test "$$stopped" = 1 || { printf 'factory-stop: daemon acknowledged shutdown but socket remains: %s\n' "$$socket" >&2; exit 1; }; \
+	 test ! -e "$(FACTORY_START_PID_FILE)" || rm -f -- "$(FACTORY_START_PID_FILE)"; \
+	 printf 'factory-stop: stopped cleanly\n'
 
 factory-reset:
 	test "$(FACTORY_RESET_CONFIRM)" = "WIPE_FACTORY"

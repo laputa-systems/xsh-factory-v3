@@ -60,6 +60,52 @@ commit matches the clean local `../xsh` `HEAD`, proven by
 `make paid-cycle-verify`. A campaign admission or a paid spend is not a
 shipped result.
 
+## Factory lifecycle
+
+The Grand Architect operates the local Factory through the idempotent lifecycle
+targets, not by launching `factoryd`, Pi, or actors directly. With a dedicated
+already-created PostgreSQL database and a runtime root outside source control,
+run:
+
+```sh
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
+make factory-start
+```
+
+`make factory-start` re-fetches locked dependencies, performs a release build,
+initializes the selected database/runtime when no daemon is serving, launches
+the release daemon through `factoryctl daemon start` in its own tracked process
+group, waits for `factoryctl daemon status`, and idempotently ensures the XSH
+application is admitted and active. A live daemon with a different qualified
+build fails closed; stop it and select a fresh database/runtime pair rather than
+silently mixing installed inputs. Startup does not authorize provider spend.
+
+The daemon has no OpenRouter key supplied by the Make target or its process
+environment. Its startup and assignment preflight resolve
+`OPENROUTER_API_KEY` through Vault. Do not wrap lifecycle commands in a shell
+that exports the key or pass the key as an argument.
+
+When work is complete, stop through the typed operator socket:
+
+```sh
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
+make factory-stop
+```
+
+`make factory-stop` is idempotent when the socket is absent. Otherwise it sends
+`factoryctl daemon stop`, waits for the daemon to acknowledge shutdown and
+remove only its owned socket, and removes the tracked launcher record. The
+kernel cancels and reconciles active sessions before releasing the PostgreSQL
+lock; the database, CAS, transcripts, tickets, and campaign history remain
+intact. Never replace this with a broad PID scan or a process-group kill.
+
+After startup, inspect the live daemon and active application revision, then use
+the explicit `make paid-cycle` admission contract below. After the campaign
+reaches its terminal decision, run `make paid-cycle-verify` before reporting a
+shipped result.
+
 ## Non-negotiable boundaries
 
 The Grand Architect does not directly edit `../xsh`, launch Pi or actors,

@@ -50,6 +50,8 @@ pub const OP_ARCHITECT_DECIDE_CANDIDATE: &str = "architect.decide_candidate";
 /// Transport-owned daemon liveness probe. It has no actor identity or durable
 /// side effect, but remains a closed typed operator frame for SDK parity.
 pub const OP_FACTORYD_STATUS: &str = "factoryd.status";
+/// Authenticated local-operator request for an orderly daemon shutdown.
+pub const OP_FACTORYD_SHUTDOWN: &str = "factoryd.shutdown";
 /// Authenticated local-operator campaign admission. The daemon, rather than
 /// the wire client, resolves the installed build and repository pin.
 pub const OP_OPERATOR_START_CAMPAIGN: &str = "operator.campaign.start";
@@ -255,6 +257,7 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_ARCHITECT_RELEASE_TICKET_ATTEMPT
             | OP_ARCHITECT_DECIDE_CANDIDATE
             | OP_FACTORYD_STATUS
+            | OP_FACTORYD_SHUTDOWN
             | OP_OPERATOR_START_CAMPAIGN
             | OP_OPERATOR_CAMPAIGN_STATUS
             | OP_OPERATOR_CANCEL_CAMPAIGN
@@ -817,6 +820,7 @@ pub struct OperatorStartCampaignRequest {
 }
 read_request!(OperatorCampaignStatusRequest { campaign_id: i64 });
 read_request!(OperatorStatusRequest {});
+read_request!(OperatorShutdownRequest {});
 mutating_request!(OperatorCancelCampaignRequest {
     campaign_id: i64,
     principal: String,
@@ -1161,6 +1165,17 @@ pub struct ArtifactReceiptResponse {
     pub digest: String,
     pub byte_length: u64,
     pub aggregate_revision: u64,
+}
+
+/// Receipt for an orderly daemon shutdown request. The response is sent
+/// before the listener exits so the operator can distinguish acceptance from
+/// an unresponsive or already-dead daemon.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorShutdownResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub state: String,
 }
 
 /// Immutable receipt for the operator-only evidence adoption bridge. Unlike

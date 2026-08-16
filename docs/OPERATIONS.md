@@ -33,6 +33,28 @@ The database must be already created and dedicated to this factory. Choose a
 runtime root outside source control, initialize it, then serve with explicit
 paths:
 
+For the ordinary Grand Architect path, use the idempotent lifecycle wrapper;
+it performs locked dependency fetch, release qualification, initialization
+when needed, daemon launch under a tracked process group, readiness polling,
+and XSH application activation:
+
+```sh
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
+make factory-start
+```
+
+Stop the same runtime through the typed operator socket and preserve all durable
+factory state:
+
+```sh
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
+make factory-stop
+```
+
+The lower-level commands remain useful for diagnostics and deployment work:
+
 ```sh
 factoryctl init \
   --database-url 'postgresql://USER@localhost/factory_v3' \
