@@ -112,13 +112,29 @@ pub async fn execute_product_proposal(
     };
     let mut profile = sealed_profile;
     profile.expected_exit_status = proposal.reproducer.expected_observation.exit_status;
+    let expected_stdout = registered_reference_bytes(
+        process,
+        cas,
+        input.principal,
+        &proposal.reproducer.expected_observation.stdout,
+    )
+    .await?;
+    let expected_stderr = registered_reference_bytes(
+        process,
+        cas,
+        input.principal,
+        &proposal.reproducer.expected_observation.stderr,
+    )
+    .await?;
+    let (expected_stdout, expected_stderr) =
+        product_expected_streams(expected_stdout, expected_stderr)?;
     let command = DeterministicCommand::new(
         profile,
         command_stdin,
         CommandExpectation::new(
             ComparisonRevision::parse(PRODUCT_PROPOSAL_COMPARISON_REVISION)?,
-            None,
-            None,
+            Some(expected_stdout),
+            Some(expected_stderr),
         ),
     )?;
     let workspace = CommandWorkspace::open(input.workspace_root)?;
@@ -254,6 +270,13 @@ fn discover_clean_snapshot(
         }
     }
     Ok((commit, tree))
+}
+
+fn product_expected_streams(
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+) -> Result<(ExactBytes, ExactBytes), CommandSupervisionError> {
+    Ok((ExactBytes::inline(stdout)?, ExactBytes::inline(stderr)?))
 }
 
 /// Chooses the immutable replay identity that the ticket store persists for a
@@ -529,7 +552,10 @@ async fn execute_duplicate_query(
 mod tests {
     use factory_protocol::ArtifactId;
 
-    use super::{persisted_discovery_observations, product_observation_manifest_bytes};
+    use super::{
+        persisted_discovery_observations, product_expected_streams,
+        product_observation_manifest_bytes,
+    };
 
     #[test]
     fn status_only_discovery_uses_the_first_observation_as_the_ticket_replay_identity() {
@@ -551,5 +577,14 @@ mod tests {
             .expect("static JSON is UTF-8"),
             "{\"comparison_revision\":\"status-only-v1\",\"terminal\":\"exited\",\"exit_status\":101,\"signal\":null}"
         );
+    }
+
+    #[test]
+    fn product_expected_streams_preserve_output_contracts() {
+        let (stdout, stderr) = product_expected_streams(b"5\n".to_vec(), Vec::new())
+            .expect("expected streams should be bounded exact bytes");
+
+        assert_eq!(stdout.bytes(), b"5\n");
+        assert!(stderr.bytes().is_empty());
     }
 }
