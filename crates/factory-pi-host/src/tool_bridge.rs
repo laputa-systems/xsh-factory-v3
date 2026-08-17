@@ -643,6 +643,12 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
+            if state.implementation_mutation_started {
+                Self::mark_engineering_protocol_violation(&mut state);
+                return Err(
+                    "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit",
+                );
+            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -656,6 +662,12 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
+            if state.implementation_mutation_started {
+                Self::mark_engineering_protocol_violation(&mut state);
+                return Err(
+                    "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit",
+                );
+            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -2327,6 +2339,12 @@ mod tests {
         assert!(context
             .require_engineering_checkpoint_before(ToolName::Shell)
             .is_ok());
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
+            Err(
+                "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit"
+            )
+        );
     }
 
     #[test]

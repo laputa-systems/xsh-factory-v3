@@ -41,8 +41,10 @@
    the larger bounded post-checkpoint budget; pre-mutation shell discovery closes.
    Adjacent exact reads (for example, `crates/xsh-registry/src/runtime_op.rs` or
    `src/runtime/eval/lowered_ops.rs`) and the smallest mutation remain available,
-   and focused shell validation unlocks only after that mutation. Repeated
-   discovery still fails closed at the finite budget.
+   and focused shell validation unlocks only after that mutation. Once a mutation
+   starts, search/list discovery closes so the actor must validate, repair the
+   focused edit, or submit; repeated discovery still fails closed at the finite
+   budget.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery
