@@ -1,5 +1,9 @@
 Complete XSH Product assignment ${ASSIGNMENT_ID}.
 
+Use tool calls as the only response format. Start by invoking `workspace_read` for each required
+contract path; do not spend a turn narrating or analyzing in plain text. End through
+`product_submit_ticket` or `work_complete` only.
+
 The sealed target and evidence map are authoritative:
 
 ${TARGET}
