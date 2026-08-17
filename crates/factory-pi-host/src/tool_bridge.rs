@@ -471,6 +471,7 @@ impl CommandContext {
         }
         if tool == ToolName::Shell {
             if state.post_checkpoint_owner_searches != 0 && !state.runtime_owner_read {
+                state.stalled = true;
                 return Err(
                     "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit",
                 );
@@ -569,6 +570,7 @@ impl CommandContext {
             && tool == ToolName::WorkspaceSearch
         {
             if state.owner_searches != 0 {
+                state.stalled = true;
                 return Err(
                     "Engineering has completed its one owner search; call candidate_checkpoint_regression next",
                 );
@@ -587,6 +589,7 @@ impl CommandContext {
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
             if state.post_checkpoint_owner_lists != 0 {
+                state.stalled = true;
                 return Err(
                     "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit",
                 );
@@ -596,6 +599,7 @@ impl CommandContext {
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
             if state.post_checkpoint_owner_searches != 0 {
+                state.stalled = true;
                 return Err(
                     "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit",
                 );
@@ -613,6 +617,7 @@ impl CommandContext {
                     | ToolName::ForumReadThread
             )
         {
+            state.stalled = true;
             return Err(
                 "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners: crates/xsh-registry/src/signature/methods.rs; runtime lowering: src/runtime/eval/lowered_ops.rs)",
             );
@@ -2061,7 +2066,7 @@ mod tests {
             )
         );
 
-        assert!(!context.engineering_should_stop_after_turn());
+        assert!(context.engineering_should_stop_after_turn());
     }
 
     #[test]
@@ -2108,7 +2113,7 @@ mod tests {
                 "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit"
             )
         );
-        assert!(!context.engineering_should_stop_after_turn());
+        assert!(context.engineering_should_stop_after_turn());
         context
             .record_engineering_submission()
             .expect("submission advances the phase");
@@ -2202,6 +2207,7 @@ mod tests {
                 "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit"
             )
         );
+        assert!(context.engineering_should_stop_after_turn());
         assert!(context
             .record_engineering_tool_call(
                 ToolName::WorkspaceRead,
