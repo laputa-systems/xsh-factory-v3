@@ -33,6 +33,7 @@ pub const FACTORY_CAPABILITY: &str = "factory";
 pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
 const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
+const MAX_ENGINEERING_TURNS: u32 = 32;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
@@ -265,6 +266,7 @@ impl EngineeringPhase {
 struct EngineeringProgressState {
     phase: EngineeringPhase,
     owner_searches: u32,
+    turns_started: u32,
 }
 
 impl Default for EngineeringProgressState {
@@ -272,6 +274,7 @@ impl Default for EngineeringProgressState {
         Self {
             phase: EngineeringPhase::Disabled,
             owner_searches: 0,
+            turns_started: 0,
         }
     }
 }
@@ -342,6 +345,7 @@ impl CommandContext {
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
             owner_searches: 0,
+            turns_started: 0,
         };
     }
 
@@ -426,12 +430,16 @@ impl CommandContext {
     }
 
     pub(crate) fn engineering_should_stop_after_turn(&self) -> bool {
-        let Ok(state) = self.engineering.lock() else {
+        let Ok(mut state) = self.engineering.lock() else {
             return true;
         };
         match state.phase {
             EngineeringPhase::Submitted => true,
-            _ => false,
+            EngineeringPhase::Disabled => false,
+            EngineeringPhase::AwaitingCheckpoint | EngineeringPhase::Implementing => {
+                state.turns_started = state.turns_started.saturating_add(1);
+                state.turns_started >= MAX_ENGINEERING_TURNS
+            }
         }
     }
 
@@ -1973,6 +1981,17 @@ mod tests {
             context.engineering_diagnostics(),
             EngineeringPhase::Submitted
         );
+    }
+
+    #[test]
+    fn engineering_phase_stops_after_bounded_turns() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+
+        for _ in 0..(MAX_ENGINEERING_TURNS - 1) {
+            assert!(!context.engineering_should_stop_after_turn());
+        }
+        assert!(context.engineering_should_stop_after_turn());
     }
 
     #[test]
