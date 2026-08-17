@@ -9,7 +9,7 @@ use crate::Admission;
 use crate::agent_host::{AgentHostError, BareAgentHost};
 use crate::tool_bridge::{
     CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolExecutionDiagnostic,
-    ToolName, bind_policy,
+    ToolName, MAX_ENGINEERING_TURNS, bind_policy,
 };
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
@@ -848,7 +848,7 @@ mod tests {
             host_messages: Vec::new(),
         };
 
-        for _ in 0..128 {
+        for _ in 0..(MAX_ENGINEERING_TURNS - 1) {
             assert!(
                 !smol::block_on(
                     hooks.should_stop_after_turn_async(&context, CancellationToken::new(),)

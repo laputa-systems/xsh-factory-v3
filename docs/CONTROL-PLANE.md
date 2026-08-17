@@ -33,9 +33,11 @@
    waiver: broad rewrites remain forbidden, and a passing candidate is not yet
    delivered.
    The host enforces the Engineering phase order independently of prompt prose:
-   required reads and bounded discovery precede the checkpoint, shell/write/edit
-   operations are unavailable before it, and the run stops at controller-owned
-   checkpoint and submission deadlines with phase diagnostics.
+   required reads and bounded owner discovery may continue around the checkpoint,
+   shell/write/edit operations are unavailable before it, and the run stops at
+   controller-owned discovery, checkpoint, and submission deadlines with phase
+   diagnostics. A narrow no-match search therefore cannot strand the assignment,
+   while repeated discovery still fails closed.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery

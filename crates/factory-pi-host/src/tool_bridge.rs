@@ -33,9 +33,11 @@ pub const FACTORY_CAPABILITY: &str = "factory";
 pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
 const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
-const MAX_ENGINEERING_TURNS: u32 = 64;
+pub(crate) const MAX_ENGINEERING_TURNS: u32 = 64;
 const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
+const MAX_ENGINEERING_OWNER_DISCOVERY_CALLS: u32 = 8;
+const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 8;
 const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
@@ -271,7 +273,7 @@ struct EngineeringProgressState {
     owner_searches: u32,
     post_checkpoint_owner_lists: u32,
     post_checkpoint_owner_searches: u32,
-    implementation_discovery_closed: bool,
+    owner_discovery_calls: u32,
     runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
@@ -290,7 +292,7 @@ impl Default for EngineeringProgressState {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
-            implementation_discovery_closed: false,
+            owner_discovery_calls: 0,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -372,7 +374,7 @@ impl CommandContext {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
-            implementation_discovery_closed: false,
+            owner_discovery_calls: 0,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -450,10 +452,8 @@ impl CommandContext {
             return Err("Engineering checkpoint is not the next required phase");
         }
         state.phase = EngineeringPhase::Implementing;
-        // The assignment already required one bounded owner search before this checkpoint.
-        // Once the regression is captured, implementation begins immediately; any further
-        // listing/search is a protocol violation that receives only the bounded recovery turn.
-        state.implementation_discovery_closed = true;
+        // The checkpoint unlocks mutation, but owner resolution remains bounded. A no-match
+        // search before the checkpoint must not strand the actor with an unusable owner path.
         Ok(())
     }
 
@@ -601,15 +601,19 @@ impl CommandContext {
             .lock()
             .map_err(|_| "Engineering phase state is unavailable")?;
         if state.phase == EngineeringPhase::AwaitingCheckpoint
-            && tool == ToolName::WorkspaceSearch
+            && matches!(tool, ToolName::WorkspaceSearch | ToolName::WorkspaceList)
         {
-            if state.owner_searches != 0 {
+            if state.owner_discovery_calls >= MAX_ENGINEERING_OWNER_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
-                    "Engineering has completed its one owner search; call candidate_checkpoint_regression next",
+                    "Engineering exhausted its bounded owner-discovery budget; call candidate_checkpoint_regression now",
                 );
             }
-            state.owner_searches = 1;
+            state.owner_discovery_calls = state.owner_discovery_calls.saturating_add(1);
+            if tool == ToolName::WorkspaceSearch {
+                state.owner_searches = state.owner_searches.saturating_add(1);
+            }
+            return Ok(());
         }
         if state.phase == EngineeringPhase::AwaitingCheckpoint
             && matches!(
@@ -622,23 +626,30 @@ impl CommandContext {
             );
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
-            if state.implementation_discovery_closed || state.post_checkpoint_owner_lists != 0 {
+            let discovery_calls = state
+                .post_checkpoint_owner_lists
+                .saturating_add(state.post_checkpoint_owner_searches);
+            if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
-                    "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit",
+                    "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit",
                 );
             }
-            state.post_checkpoint_owner_lists = 1;
+            state.post_checkpoint_owner_lists = state.post_checkpoint_owner_lists.saturating_add(1);
             return Ok(());
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
-            if state.implementation_discovery_closed || state.post_checkpoint_owner_searches != 0 {
+            let discovery_calls = state
+                .post_checkpoint_owner_lists
+                .saturating_add(state.post_checkpoint_owner_searches);
+            if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
-                    "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit",
+                    "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit",
                 );
             }
-            state.post_checkpoint_owner_searches = 1;
+            state.post_checkpoint_owner_searches =
+                state.post_checkpoint_owner_searches.saturating_add(1);
             return Ok(());
         }
         if state.phase == EngineeringPhase::Implementing
@@ -2081,10 +2092,22 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
                 .is_ok()
         );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
+        );
+        for _ in 0..(MAX_ENGINEERING_OWNER_DISCOVERY_CALLS - 2) {
+            assert!(
+                context
+                    .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                    .is_ok()
+            );
+        }
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering has completed its one owner search; call candidate_checkpoint_regression next"
+                "Engineering exhausted its bounded owner-discovery budget; call candidate_checkpoint_regression now"
             )
         );
         assert_eq!(
@@ -2125,17 +2148,24 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
                 .is_ok()
         );
+        for _ in 0..MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
+            assert!(
+                context
+                    .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                    .is_ok()
+            );
+        }
         assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit"
+                "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit"
+                "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit"
             )
         );
         assert!(context.engineering_should_stop_after_turn());
@@ -2260,9 +2290,13 @@ mod tests {
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
 
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-            .is_err());
+        for _ in 0..MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
+            assert!(
+                context
+                    .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                    .is_ok()
+            );
+        }
         assert!(context
             .require_engineering_checkpoint_before(ToolName::WorkspaceList)
             .is_err());
@@ -2321,6 +2355,7 @@ mod tests {
 
         assert!(!context.product_should_stop_after_turn());
         context.record_product_tool_call("shell:{\"command\":\"printf progress\"}");
+        assert!(!context.product_should_stop_after_turn());
         assert!(!context.product_should_stop_after_turn());
         assert!(!context.product_should_stop_after_turn());
         assert!(context.product_should_stop_after_turn());
