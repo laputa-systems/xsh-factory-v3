@@ -39,6 +39,7 @@ const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
 const MAX_ENGINEERING_OWNER_DISCOVERY_CALLS: u32 = 8;
 const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 32;
 const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
+const MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS: u32 = 4;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
@@ -273,6 +274,7 @@ struct EngineeringProgressState {
     owner_searches: u32,
     post_checkpoint_owner_lists: u32,
     post_checkpoint_owner_searches: u32,
+    post_mutation_discovery_calls: u32,
     owner_discovery_calls: u32,
     implementation_discovery_closed: bool,
     implementation_mutation_started: bool,
@@ -294,6 +296,7 @@ impl Default for EngineeringProgressState {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            post_mutation_discovery_calls: 0,
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
@@ -378,6 +381,7 @@ impl CommandContext {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            post_mutation_discovery_calls: 0,
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
@@ -644,10 +648,17 @@ impl CommandContext {
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
             if state.implementation_mutation_started {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit",
-                );
+                if state.post_mutation_discovery_calls
+                    >= MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS
+                {
+                    Self::mark_engineering_protocol_violation(&mut state);
+                    return Err(
+                        "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit",
+                    );
+                }
+                state.post_mutation_discovery_calls =
+                    state.post_mutation_discovery_calls.saturating_add(1);
+                return Ok(());
             }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
@@ -663,10 +674,17 @@ impl CommandContext {
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
             if state.implementation_mutation_started {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit",
-                );
+                if state.post_mutation_discovery_calls
+                    >= MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS
+                {
+                    Self::mark_engineering_protocol_violation(&mut state);
+                    return Err(
+                        "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit",
+                    );
+                }
+                state.post_mutation_discovery_calls =
+                    state.post_mutation_discovery_calls.saturating_add(1);
+                return Ok(());
             }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
@@ -2339,10 +2357,15 @@ mod tests {
         assert!(context
             .require_engineering_checkpoint_before(ToolName::Shell)
             .is_ok());
+        for _ in 0..MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS {
+            assert!(context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok());
+        }
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering has started a mutation; stop searching/listing, run the focused check, repair the exact edit if needed, then submit"
+                "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit"
             )
         );
     }

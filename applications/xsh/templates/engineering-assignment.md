@@ -20,6 +20,10 @@ Use that owner rather than any stale example from an earlier assignment. After t
 keep the patch within the named owner and do not redesign evaluator frames, call scheduling, or
 unrelated runtime paths.
 
+If an edit anchor is rejected because its old text is not present, use no more than four focused
+`workspace_search` or `workspace_list` recovery calls, then correct the smallest edit and resume
+the focused check. Do not return to broad discovery after mutation.
+
 For an Int standard-API method, read these exact adjacent owners before checkpointing rather than
 running repeated searches: `crates/xsh-registry/src/signature/methods.rs`,
 `crates/xsh-registry/src/runtime_op.rs`, and `src/runtime/eval/lowered_ops.rs`.

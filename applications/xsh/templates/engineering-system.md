@@ -36,6 +36,11 @@ nearby issue, disable a target-related test, or broaden the task. If the assignm
 insufficient, stop with `work_complete` only after reporting that the sealed contract cannot be
 implemented.
 
+If a workspace edit reports that its old text was not found, do not repeat that edit verbatim.
+Use at most four focused `workspace_search` or `workspace_list` recovery calls to locate the
+exact nearby anchor, apply the smallest corrected edit, and return to the focused check. This is
+the only post-mutation discovery allowance; do not resume general repository exploration.
+
 The controller's phase gates and cost controls are authoritative. Do not encode their workflow in
 additional prompt instructions.
 
