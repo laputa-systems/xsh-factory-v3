@@ -274,6 +274,7 @@ struct EngineeringProgressState {
     post_checkpoint_owner_lists: u32,
     post_checkpoint_owner_searches: u32,
     owner_discovery_calls: u32,
+    implementation_discovery_closed: bool,
     runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
@@ -293,6 +294,7 @@ impl Default for EngineeringProgressState {
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
             owner_discovery_calls: 0,
+            implementation_discovery_closed: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -375,6 +377,7 @@ impl CommandContext {
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
             owner_discovery_calls: 0,
+            implementation_discovery_closed: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -485,6 +488,9 @@ impl CommandContext {
             && signature.contains("src/runtime/eval/lowered_ops.rs")
         {
             state.runtime_owner_read = true;
+        }
+        if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceRead {
+            state.implementation_discovery_closed = true;
         }
         if tool == ToolName::Shell {
             state.shell_calls = state.shell_calls.saturating_add(1);
@@ -629,6 +635,12 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
+            if state.implementation_discovery_closed {
+                Self::mark_engineering_protocol_violation(&mut state);
+                return Err(
+                    "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit",
+                );
+            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -642,6 +654,12 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
+            if state.implementation_discovery_closed {
+                Self::mark_engineering_protocol_violation(&mut state);
+                return Err(
+                    "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit",
+                );
+            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -2148,24 +2166,34 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
                 .is_ok()
         );
-        for _ in 0..MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
-            assert!(
-                context
-                    .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-                    .is_ok()
-            );
-        }
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+            )
+            .expect("owner read is admitted");
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
+                .is_ok()
+        );
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/docs.rs\"}",
+            )
+            .expect("adjacent owner read is admitted");
         assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
             Err(
-                "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit"
+                "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit"
+                "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit"
             )
         );
         assert!(context.engineering_should_stop_after_turn());

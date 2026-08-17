@@ -36,8 +36,9 @@
    required reads and bounded owner discovery may continue around the checkpoint,
    shell/write/edit operations are unavailable before it, and the run stops at
    controller-owned discovery, checkpoint, and submission deadlines with phase
-   diagnostics. A narrow no-match search therefore cannot strand the assignment,
-   while repeated discovery still fails closed.
+   diagnostics. A narrow no-match search therefore cannot strand the assignment;
+   once an owner file is read, search/list discovery closes while adjacent reads
+   and mutation remain available, and repeated discovery still fails closed.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery
