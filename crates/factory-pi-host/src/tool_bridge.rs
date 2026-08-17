@@ -270,6 +270,7 @@ struct EngineeringProgressState {
     owner_searches: u32,
     post_checkpoint_owner_lists: u32,
     post_checkpoint_owner_searches: u32,
+    runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
@@ -284,6 +285,7 @@ impl Default for EngineeringProgressState {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -361,6 +363,7 @@ impl CommandContext {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -461,7 +464,17 @@ impl CommandContext {
         if matches!(state.phase, EngineeringPhase::Disabled | EngineeringPhase::Submitted) {
             return Ok(());
         }
+        if tool == ToolName::WorkspaceRead
+            && signature.contains("src/runtime/eval/lowered_ops.rs")
+        {
+            state.runtime_owner_read = true;
+        }
         if tool == ToolName::Shell {
+            if state.post_checkpoint_owner_searches != 0 && !state.runtime_owner_read {
+                return Err(
+                    "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit",
+                );
+            }
             state.shell_calls = state.shell_calls.saturating_add(1);
             if state.shell_calls > MAX_ENGINEERING_SHELL_CALLS {
                 state.stalled = true;
@@ -2171,6 +2184,33 @@ mod tests {
             )
         );
         assert!(context.engineering_should_stop_after_turn());
+    }
+
+    #[test]
+    fn engineering_phase_reads_runtime_owner_before_shell_after_search() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+        context
+            .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+            .expect("one bounded owner search is allowed");
+        assert_eq!(
+            context.record_engineering_tool_call(ToolName::Shell, "shell:search"),
+            Err(
+                "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit"
+            )
+        );
+        assert!(context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}"
+            )
+            .is_ok());
+        assert!(context
+            .record_engineering_tool_call(ToolName::Shell, "shell:focused-check")
+            .is_ok());
     }
 
     #[test]
