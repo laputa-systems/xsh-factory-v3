@@ -97,7 +97,26 @@ status:
 	  printf 'make status: stale daemon build; live=%s expected=%s; restart with make factory-start\n' "$$live_build" "$$expected_build" >&2; \
 	  exit 1; \
 	 fi; \
-	 "$(FACTORYCTL)" status --socket "$$socket"
+	 status_output="$$($(FACTORYCTL) status --socket "$$socket")"; \
+	 printf '%s\n' "$$status_output"; \
+	 transcript_line="$$(printf '%s\n' "$$status_output" | sed -n '/^  transcripts: cycle /p')"; \
+	 transcript_directory=""; \
+	 case "$$transcript_line" in \
+	  *' -> '*) transcript_directory="$${transcript_line#* -> }"; transcript_directory="$${transcript_directory% (*}";; \
+	 esac; \
+	 unzipped=0; \
+	 if test -n "$$transcript_directory"; then \
+	  for archive in "$$transcript_directory"/*.ndjson.gz; do \
+	   test -f "$$archive" || continue; \
+	   plain="$${archive%.gz}"; \
+	   test ! -L "$$plain" || { printf 'make status: transcript output is a symbolic link: %s\n' "$$plain" >&2; exit 1; }; \
+	   gzip -dkf "$$archive"; \
+	   unzipped=$$((unzipped + 1)); \
+	  done; \
+	 fi; \
+	 if test "$$unzipped" -gt 0; then \
+	  printf '  transcripts: unzipped %s archive(s) beside the compressed evidence\n' "$$unzipped"; \
+	 fi
 
 # Requalify the complete release source graph before paid admission. The
 # identity check deliberately compares the freshly built local graph with the

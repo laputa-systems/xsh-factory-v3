@@ -137,9 +137,11 @@ campaign (completed, failed, or cancelled), reads its session artifact IDs from
 PostgreSQL, verifies the corresponding CAS bytes, and writes available
 transcripts under the OS temporary directory at
 `cycle-<campaign-id>-status/`. Complete archives are named
-`session-<id>-transcript.ndjson.gz`; interrupted-session evidence is retained as
-`session-<id>-partial.ndjson`. The status output reports the directory and any
-terminal sessions for which no transcript artifact exists.
+`session-<id>-transcript.ndjson.gz`; `make status` preserves each archive and
+gunzips a readable `session-<id>-transcript.ndjson` copy beside it. Interrupted-
+session evidence is retained as `session-<id>-partial.ndjson`. The status output
+reports the directory, the number of archives made readable, and any terminal
+sessions for which no transcript artifact exists.
 
 ## One-commit paid cycle
 

@@ -52,6 +52,9 @@ reads only the PostgreSQL artifact references and verified CAS bytes; the
 operator client receives file metadata and a path, not raw transcript bytes on
 the socket. Failed and cancelled campaigns are eligible, and sessions without
 an available transcript remain explicitly reported.
+`make status` preserves each complete `.ndjson.gz` archive and gunzips a readable
+`.ndjson` copy beside it in that temporary directory; the compressed artifact
+remains the durable-evidence projection.
 
 ## Factory-Cost on delivered commits
 
