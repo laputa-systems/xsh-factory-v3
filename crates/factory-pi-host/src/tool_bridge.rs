@@ -36,6 +36,7 @@ const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
 const MAX_ENGINEERING_TURNS: u32 = 64;
 const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
+const MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ: u32 = 4;
 const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
@@ -487,17 +488,19 @@ impl CommandContext {
             state.runtime_owner_read = true;
         }
         if tool == ToolName::Shell {
-            if !state.runtime_owner_read {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit",
-                );
-            }
             state.shell_calls = state.shell_calls.saturating_add(1);
             if state.shell_calls > MAX_ENGINEERING_SHELL_CALLS {
                 state.stalled = true;
                 return Err(
                     "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit",
+                );
+            }
+            if !state.runtime_owner_read
+                && state.shell_calls > MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ
+            {
+                state.stalled = true;
+                return Err(
+                    "Engineering exceeded bounded shell discovery before reading src/runtime/eval/lowered_ops.rs; use workspace_read on that owner, then make the smallest edit and submit",
                 );
             }
         }
@@ -2244,22 +2247,18 @@ mod tests {
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
+        for index in 0..MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ {
+            assert!(context
+                .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
+                .is_ok());
+        }
         assert_eq!(
-            context.record_engineering_tool_call(ToolName::Shell, "shell:search"),
+            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow-before-owner"),
             Err(
-                "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit"
+                "Engineering exceeded bounded shell discovery before reading src/runtime/eval/lowered_ops.rs; use workspace_read on that owner, then make the smallest edit and submit"
             )
         );
-        assert!(!context.engineering_should_stop_after_turn());
-        assert!(context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}"
-            )
-            .is_ok());
-        assert!(context
-            .record_engineering_tool_call(ToolName::Shell, "shell:focused-check")
-            .is_ok());
+        assert!(context.engineering_should_stop_after_turn());
     }
 
     #[test]
@@ -2267,21 +2266,18 @@ mod tests {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-            .expect("one bounded owner search is allowed");
-        context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
 
         assert!(context
-            .record_engineering_tool_call(ToolName::Shell, "shell:first")
+            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
             .is_err());
         assert!(context
-            .record_engineering_tool_call(ToolName::Shell, "shell:second-in-turn")
+            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
             .is_err());
         assert!(!context.engineering_should_stop_after_turn());
         assert!(context
-            .record_engineering_tool_call(ToolName::Shell, "shell:second-turn")
+            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
             .is_err());
         assert!(context.engineering_should_stop_after_turn());
     }
