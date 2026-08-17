@@ -601,7 +601,7 @@ impl CommandContext {
             )
         {
             return Err(
-                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners are under crates/xsh-registry/src/signature and src/runtime/eval)",
+                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners: crates/xsh-registry/src/signature/methods.rs; runtime lowering: src/runtime/eval/lowered_ops.rs)",
             );
         }
         Ok(())
