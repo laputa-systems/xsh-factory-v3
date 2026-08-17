@@ -25,7 +25,7 @@ use factory_protocol::{
 };
 use miniserde::json;
 use sqlx::{PgPool, Row};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::{Path, PathBuf}, sync::Arc};
 use thiserror::Error;
 
 use crate::cas::CasStore;
@@ -344,14 +344,15 @@ impl OperatorNavigationRpc {
                 // transcript columns for the session-level evidence invariant.
                 // Do not mislabel that JSON marker as a gzip archive in the
                 // operator projection; export it only as the partial record.
-                if should_export_complete_transcript(
+                let export_complete = should_export_complete_transcript(
                     transcript_artifact_id,
                     partial_transcript_artifact_id,
                     row.try_get::<Option<Vec<u8>>, _>("transcript_digest")
                         .map_err(navigation_database)?,
                     row.try_get::<Option<Vec<u8>>, _>("partial_digest")
                         .map_err(navigation_database)?,
-                ) {
+                );
+                if export_complete {
                     let bytes = read_export_artifact(
                         cas,
                         &row,
@@ -367,6 +368,15 @@ impl OperatorNavigationRpc {
                         byte_length: bytes.len() as u64,
                     });
                     exported = true;
+                } else {
+                    remove_export_file(
+                        &directory,
+                        &format!("session-{session_id}-transcript.ndjson.gz"),
+                    )?;
+                    remove_export_file(
+                        &directory,
+                        &format!("session-{session_id}-transcript.ndjson"),
+                    )?;
                 }
                 if partial_transcript_artifact_id.is_some() {
                     let bytes = read_export_artifact(
@@ -1766,6 +1776,29 @@ fn write_export_file(
     fs::write(&path, bytes).map_err(|error| {
         NavigationRejection::Navigation(NavigationError::Export {
             message: format!("write transcript export file {file_name}: {error}"),
+        })
+    })
+}
+
+fn remove_export_file(directory: &Path, file_name: &str) -> Result<(), NavigationRejection> {
+    let path = directory.join(file_name);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(NavigationRejection::Navigation(NavigationError::Export {
+                message: format!("inspect transcript export target {file_name}: {error}"),
+            }));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(NavigationRejection::Navigation(NavigationError::Export {
+            message: format!("transcript export target {file_name} is unsafe"),
+        }));
+    }
+    fs::remove_file(&path).map_err(|error| {
+        NavigationRejection::Navigation(NavigationError::Export {
+            message: format!("remove stale transcript export file {file_name}: {error}"),
         })
     })
 }
