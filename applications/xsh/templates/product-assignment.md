@@ -14,6 +14,11 @@ proposal with a concrete reproducer. Run it twice before reading unrelated histo
 another owner. When the two observations contradict the contract, create the evidence and submit
 immediately; do not keep investigating alternatives or narrating after the candidate is proven.
 
+Concise prose analysis is allowed, but keep it action-linked: after each read or tool result, make
+the next relevant tool call or terminal call. Do not repeat intended actions in prose, simulate
+tool output, or spend a turn narrating an unbounded investigation. If no defensible defect remains,
+call `work_complete` honestly.
+
 Use the controller's exact sealed receipts; do not guess artifact IDs, digests, observations, or
 command shapes. Create those files in one shell call from the current assigned workspace with
 relative paths; do not `cd` to `/tmp`, and do not call `workspace_list` with an empty path. When an

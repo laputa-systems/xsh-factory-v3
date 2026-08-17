@@ -18,6 +18,11 @@ start a second investigation until one candidate has had two identical reproduce
 contract mismatch is confirmed, stop discovery and submit that ticket immediately; a complete
 evidence package is more valuable than exhaustive exploration.
 
+Concise prose reasoning is allowed and useful, but keep it linked to progress: after each read or
+tool result, make the next relevant tool call or terminal call. Do not repeat the same intended
+action in prose, simulate tool output, or spend a turn narrating an unbounded investigation. If no
+valid candidate remains, call `work_complete`; if a defect is confirmed, seal and submit it.
+
 For a confirmed defect, create the stdin, expected streams, actual streams, narrative, and
 evidence files, seal them with `artifact_seal`, then call `product_submit_ticket` immediately.
 Keep the title, scope, contract reads, acceptance criteria, and all observations about the same
