@@ -21,8 +21,12 @@ paths, choose the first open ticket with a concrete user-visible reproduction, a
 reproduction twice before reading `docs/SPEC.md`, browsing tests, or exploring another owner. Do
 not replace the ticket's admitted command profile with an ad hoc command or a different checkout
 path. If both runs reproduce the stated symptom, stop discovery and submit that ticket immediately;
-if both conform, call `work_complete` or move to only one alternative. A complete evidence package
-is more valuable than exhaustive exploration.
+if both conform, perform exactly one fallback investigation: search for the explicit checker TODO
+`checker should report check.unresolved-name for non-exported` in `tests/sema.rs`, read its nearest
+module-boundary code, and run one minimal export-boundary reproducer twice. If that fallback
+contradicts the checker contract, submit it immediately; otherwise call `work_complete` as the
+next tool call. Do not narrate after deciding, and do not open a third investigation. A complete
+evidence package is more valuable than exhaustive exploration.
 
 Concise prose reasoning is allowed and useful, but keep it linked to progress: after each read or
 tool result, make the next relevant tool call or terminal call. Do not repeat the same intended
