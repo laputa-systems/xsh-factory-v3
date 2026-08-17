@@ -272,6 +272,7 @@ struct EngineeringProgressState {
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
     shell_calls: u32,
+    stalled: bool,
 }
 
 impl Default for EngineeringProgressState {
@@ -283,6 +284,7 @@ impl Default for EngineeringProgressState {
             last_tool_call: None,
             identical_tool_calls: 0,
             shell_calls: 0,
+            stalled: false,
         }
     }
 }
@@ -357,6 +359,7 @@ impl CommandContext {
             last_tool_call: None,
             identical_tool_calls: 0,
             shell_calls: 0,
+            stalled: false,
         };
     }
 
@@ -455,6 +458,7 @@ impl CommandContext {
         if tool == ToolName::Shell {
             state.shell_calls = state.shell_calls.saturating_add(1);
             if state.shell_calls > MAX_ENGINEERING_SHELL_CALLS {
+                state.stalled = true;
                 return Err(
                     "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit",
                 );
@@ -467,6 +471,7 @@ impl CommandContext {
             state.identical_tool_calls = 1;
         }
         if state.identical_tool_calls >= MAX_ENGINEERING_IDENTICAL_TOOL_CALLS {
+            state.stalled = true;
             return Err(
                 "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit",
             );
@@ -478,6 +483,9 @@ impl CommandContext {
         let Ok(mut state) = self.engineering.lock() else {
             return true;
         };
+        if state.stalled {
+            return true;
+        }
         match state.phase {
             EngineeringPhase::Submitted => true,
             EngineeringPhase::Disabled => false,
@@ -2096,6 +2104,7 @@ mod tests {
                 "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit"
             )
         );
+        assert!(context.engineering_should_stop_after_turn());
         assert!(context
             .record_engineering_tool_call(
                 ToolName::WorkspaceEdit,
@@ -2123,6 +2132,7 @@ mod tests {
                 "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit"
             )
         );
+        assert!(context.engineering_should_stop_after_turn());
     }
 
     #[test]
