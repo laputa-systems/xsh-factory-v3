@@ -279,6 +279,7 @@ struct EngineeringProgressState {
     shell_calls: u32,
     protocol_violations: u8,
     recovery_turns_remaining: u8,
+    protocol_violation_recorded_this_turn: bool,
     stalled: bool,
 }
 
@@ -297,6 +298,7 @@ impl Default for EngineeringProgressState {
             shell_calls: 0,
             protocol_violations: 0,
             recovery_turns_remaining: 0,
+            protocol_violation_recorded_this_turn: false,
             stalled: false,
         }
     }
@@ -378,6 +380,7 @@ impl CommandContext {
             shell_calls: 0,
             protocol_violations: 0,
             recovery_turns_remaining: 0,
+            protocol_violation_recorded_this_turn: false,
             stalled: false,
         };
     }
@@ -518,6 +521,10 @@ impl CommandContext {
     fn mark_engineering_protocol_violation(
         state: &mut EngineeringProgressState,
     ) {
+        if state.protocol_violation_recorded_this_turn {
+            return;
+        }
+        state.protocol_violation_recorded_this_turn = true;
         state.protocol_violations = state.protocol_violations.saturating_add(1);
         if state.protocol_violations > MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS {
             state.stalled = true;
@@ -535,8 +542,10 @@ impl CommandContext {
         }
         if state.recovery_turns_remaining != 0 {
             state.recovery_turns_remaining = state.recovery_turns_remaining.saturating_sub(1);
+            state.protocol_violation_recorded_this_turn = false;
             return false;
         }
+        state.protocol_violation_recorded_this_turn = false;
         match state.phase {
             EngineeringPhase::Submitted => true,
             EngineeringPhase::Disabled => false,
@@ -2267,9 +2276,12 @@ mod tests {
         assert!(context
             .record_engineering_tool_call(ToolName::Shell, "shell:first")
             .is_err());
+        assert!(context
+            .record_engineering_tool_call(ToolName::Shell, "shell:second-in-turn")
+            .is_err());
         assert!(!context.engineering_should_stop_after_turn());
         assert!(context
-            .record_engineering_tool_call(ToolName::Shell, "shell:second")
+            .record_engineering_tool_call(ToolName::Shell, "shell:second-turn")
             .is_err());
         assert!(context.engineering_should_stop_after_turn());
     }
