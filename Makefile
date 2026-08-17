@@ -7,14 +7,14 @@ FACTORYCTL ?= $(CURDIR)/target/release/factoryctl
 FACTORY_PAID_CYCLE_PRINCIPAL ?= grand-architect
 FACTORY_START_PRINCIPAL ?= grand-architect
 FACTORY_START_WAIT_SECONDS ?= 30
-FACTORY_START_SOCKET ?= $(FACTORY_RUNTIME_ROOT)/factoryd.operator.sock
+FACTORY_START_SOCKET ?=
 # Status is read-only and can discover the socket from the daemon command line
 # when the caller has not exported the runtime root.  Keep this override empty
 # by default so an empty FACTORY_RUNTIME_ROOT does not become the bogus path
 # `/factoryd.operator.sock`.
 FACTORY_STATUS_SOCKET ?=
-FACTORY_START_PID_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.pid
-FACTORY_START_LOG_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.log
+FACTORY_START_PID_FILE ?=
+FACTORY_START_LOG_FILE ?=
 
 # The factory keeps Clippy's correctness and default quality groups strict.
 # Pedantic documentation/style heuristics and these boundary-shape
@@ -126,9 +126,12 @@ paid-cycle-preflight:
 # database names are rejected before a daemon can initialize or serve, so a
 # caller cannot silently strand tickets by choosing a new database per cycle.
 factory-database-guard:
-	test -n "$$FACTORY_DATABASE_URL"
 	@set -eu; \
-	 database_url="$$FACTORY_DATABASE_URL"; \
+	 database_url="$(FACTORY_DATABASE_URL)"; \
+	 if test -z "$$database_url"; then \
+	  database_url="$$(ps -axo command= 2>/dev/null | awk '$$0 ~ /factoryd serve/ { for (i = 1; i < NF; i++) if ($$i == "--database-url") { print $$(i + 1); exit } }')"; \
+	 fi; \
+	 test -n "$$database_url" || { printf 'factory: no database URL supplied or advertised by a running factoryd; set FACTORY_DATABASE_URL\n' >&2; exit 1; }; \
 	 database_name="$${database_url##*/}"; \
 	 database_name="$${database_name%%\?*}"; \
 	 test "$$database_name" = factory_live_v3 || { \
@@ -139,7 +142,10 @@ factory-database-guard:
 
 # The daemon has no provider credential in its environment. It invokes Vault
 # for startup preflight and again at each provider-backed assignment launch.
-# Callers must choose the dedicated database and runtime root explicitly.
+# A live daemon advertises the dedicated database and runtime root, so the
+# lifecycle wrapper can reuse those inputs when the caller omits environment
+# variables. A cold start still requires explicit values; guessing a database
+# or runtime root would risk selecting the wrong authority.
 factoryd-serve: factory-database-guard
 	test -n "$$FACTORY_RUNTIME_ROOT"
 	target/release/factoryd serve \
@@ -149,15 +155,24 @@ factoryd-serve: factory-database-guard
 
 factory-start: factory-database-guard
 	test -x "$(FACTORYCTL)"
-	test -n "$$FACTORY_RUNTIME_ROOT"
 	test -d "$(CURDIR)/applications/xsh"
 	test -f "$(CURDIR)/applications/xsh/bundle.v2.json"
 	test -d "$(CURDIR)/../xsh"
 	test -z "$$(git -C "$(CURDIR)/../xsh" status --porcelain)"
 	$(MAKE) release-build
 	@set -eu; \
-	 runtime_root="$$FACTORY_RUNTIME_ROOT"; \
-	 socket="$(FACTORY_START_SOCKET)"; \
+	 database_url="$(FACTORY_DATABASE_URL)"; \
+	 runtime_root="$(FACTORY_RUNTIME_ROOT)"; \
+	 if test -z "$$database_url" || test -z "$$runtime_root"; then \
+	  daemon_command="$$(ps -axo command= 2>/dev/null | awk '$$0 ~ /factoryd serve/ { print; exit }')"; \
+	  if test -z "$$database_url"; then database_url="$$(printf '%s\n' "$$daemon_command" | awk '{ for (i = 1; i < NF; i++) if ($$i == "--database-url") { print $$(i + 1); exit } }')"; fi; \
+	  if test -z "$$runtime_root"; then runtime_root="$$(printf '%s\n' "$$daemon_command" | awk '{ for (i = 1; i < NF; i++) if ($$i == "--runtime-root") { print $$(i + 1); exit } }')"; fi; \
+	 fi; \
+	 test -n "$$database_url" || { printf 'factory-start: no database URL supplied or advertised by a running factoryd; set FACTORY_DATABASE_URL\n' >&2; exit 1; }; \
+	 test -n "$$runtime_root" || { printf 'factory-start: no runtime root supplied or advertised by a running factoryd; set FACTORY_RUNTIME_ROOT\n' >&2; exit 1; }; \
+	 socket="$(FACTORY_START_SOCKET)"; test -n "$$socket" || socket="$$runtime_root/factoryd.operator.sock"; \
+	 pid_file="$(FACTORY_START_PID_FILE)"; test -n "$$pid_file" || pid_file="$$runtime_root/factoryd.pid"; \
+	 log_file="$(FACTORY_START_LOG_FILE)"; test -n "$$log_file" || log_file="$$runtime_root/factoryd.log"; \
 	 expected_json="$$($(FACTORYCTL) build identity \
 	  --installation-root "$(CURDIR)" \
 	  --factoryd "$(CURDIR)/target/release/factoryd" \
@@ -178,22 +193,22 @@ factory-start: factory-database-guard
 	  "$(FACTORYCTL)" init \
 	   --installation-root "$(CURDIR)" \
 	   --factoryd "$(CURDIR)/target/release/factoryd" \
-	   --database-url "$$FACTORY_DATABASE_URL" \
+	   --database-url "$$database_url" \
 	   --runtime-root "$$runtime_root" \
 	   --provider-credential-environment openrouter=OPENROUTER_API_KEY; \
 	  "$(FACTORYCTL)" daemon start \
 	   --factoryd "$(CURDIR)/target/release/factoryd" \
-	   --database-url "$$FACTORY_DATABASE_URL" \
+	   --database-url "$$database_url" \
 	   --runtime-root "$$runtime_root" \
-	   --pid-file "$(FACTORY_START_PID_FILE)" \
-	   --log-file "$(FACTORY_START_LOG_FILE)" \
+	   --pid-file "$$pid_file" \
+	   --log-file "$$log_file" \
 	   --operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"; \
 	  ready=0; \
 	  for attempt in $$(seq 1 "$(FACTORY_START_WAIT_SECONDS)"); do \
 	   if test -S "$$socket" && "$(FACTORYCTL)" daemon status --socket "$$socket" >/dev/null 2>&1; then ready=1; break; fi; \
 	   sleep 1; \
 	  done; \
-	  test "$$ready" = 1 || { printf 'factory-start: daemon did not become ready; inspect %s\n' "$(FACTORY_START_LOG_FILE)" >&2; exit 1; }; \
+	  test "$$ready" = 1 || { printf 'factory-start: daemon did not become ready; inspect %s\n' "$$log_file" >&2; exit 1; }; \
 	 fi; \
 	 status_json="$$($(FACTORYCTL) daemon status --socket "$$socket" --format json)"; \
 	 kernel_revision="$$(printf '%s\n' "$$status_json" | sed -n 's/.*"aggregate_revision":\([0-9][0-9]*\).*/\1/p')"; \
@@ -241,9 +256,14 @@ factory-start: factory-database-guard
 	 printf 'factory-start: ready on %s with qualified build %s and active XSH application\n' "$$socket" "$$expected_build"
 
 factory-stop:
-	test -n "$$FACTORY_RUNTIME_ROOT"
 	@set -eu; \
-	 socket="$(FACTORY_START_SOCKET)"; \
+	 runtime_root="$(FACTORY_RUNTIME_ROOT)"; \
+	 if test -z "$$runtime_root"; then \
+	  runtime_root="$$(ps -axo command= 2>/dev/null | awk '$$0 ~ /factoryd serve/ { for (i = 1; i < NF; i++) if ($$i == "--runtime-root") { print $$(i + 1); exit } }')"; \
+	 fi; \
+	 test -n "$$runtime_root" || { printf 'factory-stop: no runtime root supplied or advertised by a running factoryd; set FACTORY_RUNTIME_ROOT\n' >&2; exit 1; }; \
+	 socket="$(FACTORY_START_SOCKET)"; test -n "$$socket" || socket="$$runtime_root/factoryd.operator.sock"; \
+	 pid_file="$(FACTORY_START_PID_FILE)"; test -n "$$pid_file" || pid_file="$$runtime_root/factoryd.pid"; \
 	 if test ! -S "$$socket"; then printf 'factory-stop: already stopped (%s)\n' "$$socket"; exit 0; fi; \
 	 test -x "$(FACTORYCTL)"; \
 	 "$(FACTORYCTL)" daemon stop --socket "$$socket" --format json; \
@@ -253,7 +273,7 @@ factory-stop:
 	  sleep 1; \
 	 done; \
 	 test "$$stopped" = 1 || { printf 'factory-stop: daemon acknowledged shutdown but socket remains: %s\n' "$$socket" >&2; exit 1; }; \
-	 test ! -e "$(FACTORY_START_PID_FILE)" || rm -f -- "$(FACTORY_START_PID_FILE)"; \
+	 test ! -e "$$pid_file" || rm -f -- "$$pid_file"; \
 	 printf 'factory-stop: stopped cleanly\n'
 
 factory-reset: factory-database-guard
