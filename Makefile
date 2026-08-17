@@ -84,6 +84,19 @@ status:
 	 fi; \
 	 test -n "$$socket" || { printf 'make status: no factoryd operator socket found; set FACTORY_STATUS_SOCKET or FACTORY_RUNTIME_ROOT\n' >&2; exit 1; }; \
 	 test -S "$$socket" || { printf 'make status: operator socket is not live: %s\n' "$$socket" >&2; exit 1; }; \
+	 live_json="$$($(FACTORYCTL) daemon status --socket "$$socket" --format json)"; \
+	 live_build="$$(printf '%s\n' "$$live_json" | sed -n 's/.*"current_kernel_build_id":"\([^\"]*\)".*/\1/p')"; \
+	 test -n "$$live_build" || { printf 'make status: daemon did not report a qualified build identity; perform a controlled daemon restart\n' >&2; exit 1; }; \
+	 expected_json="$$($(FACTORYCTL) build identity \
+	  --installation-root "$(CURDIR)" \
+	  --factoryd "$(CURDIR)/target/release/factoryd" \
+	  --format json)"; \
+	 expected_build="$$(printf '%s\n' "$$expected_json" | sed -n 's/.*"kernel_build_id":"\([^\"]*\)".*/\1/p')"; \
+	 test -n "$$expected_build" || { printf 'make status: could not compute the release build identity; run make release-build first\n' >&2; exit 1; }; \
+	 if test "$$live_build" != "$$expected_build"; then \
+	  printf 'make status: stale daemon build; live=%s expected=%s; restart with make factory-start\n' "$$live_build" "$$expected_build" >&2; \
+	  exit 1; \
+	 fi; \
 	 "$(FACTORYCTL)" status --socket "$$socket"
 
 # Requalify the complete release source graph before paid admission. The
