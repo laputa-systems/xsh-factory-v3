@@ -269,6 +269,7 @@ struct EngineeringProgressState {
     phase: EngineeringPhase,
     owner_searches: u32,
     post_checkpoint_owner_lists: u32,
+    post_checkpoint_owner_searches: u32,
     turns_started: u32,
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
@@ -282,6 +283,7 @@ impl Default for EngineeringProgressState {
             phase: EngineeringPhase::Disabled,
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
+            post_checkpoint_owner_searches: 0,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -358,6 +360,7 @@ impl CommandContext {
             phase: EngineeringPhase::AwaitingCheckpoint,
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
+            post_checkpoint_owner_searches: 0,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -578,11 +581,19 @@ impl CommandContext {
             state.post_checkpoint_owner_lists = 1;
             return Ok(());
         }
+        if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
+            if state.post_checkpoint_owner_searches != 0 {
+                return Err(
+                    "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit",
+                );
+            }
+            state.post_checkpoint_owner_searches = 1;
+            return Ok(());
+        }
         if state.phase == EngineeringPhase::Implementing
             && matches!(
                 tool,
-                ToolName::WorkspaceSearch
-                    | ToolName::ArtifactRead
+                ToolName::ArtifactRead
                     | ToolName::ForumSearch
                     | ToolName::ForumListTopics
                     | ToolName::ForumListThreads
@@ -2073,10 +2084,15 @@ mod tests {
                 "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit"
             )
         );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
+        );
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners are under crates/xsh-registry/src/signature and src/runtime/eval)"
+                "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
