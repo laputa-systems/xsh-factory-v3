@@ -9,7 +9,7 @@ use crate::Admission;
 use crate::agent_host::{AgentHostError, BareAgentHost};
 use crate::tool_bridge::{
     CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolExecutionDiagnostic,
-    ToolName, MAX_ENGINEERING_TURNS, bind_policy,
+    ToolName, bind_policy,
 };
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
@@ -701,6 +701,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool_bridge::MAX_ENGINEERING_TURNS;
     use pi_agent_core::hooks::ContextEnvelope;
     use pi_agent_core::scheduler::CancellationToken;
     use pi_agent_core::state::{Message, MessageId};
