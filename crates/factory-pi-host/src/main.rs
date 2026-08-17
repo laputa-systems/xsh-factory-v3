@@ -22,7 +22,16 @@ use factory_settings::{
     MAX_PROVIDER_REQUEST_TIMEOUT, MAX_PROVIDER_RETRIES, MAX_PROVIDER_STALL_TIMEOUT,
     PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
 };
-use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
+use flate2::{Compression, write::GzEncoder};
+use std::{
+    env,
+    fs,
+    io::Write,
+    path::Path,
+    process::ExitCode,
+    sync::Arc,
+    time::Duration,
+};
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -302,7 +311,7 @@ fn write_transcript(
         lines.extend_from_slice(summary.as_bytes());
         lines.push(b'\n');
     }
-    Ok(gzip_transcript(&lines))
+    gzip_transcript(&lines)
 }
 
 fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, String> {
@@ -516,254 +525,39 @@ fn base64(bytes: &[u8]) -> String {
     output
 }
 
-/// Returns the exact size of the stored-block fallback. This is a safe upper
-/// bound for the real compressor and keeps the session output limit stable
-/// without requiring a compression pass for every appended event.
+/// Returns a conservative size bound for the stored-block fallback. The
+/// miniz_oxide backend may split uncompressed data below the DEFLATE maximum
+/// block size, so this deliberately assumes 32 KiB blocks.
 fn gzip_upper_bound_len(input_len: usize) -> usize {
     if input_len == 0 {
         23
     } else {
-        18 + input_len + input_len.div_ceil(65_535) * 5
+        18 + input_len + input_len.div_ceil(32_768) * 5
     }
 }
 
-/// Produces a deterministic gzip member. Fixed-Huffman DEFLATE handles the
-/// repetitive JSON transcript well; incompressible input falls back to stored
-/// blocks so the result never grows beyond the bounded raw representation.
-fn gzip_transcript(input: &[u8]) -> Vec<u8> {
-    let compressed = gzip_fixed_huffman(input);
+fn gzip_transcript(input: &[u8]) -> Result<Vec<u8>, String> {
+    let compressed = gzip_with_level(input, Compression::default())?;
     if compressed.len() < gzip_upper_bound_len(input.len()) {
-        compressed
-    } else {
-        gzip_stored(input)
+        return Ok(compressed);
     }
+    gzip_with_level(input, Compression::none())
 }
 
-fn gzip_fixed_huffman(input: &[u8]) -> Vec<u8> {
-    let mut writer = BitWriter::default();
-    // One final fixed-Huffman block: BFINAL=1, BTYPE=01.
-    writer.write_bits(0b011, 3);
-    let mut recent = vec![[u32::MAX; 4]; 1 << 16];
-    let mut position = 0;
-    while position < input.len() {
-        let (candidate, length) = find_match(input, position, &recent);
-        if let Some(candidate) = candidate {
-            encode_length_distance(&mut writer, length, position - candidate);
-            let end = (position + length).min(input.len());
-            for index in position..end {
-                remember_position(&mut recent, input, index);
-            }
-            position = end;
-        } else {
-            encode_fixed_symbol(&mut writer, u16::from(input[position]));
-            remember_position(&mut recent, input, position);
-            position += 1;
-        }
-    }
-    encode_fixed_symbol(&mut writer, 256);
-
-    let deflate = writer.finish();
-    let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-    output.extend_from_slice(&deflate);
-    output.extend_from_slice(&crc32(input).to_le_bytes());
-    output.extend_from_slice(&(input.len() as u32).to_le_bytes());
-    output
-}
-
-fn gzip_stored(input: &[u8]) -> Vec<u8> {
-    let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-    if input.is_empty() {
-        output.extend_from_slice(&[1, 0, 0, 255, 255]);
-    }
-    for (index, chunk) in input.chunks(65_535).enumerate() {
-        output.push(u8::from((index + 1) * 65_535 >= input.len()));
-        let length = chunk.len() as u16;
-        output.extend_from_slice(&length.to_le_bytes());
-        output.extend_from_slice(&(!length).to_le_bytes());
-        output.extend_from_slice(chunk);
-    }
-    output.extend_from_slice(&crc32(input).to_le_bytes());
-    output.extend_from_slice(&(input.len() as u32).to_le_bytes());
-    output
-}
-
-#[derive(Default)]
-struct BitWriter {
-    bytes: Vec<u8>,
-    current: u8,
-    bit_count: u8,
-}
-
-impl BitWriter {
-    fn write_bits(&mut self, value: u32, count: u8) {
-        debug_assert!(count <= 24);
-        for bit in 0..count {
-            self.current |= (((value >> bit) & 1) as u8) << self.bit_count;
-            self.bit_count += 1;
-            if self.bit_count == 8 {
-                self.bytes.push(self.current);
-                self.current = 0;
-                self.bit_count = 0;
-            }
-        }
-    }
-
-    fn finish(mut self) -> Vec<u8> {
-        if self.bit_count != 0 {
-            self.bytes.push(self.current);
-        }
-        self.bytes
-    }
-}
-
-fn find_match(
-    input: &[u8],
-    position: usize,
-    recent: &[[u32; 4]],
-) -> (Option<usize>, usize) {
-    if position + 2 >= input.len() {
-        return (None, 0);
-    }
-    let candidates = recent[hash_three(&input[position..position + 3]) as usize];
-    let mut best_candidate = None;
-    let mut best_length = 0;
-    for candidate in candidates {
-        if candidate == u32::MAX {
-            continue;
-        }
-        let candidate = candidate as usize;
-        let distance = position.saturating_sub(candidate);
-        if distance == 0 || distance > 32_768 {
-            continue;
-        }
-        let mut length = 0;
-        while length < 258
-            && position + length < input.len()
-            && candidate + length < input.len()
-            && input[candidate + length] == input[position + length]
-        {
-            length += 1;
-        }
-        if length >= 3 && length > best_length {
-            best_candidate = Some(candidate);
-            best_length = length;
-            if length == 258 {
-                break;
-            }
-        }
-    }
-    (best_candidate, best_length)
-}
-
-fn remember_position(recent: &mut [[u32; 4]], input: &[u8], position: usize) {
-    if position + 2 >= input.len() {
-        return;
-    }
-    let slot = &mut recent[hash_three(&input[position..position + 3]) as usize];
-    slot[3] = slot[2];
-    slot[2] = slot[1];
-    slot[1] = slot[0];
-    slot[0] = position as u32;
-}
-
-fn hash_three(bytes: &[u8]) -> u16 {
-    debug_assert!(bytes.len() >= 3);
-    u16::from(bytes[0])
-        .wrapping_mul(251)
-        .wrapping_add(u16::from(bytes[1]).wrapping_mul(31))
-        .wrapping_add(u16::from(bytes[2]))
-}
-
-const LENGTH_BASE: [usize; 29] = [
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
-    99, 115, 131, 163, 195, 227, 258,
-];
-const LENGTH_EXTRA: [u8; 29] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5,
-    5, 5, 0,
-];
-const DISTANCE_BASE: [usize; 30] = [
-    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025,
-    1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
-];
-const DISTANCE_EXTRA: [u8; 30] = [
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
-    12, 12, 13, 13,
-];
-
-fn encode_length_distance(writer: &mut BitWriter, length: usize, distance: usize) {
-    let length_code = if length == 258 {
-        28
-    } else {
-        LENGTH_BASE
-            .iter()
-            .enumerate()
-            .find(|(index, base)| {
-                length <= **base + ((1usize << LENGTH_EXTRA[*index]) - 1)
-            })
-            .map_or(28, |(index, _)| index)
-    };
-    let length_extra = LENGTH_EXTRA[length_code];
-    encode_fixed_symbol(writer, 257 + length_code as u16);
-    writer.write_bits(
-        (length - LENGTH_BASE[length_code]) as u32,
-        length_extra,
-    );
-
-    let distance_code = DISTANCE_BASE
-        .iter()
-        .enumerate()
-        .find(|(index, base)| {
-            distance <= **base + ((1usize << DISTANCE_EXTRA[*index]) - 1)
-        })
-        .map_or(29, |(index, _)| index);
-    let distance_extra = DISTANCE_EXTRA[distance_code];
-    writer.write_bits(reverse_bits(distance_code as u32, 5), 5);
-    writer.write_bits(
-        (distance - DISTANCE_BASE[distance_code]) as u32,
-        distance_extra,
-    );
-}
-
-fn encode_fixed_symbol(writer: &mut BitWriter, symbol: u16) {
-    let (code, bit_count) = match symbol {
-        0..=143 => (0x30 + u32::from(symbol), 8),
-        144..=255 => (0x190 + u32::from(symbol - 144), 9),
-        256..=279 => (u32::from(symbol - 256), 7),
-        280..=287 => (0xc0 + u32::from(symbol - 280), 8),
-        _ => unreachable!("invalid fixed Huffman symbol"),
-    };
-    writer.write_bits(reverse_bits(code, bit_count), bit_count);
-}
-
-fn reverse_bits(mut value: u32, bit_count: u8) -> u32 {
-    let mut reversed = 0;
-    for _ in 0..bit_count {
-        reversed = (reversed << 1) | (value & 1);
-        value >>= 1;
-    }
-    reversed
-}
-
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = !0_u32;
-    for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            crc = if crc & 1 == 0 {
-                crc >> 1
-            } else {
-                (crc >> 1) ^ 0xedb8_8320
-            };
-        }
-    }
-    !crc
+fn gzip_with_level(input: &[u8], level: Compression) -> Result<Vec<u8>, String> {
+    let mut encoder = GzEncoder::new(Vec::new(), level);
+    encoder
+        .write_all(input)
+        .map_err(|error| format!("write gzip transcript: {error}"))?;
+    encoder
+        .finish()
+        .map_err(|error| format!("finish gzip transcript: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        gzip_stored, gzip_transcript, micro_usd, packet_verification_error,
+        gzip_transcript, gzip_upper_bound_len, micro_usd, packet_verification_error,
         provider_request_timeout, provider_retry_policy, provider_stall_timeout, CostSnapshot,
     };
     use pi_agent_protocol::JsonValue;
@@ -848,8 +642,8 @@ mod tests {
                 .as_bytes(),
             );
         }
-        let archive = gzip_transcript(&input);
-        assert!(archive.len() < gzip_stored(&input).len());
+        let archive = gzip_transcript(&input).expect("compress transcript");
+        assert!(archive.len() < gzip_upper_bound_len(input.len()));
         assert!(archive.len() * 2 < input.len());
 
         let path = std::env::temp_dir().join(format!(
@@ -864,5 +658,22 @@ mod tests {
         fs::remove_file(&path).expect("remove gzip test member");
         assert!(decoded.status.success());
         assert_eq!(decoded.stdout, input);
+    }
+
+    #[test]
+    fn transcript_gzip_fallback_stays_within_the_stored_bound() {
+        let mut input = Vec::with_capacity(100_000);
+        let mut state = 0x9e37_79b9_u32;
+        for _ in 0..100_000 {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            input.push((state >> 24) as u8);
+        }
+        let archive = gzip_transcript(&input).expect("compress incompressible transcript");
+        assert!(
+            archive.len() <= gzip_upper_bound_len(input.len()),
+            "archive={} bound={}",
+            archive.len(),
+            gzip_upper_bound_len(input.len())
+        );
     }
 }

@@ -29,10 +29,11 @@ documented missing capability, not permission to delete runtime data broadly.
 
 The Rust Pi agent implementation emits a compact audit projection before the
 host writes `session.ndjson`. The host streams it and seals one gzip archive at
-terminal state. The member uses fixed-Huffman DEFLATE for repetitive audit JSON
-and falls back to a stored block only when compression would expand the bounded
-artifact. Events outside the compact projection are omitted rather than
-represented as blank records. This retains the information useful for diagnosis:
+terminal state. The member uses the `flate2` Rust backend (`miniz_oxide`) for
+repetitive audit JSON and falls back to a stored block only when compression
+would expand the bounded artifact. Events outside the compact projection are
+omitted rather than represented as blank records. This retains the information
+useful for diagnosis:
 
 - bounded assistant text;
 - tool names, boundaries, inputs, results, retries, and terminal reason;

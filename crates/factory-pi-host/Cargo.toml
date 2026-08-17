@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 factory-settings = { path = "../factory-settings" }
 factory-protocol = { path = "../factory-protocol" }
+flate2.workspace = true
 miniserde.workspace = true
 pi-agent-core = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-core", features = ["provider-openrouter"] }
 pi-agent-luau = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-luau" }
