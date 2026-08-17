@@ -38,6 +38,7 @@ fn static_xsh_bundle_compiles_deterministically_with_all_sources() {
         .find(|profile| profile.assignment_role == AssignmentRole::ProductResearch)
         .expect("Product profile");
     assert_eq!(product.model.output_token_limit, 32_768);
+    assert_eq!(product.limits.wall_limit.get(), 900_000);
     assert!(
         first
             .application

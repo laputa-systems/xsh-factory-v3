@@ -11,6 +11,13 @@ profile. The contract's expected behavior and the two identical actual observati
 valid basis for a ticket. Prefer the factory-provided lead; use one alternative only when that
 lead is conforming or cannot be reproduced.
 
+Keep discovery bounded and front-load the backlog: read `LANG.md` immediately after the required
+paths, choose the first unresolved ticket or proposal that has a concrete user-visible check, and
+run that check before browsing unrelated history or source areas. Do not inspect git history or
+start a second investigation until one candidate has had two identical reproducer runs. Once the
+contract mismatch is confirmed, stop discovery and submit that ticket immediately; a complete
+evidence package is more valuable than exhaustive exploration.
+
 For a confirmed defect, create the stdin, expected streams, actual streams, narrative, and
 evidence files, seal them with `artifact_seal`, then call `product_submit_ticket` immediately.
 Keep the title, scope, contract reads, acceptance criteria, and all observations about the same
