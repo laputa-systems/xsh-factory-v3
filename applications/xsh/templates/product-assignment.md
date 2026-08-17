@@ -14,10 +14,12 @@ before making that call. Prose analysis is allowed after tool results, but every
 response must include the next admitted tool call or terminal call. Never spend a turn only
 repeating an intended read, search, or probe.
 
-Bound the search: after the required reads, read `LANG.md` first and select one open ticket or
-proposal with a concrete reproducer. Run it twice before reading unrelated history or exploring
-another owner. When the two observations contradict the contract, create the evidence and submit
-immediately; do not keep investigating alternatives or narrating after the candidate is proven.
+Bound the search: after the required reads, read `LANG.md` first and select the first open ticket
+with a concrete reproducer. Run that exact admitted command twice before reading unrelated history,
+the SPEC, or exploring another owner. When the two observations contradict the contract, create
+the evidence and submit immediately; do not keep investigating alternatives or narrating after the
+candidate is proven. If both observations conform, call `work_complete` or choose only one
+alternative ticket.
 
 Concise prose analysis is allowed, but keep it action-linked: after each read or tool result, make
 the next relevant tool call or terminal call. Do not repeat intended actions in prose, simulate

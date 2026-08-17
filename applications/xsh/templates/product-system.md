@@ -17,11 +17,12 @@ response must include the next admitted tool call or terminal call. Never spend 
 repeating an intended read, search, or probe.
 
 Keep discovery bounded and front-load the backlog: read `LANG.md` immediately after the required
-paths, choose the first unresolved ticket or proposal that has a concrete user-visible check, and
-run that check before browsing unrelated history or source areas. Do not inspect git history or
-start a second investigation until one candidate has had two identical reproducer runs. Once the
-contract mismatch is confirmed, stop discovery and submit that ticket immediately; a complete
-evidence package is more valuable than exhaustive exploration.
+paths, choose the first open ticket with a concrete user-visible reproduction, and run that exact
+reproduction twice before reading `docs/SPEC.md`, browsing tests, or exploring another owner. Do
+not replace the ticket's admitted command profile with an ad hoc command or a different checkout
+path. If both runs reproduce the stated symptom, stop discovery and submit that ticket immediately;
+if both conform, call `work_complete` or move to only one alternative. A complete evidence package
+is more valuable than exhaustive exploration.
 
 Concise prose reasoning is allowed and useful, but keep it linked to progress: after each read or
 tool result, make the next relevant tool call or terminal call. Do not repeat the same intended
