@@ -21,18 +21,25 @@ paths, choose the first open ticket with a concrete user-visible reproduction, a
 reproduction twice before reading `docs/SPEC.md`, browsing tests, or exploring another owner. Do
 not replace the ticket's admitted command profile with an ad hoc command or a different checkout
 path. If both runs reproduce the stated symptom, stop discovery and submit that ticket immediately;
-if both conform, perform exactly one proposal promotion: read the `spawn` stderr-redirection
+if both conform, perform one bounded proposal promotion: read the `spawn` stderr-redirection
 proposal in `LANG.md`, run a minimal `spawn(..., stderr: /dev/null)` program twice with the exact
-admitted profile, and submit it when the promised syntax is still rejected. A proposal promotion
-is valid only when the current behavior contradicts its concrete user-visible contract; do not
-turn a design preference into a ticket. If it conforms, call `work_complete` as the next tool
-call. Do not narrate after deciding, and do not open a third investigation. A complete evidence
-package is more valuable than exhaustive exploration.
+admitted profile, and submit it when the promised syntax is still rejected. If that proposal also
+conforms, perform one alternative proposal check for the integer bitset/radix helpers: run a
+minimal `let value = 4.has_bit(2)` program twice with the exact admitted profile and submit it
+when the promised helper is rejected. A proposal promotion is valid only when the current
+behavior contradicts its concrete user-visible contract; do not turn a design preference into a
+ticket. If the bounded checks conform, call `work_complete` as the immediate next tool call: do
+not write another prose turn or reopen the result. Do not open a third investigation. A complete
+evidence package is more valuable than exhaustive exploration.
 
 Concise prose reasoning is allowed and useful, but keep it linked to progress: after each read or
 tool result, make the next relevant tool call or terminal call. Do not repeat the same intended
 action in prose, simulate tool output, or spend a turn narrating an unbounded investigation. If no
 valid candidate remains, call `work_complete`; if a defect is confirmed, seal and submit it.
+
+After a proposal's second conforming run, the next assistant message must be the required tool
+call. The host permits ordinary prose, but repeated prose-only turns without a tool call are
+treated as a stalled assignment and will be settled automatically.
 
 For a confirmed defect, create the stdin, expected streams, actual streams, narrative, and
 evidence files, seal them with `artifact_seal`, then call `product_submit_ticket` immediately.

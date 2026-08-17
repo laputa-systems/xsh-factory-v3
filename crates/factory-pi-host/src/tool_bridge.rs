@@ -32,6 +32,7 @@ pub const FACTORY_CAPABILITY: &str = "factory";
 /// allowed until the run makes no bounded progress.
 pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
 const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
+const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
@@ -279,6 +280,8 @@ struct ProductProgressState {
     turns_started: u32,
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
+    no_tool_turns: u32,
+    tool_called_this_turn: bool,
     stalled: bool,
 }
 
@@ -365,6 +368,7 @@ impl CommandContext {
             state.last_tool_call = Some(signature.to_owned());
             state.identical_tool_calls = 1;
         }
+        state.tool_called_this_turn = true;
         if state.identical_tool_calls >= MAX_PRODUCT_IDENTICAL_TOOL_CALLS {
             state.stalled = true;
         }
@@ -379,6 +383,15 @@ impl CommandContext {
             return false;
         }
         state.turns_started = state.turns_started.saturating_add(1);
+        if state.tool_called_this_turn {
+            state.no_tool_turns = 0;
+            state.tool_called_this_turn = false;
+        } else {
+            state.no_tool_turns = state.no_tool_turns.saturating_add(1);
+            if state.no_tool_turns >= MAX_PRODUCT_NO_TOOL_TURNS {
+                state.stalled = true;
+            }
+        }
         if state.turns_started >= MAX_PRODUCT_TURNS {
             state.stalled = true;
         }
@@ -1961,9 +1974,38 @@ mod tests {
         let context = CommandContext::new(1);
         context.configure_product();
 
-        for _ in 0..(MAX_PRODUCT_TURNS - 1) {
+        for index in 0..(MAX_PRODUCT_TURNS - 1) {
+            context.record_product_tool_call(&format!(
+                "shell:{{\"command\":\"printf progress {index}\"}}"
+            ));
             assert!(!context.product_should_stop_after_turn());
         }
+        context.record_product_tool_call(&format!(
+            "shell:{{\"command\":\"printf progress {}\"}}",
+            MAX_PRODUCT_TURNS - 1
+        ));
+        assert!(context.product_should_stop_after_turn());
+    }
+
+    #[test]
+    fn product_phase_stops_after_repeated_toolless_turns() {
+        let context = CommandContext::new(1);
+        context.configure_product();
+
+        assert!(!context.product_should_stop_after_turn());
+        assert!(!context.product_should_stop_after_turn());
+        assert!(context.product_should_stop_after_turn());
+    }
+
+    #[test]
+    fn product_tool_call_resets_toolless_turn_guard() {
+        let context = CommandContext::new(1);
+        context.configure_product();
+
+        assert!(!context.product_should_stop_after_turn());
+        context.record_product_tool_call("shell:{\"command\":\"printf progress\"}");
+        assert!(!context.product_should_stop_after_turn());
+        assert!(!context.product_should_stop_after_turn());
         assert!(context.product_should_stop_after_turn());
     }
 }
