@@ -36,7 +36,6 @@ const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
 const MAX_ENGINEERING_TURNS: u32 = 64;
 const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
-const MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ: u32 = 4;
 const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
@@ -493,14 +492,6 @@ impl CommandContext {
                 state.stalled = true;
                 return Err(
                     "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit",
-                );
-            }
-            if !state.runtime_owner_read
-                && state.shell_calls > MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ
-            {
-                state.stalled = true;
-                return Err(
-                    "Engineering exceeded bounded shell discovery before reading src/runtime/eval/lowered_ops.rs; use workspace_read on that owner, then make the smallest edit and submit",
                 );
             }
         }
@@ -2238,7 +2229,7 @@ mod tests {
     }
 
     #[test]
-    fn engineering_phase_reads_runtime_owner_before_shell_after_search() {
+    fn engineering_phase_allows_bounded_shell_discovery_after_search() {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
@@ -2247,15 +2238,15 @@ mod tests {
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
-        for index in 0..MAX_ENGINEERING_SHELLS_BEFORE_RUNTIME_OWNER_READ {
+        for index in 0..MAX_ENGINEERING_SHELL_CALLS {
             assert!(context
                 .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
                 .is_ok());
         }
         assert_eq!(
-            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow-before-owner"),
+            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
             Err(
-                "Engineering exceeded bounded shell discovery before reading src/runtime/eval/lowered_ops.rs; use workspace_read on that owner, then make the smallest edit and submit"
+                "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit"
             )
         );
         assert!(context.engineering_should_stop_after_turn());
