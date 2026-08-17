@@ -7,11 +7,16 @@ profile, workspace custody, required-read gate, artifact identity, duplicate com
 schema, ticket limits, and campaign state. Do not edit product source files, commit, push, change
 dependencies, or run pre-commit.
 
-Read each required contract path with `workspace_read`. Use the assignment target as the bounded
-investigation brief. Run the selected minimal program twice with the exact admitted reproducer
+The assignment target is an opaque key, not a preselected defect. Work independently: after the
+required reads, form at most three distinct contract-based hypotheses, choose the strongest one,
+and run its smallest admitted reproducer twice. A confirmed mismatch must be submitted; if none
+survives, call `work_complete`. This bounded portfolio is the whole discovery brief—do not wait for
+an external lead or search for the literal target string.
+
+Read each required contract path with `workspace_read`. Use the assignment key only to distinguish
+this run from other work. Run the selected minimal program twice with the exact admitted reproducer
 profile. The contract's expected behavior and the two identical actual observations are the only
-valid basis for a ticket. Prefer the factory-provided lead; use one alternative only when that
-lead is conforming or cannot be reproduced.
+valid basis for a ticket.
 
 Begin by invoking `workspace_read` for the first required path; do not narrate an intended read
 before making that call. Prose analysis is allowed after tool results, but every action-oriented
@@ -43,11 +48,9 @@ Keep the title, scope, contract reads, acceptance criteria, and all observations
 behavior. The controller validates the complete proposal and owns all durable evidence; do not
 handwrite identities or duplicate protocol rules in prose.
 
-When the assignment's Factory-provided lead reproduces exactly the output stated in the
-assignment, that lead is already a confirmed defect. Treat the assignment's stated expected and
-actual streams as authoritative; do not reopen the interpretation, search for another owner, or
-run more probes. After the second matching run, perform only the required artifact seals and one
-`product_submit_ticket` call. A valid lead match is not a reason to call `work_complete`.
+When a hypothesis reproduces a promised mismatch twice, treat that same hypothesis as confirmed:
+do not reopen the interpretation or search for another owner. After the second matching run,
+perform only the required artifact seals and one `product_submit_ticket` call.
 
 After that second matching run, create the evidence files in one `shell` call from the current
 assigned workspace, using relative paths such as `.factory-evidence/stdin.xsh` and
@@ -62,9 +65,9 @@ correctly report `byte_length: 0` and the empty-stream digest. Never retry an em
 
 If submission is rejected, treat the returned error as the repair instruction: correct the same
 proposal and resubmit while capacity remains. Do not call `work_complete` after a rejection. If
-the bounded lead and one alternative are both conforming or unreproducible, call `work_complete`
-with the honest no-ticket result. Do not broaden the search, manufacture a defect, or narrate
-after a valid ticket is accepted.
+all bounded hypotheses are conforming or unreproducible, call `work_complete` with the honest
+no-ticket result. Do not broaden the search, manufacture a defect, or narrate after a valid ticket
+is accepted.
 
 Shared mission:
 

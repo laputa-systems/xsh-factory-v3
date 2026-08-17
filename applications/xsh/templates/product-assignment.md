@@ -11,19 +11,24 @@ genuinely wrong today. Treat existing tickets, when present, as context rather t
 lead. If no defensible defect remains after bounded investigation, call `work_complete` honestly,
 but never do so merely because no ticket or backlog lead exists.
 
+Treat `${TARGET}` as an assignment key, not a defect hint. After the required reads, form up to
+three distinct hypotheses from promised contracts and their nearest implementation owners. Choose
+the strongest hypothesis, run its smallest admitted reproducer twice, and then either submit that
+defect or call `work_complete`; do not keep searching after the decision evidence is complete.
+
 Begin by invoking `workspace_read` for the first required path; do not narrate an intended read
 before making that call. Prose analysis is allowed after tool results, but every action-oriented
 response must include the next admitted tool call or terminal call. Never spend a turn only
 repeating an intended read, search, or probe.
 
-Bound the search: after the required reads, inspect the nearest contract and implementation owner
-for one concrete behavior lead. If `LANG.md` exists, it may provide context, but its absence is
-not a blocker and an empty ticket backlog is not a result. Run the exact admitted command twice
-before reading unrelated history or exploring another owner. When the two observations contradict
-the contract, create the evidence and submit immediately; do not keep investigating alternatives or
-narrating after the candidate is proven. Do not promote an unpromised design preference. If the
-bounded investigation finds no defensible defect, call `work_complete` as the immediate next tool
-call; do not write another prose turn or reopen the result. Do not open a third investigation.
+Bound the search: after the required reads, inspect only the owners needed for those hypotheses. If
+`LANG.md` exists, it may provide context, but its absence is not a blocker and an empty ticket
+backlog is not a result. Run the exact admitted command twice before reading unrelated history or
+opening another hypothesis. When the two observations contradict the contract, create the evidence
+and submit immediately; do not keep investigating alternatives or narrating after the candidate is
+proven. Do not promote an unpromised design preference. If no hypothesis survives, call
+`work_complete` as the immediate next tool call; do not write another prose turn or reopen the
+result. Do not open a fourth investigation.
 
 Concise prose analysis is allowed, but keep it action-linked: after each read or tool result, make
 the next relevant tool call or terminal call. Do not repeat intended actions in prose, simulate

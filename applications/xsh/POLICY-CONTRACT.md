@@ -1,9 +1,12 @@
 # XSH V2 application source
 
-`bundle.v2.json` is the inert XSH application declaration. Rust reads the
-declaration, resolves the seven Markdown templates and the three Luau policy
-sources below this directory, verifies each BLAKE3 digest and byte limit, and
-seals the resulting source bytes. A running actor never reads this directory.
+`bundle.v2.json` is the inert XSH application declaration. It is intentionally
+formatted for review; admission accepts that presentation form only when its
+fields and canonical order are closed, then normalizes the declaration to the
+strict canonical V2 bytes used for the durable bundle identity. Rust resolves
+the seven Markdown templates and the three Luau policy sources below this
+directory, verifies each BLAKE3 digest and byte limit, and seals those exact
+source bytes. A running actor never reads this directory.
 
 The model price fields in the bundle are admitted accounting inputs. Keep their
 source of truth in Pi's model catalog at

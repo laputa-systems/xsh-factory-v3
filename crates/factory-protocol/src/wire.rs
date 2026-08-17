@@ -2918,6 +2918,37 @@ pub fn admit_application_bundle_v2(
     Ok((bundle, ContentDigest::of_bytes(payload)))
 }
 
+/// Admits a human-readable application source bundle while retaining the
+/// strict canonical bytes used for the durable application identity. Formatting
+/// whitespace is ignored, but reordered keys or unknown fields are rejected so
+/// the source still describes exactly one closed V2 contract.
+pub fn admit_application_bundle_source_v2(
+    payload: &[u8],
+) -> Result<(ApplicationBundleV2, ContentDigest, Vec<u8>), FrameError> {
+    let payload = std::str::from_utf8(payload).map_err(|_| FrameError::InvalidUtf8)?;
+    let wire: ApplicationBundleWireV2 =
+        json::from_str(payload).map_err(|error| FrameError::InvalidJson {
+            operation: "application bundle",
+            detail: format!("{error:?}"),
+        })?;
+    let canonical = canonical_application_bundle_json_v2(&wire)?;
+    let source_value: json::Value =
+        json::from_str(payload).map_err(|error| FrameError::InvalidJson {
+            operation: "application bundle",
+            detail: format!("{error:?}"),
+        })?;
+    if json::to_string(&source_value) != canonical {
+        return Err(FrameError::InvalidJson {
+            operation: "application bundle",
+            detail: "bundle source must preserve canonical V2 fields and order".into(),
+        });
+    }
+    let canonical_bytes = canonical.into_bytes();
+    let bundle = parse_application_bundle_v2(&canonical_bytes)?;
+    let digest = ContentDigest::of_bytes(&canonical_bytes);
+    Ok((bundle, digest, canonical_bytes))
+}
+
 pub fn decode_application_bundle_v2(
     frame: &[u8],
     maximum: usize,

@@ -354,21 +354,22 @@ fn seal_application_inputs(
     // accepts one conventional terminal LF, but the durable bundle identity
     // must be the strict canonical JSON bytes that every later runtime parser
     // consumes. First adopt the assigned regular source file to retain the
-    // staging-root and no-symlink custody checks, then seal only that bounded
-    // source convention as kernel-owned canonical bytes. Any other whitespace
-    // remains part of the payload and is rejected by the protocol parser.
+    // staging-root and no-symlink custody checks, then normalize a formatted
+    // source bundle into those kernel-owned canonical bytes. Field order and
+    // unknown fields remain closed by the protocol parser.
     let source_bundle_seal = cas.adopt(&command.source_root, &command.bundle_relative_path)?;
     let source_bundle_bytes = cas.read_verified(source_bundle_seal.digest())?;
     let bundle_bytes = source_bundle_bytes
         .strip_suffix(b"\n")
         .unwrap_or(source_bundle_bytes.as_slice());
-    let bundle_seal = if bundle_bytes.len() == source_bundle_bytes.len() {
+    let (bundle, bundle_digest, canonical_bundle_bytes) =
+        factory_protocol::admit_application_bundle_source_v2(bundle_bytes)
+            .map_err(|error| StoreError::InvalidApplicationBundle(error.to_string()))?;
+    let bundle_seal = if canonical_bundle_bytes.as_slice() == bundle_bytes {
         source_bundle_seal
     } else {
-        cas.adopt_kernel_bytes(bundle_bytes)?
+        cas.adopt_kernel_bytes(&canonical_bundle_bytes)?
     };
-    let (bundle, bundle_digest) = factory_protocol::admit_application_bundle_v2(bundle_bytes)
-        .map_err(|error| StoreError::InvalidApplicationBundle(error.to_string()))?;
     if bundle_digest != bundle_seal.digest() {
         return Err(StoreError::ApplicationBundleDigestMismatch);
     }

@@ -108,14 +108,17 @@ result to retry in place.
 ## Application revisions and campaigns
 
 Use the checked-in `applications/xsh/bundle.v2.json`, then use `factoryctl
-daemon status` to obtain the installed build ID/revision. XSH's bundle template
-paths are relative to `applications/xsh`, so admission uses that directory as
-`--source-root` and `bundle.v2.json` as `--bundle-relative-path`; the repository
-root is not a valid substitute. Register with those exact guards, seal a short
-operator rationale, and activate only while no campaign is running. Start
-campaigns through `factoryctl campaign start` with an explicit active
-application revision, aggregate micro-USD budget, deadline, and delivery
-target. Do not launch Pi or an actor host directly.
+daemon status` to obtain the installed build ID/revision. The bundle may be
+formatted for human review; admission validates its closed canonical field
+order and seals the normalized canonical V2 bytes as the bundle identity. XSH's
+bundle template paths are relative to `applications/xsh`, so admission uses
+that directory as `--source-root` and `bundle.v2.json` as
+`--bundle-relative-path`; the repository root is not a valid substitute.
+Register with those exact guards, seal a short operator rationale, and activate
+only while no campaign is running. Start campaigns through
+`factoryctl campaign start` with an explicit active application revision,
+aggregate micro-USD budget, deadline, and delivery target. Do not launch Pi or
+an actor host directly.
 
 Every mutation uses a client command ID and observed aggregate revision.
 `factoryctl campaign status`, `ticket list/show`, `candidate show`, and `audit
