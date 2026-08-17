@@ -38,9 +38,10 @@
    controller-owned discovery, checkpoint, and submission deadlines with phase
    diagnostics. A narrow no-match search therefore cannot strand the assignment;
    once an owner file is read, search/list and pre-mutation shell discovery close;
-   adjacent reads and the smallest mutation remain available, and focused shell
-   validation unlocks only after that mutation. Repeated discovery still fails
-   closed.
+   adjacent exact reads (for example, `crates/xsh-registry/src/runtime_op.rs` or
+   `src/runtime/eval/lowered_ops.rs`) and the smallest mutation remain available,
+   and focused shell validation unlocks only after that mutation. Repeated
+   discovery still fails closed.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery

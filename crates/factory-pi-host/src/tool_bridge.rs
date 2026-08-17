@@ -646,7 +646,7 @@ impl CommandContext {
             if state.implementation_discovery_closed {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
-                    "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit",
+                    "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit",
                 );
             }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
@@ -665,7 +665,7 @@ impl CommandContext {
             if state.implementation_discovery_closed {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
-                    "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit",
+                    "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit",
                 );
             }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
@@ -685,7 +685,7 @@ impl CommandContext {
         {
             Self::mark_engineering_protocol_violation(&mut state);
             return Err(
-                "Engineering has read an owner file; edit or write the smallest fix before running shell validation",
+                "Engineering has read an owner file; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit or write the smallest fix before running shell validation",
             );
         }
         if state.phase == EngineeringPhase::Implementing
@@ -2204,14 +2204,14 @@ mod tests {
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
             Err(
-                "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit"
+                "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
-                "Engineering has read an owner file; stop searching, read adjacent exact files if needed, then edit and submit"
+                "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit"
             )
         );
         assert!(context.engineering_should_stop_after_turn());
@@ -2333,7 +2333,7 @@ mod tests {
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::Shell),
             Err(
-                "Engineering has read an owner file; edit or write the smallest fix before running shell validation"
+                "Engineering has read an owner file; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit or write the smallest fix before running shell validation"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
