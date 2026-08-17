@@ -115,6 +115,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
         .with_architect_transition_resolver(architect_resolver)
         .with_campaign_control(store.process_store(), store.ticket_store())
         .with_navigation_control(store.clone())
+        .with_navigation_transcript_export(Arc::clone(&cas))
         .with_forum_control(store.forum_store())
         .with_publication_control(store.publication_store())
         // Application source paths cross only this authenticated Unix socket;

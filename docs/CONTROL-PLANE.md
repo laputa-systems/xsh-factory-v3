@@ -66,9 +66,10 @@ non-fast-forward delivery.
 ## Failure and recovery
 
 The daemon owns the process group, deadline, output capture, cancellation,
-direct wait, and terminal reconciliation. The host also polls provider-reported
-spend during the run and cancels at the remaining campaign allowance, emitting
-the typed `cost_limit` stop reason. A session with neither usable token usage
+direct wait, and terminal reconciliation. Provider accounting is refreshed at
+each completed model turn; the host checks that snapshot at the core lifecycle
+boundary and cancels at the remaining campaign allowance, emitting the typed
+`cost_limit` stop reason. A session with neither usable token usage
 nor a provider cost is fail-closed; otherwise the kernel computes Factory cost
 from the admitted model rates rather than trusting a provider-reported zero. A
 released ticket requalifies again under

@@ -90,8 +90,6 @@ pub const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(600);
 pub const MAX_PROVIDER_RETRIES: u32 = 2;
 pub const PROVIDER_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 pub const PROVIDER_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(8);
-/// How often the host checks provider-reported spend while an actor is running.
-pub const PROVIDER_COST_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const HOST_FALLBACK_PATH: &str = "/usr/bin:/bin";
 pub const HOST_SHELL_EXECUTABLE: &str = "/bin/sh";
 pub const HOST_KILL_EXECUTABLE: &str = "/bin/kill";

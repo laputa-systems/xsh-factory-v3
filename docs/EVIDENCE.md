@@ -46,6 +46,12 @@ Typed boundaries preserve the important authoritative material separately:
 required-read manifests, sealed artifacts, reproducer observations, regression
 and validation logs, candidate patches, reviews, and delivery receipts. A
 transcript is diagnostic provenance, not the only source of accepted facts.
+The read-only `make status` projection can reconstruct those durable transcript
+artifacts for the newest terminal campaign into an OS temporary directory. It
+reads only the PostgreSQL artifact references and verified CAS bytes; the
+operator client receives file metadata and a path, not raw transcript bytes on
+the socket. Failed and cancelled campaigns are eligible, and sessions without
+an available transcript remain explicitly reported.
 
 ## Factory-Cost on delivered commits
 

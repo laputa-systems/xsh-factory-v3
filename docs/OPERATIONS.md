@@ -128,6 +128,14 @@ explicit `FACTORY_STATUS_SOCKET` when supplied, otherwise the
 advertised by a running `factoryd`. It reports the daemon identity, active XSH
 revision, complete ticket-state counts, campaign totals, and session/cost
 warnings without opening PostgreSQL from the operator shell.
+After the aggregate projection, the daemon selects the newest terminal
+campaign (completed, failed, or cancelled), reads its session artifact IDs from
+PostgreSQL, verifies the corresponding CAS bytes, and writes available
+transcripts under the OS temporary directory at
+`cycle-<campaign-id>-status/`. Complete archives are named
+`session-<id>-transcript.ndjson.gz`; interrupted-session evidence is retained as
+`session-<id>-partial.ndjson`. The status output reports the directory and any
+terminal sessions for which no transcript artifact exists.
 
 ## One-commit paid cycle
 

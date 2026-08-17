@@ -11,20 +11,26 @@ use factory_protocol::{
     CandidateValidationNavigationResponse, ContentDigest, ContractError,
     DeliveryNavigationResponse, ErrorResponse, EvidenceArtifactResponse, FactoryStatusResponse,
     FrameError, InstitutionalObjectKind, InstitutionalReference, InstitutionalSearchHitResponse,
-    InstitutionalSearchResponse, InstitutionalShowResponse, OP_OPERATOR_FACTORY_STATUS,
+    InstitutionalSearchResponse, InstitutionalShowResponse, OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS,
+    OP_OPERATOR_FACTORY_STATUS,
     OP_OPERATOR_INSTITUTIONAL_SEARCH, OP_OPERATOR_INSTITUTIONAL_SHOW, OP_OPERATOR_LIST_TICKETS,
     OP_OPERATOR_SHOW_AUDIT, OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET,
-    OperatorAuditShowRequest, OperatorCandidateShowRequest, OperatorFactoryStatusRequest,
+    OperatorAuditShowRequest, OperatorCandidateShowRequest, OperatorCycleTranscriptExportRequest,
+    OperatorCycleTranscriptExportResponse, OperatorFactoryStatusRequest,
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
     OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2,
     TicketAttemptNavigationResponse, TicketListItemResponse, TicketListResponse,
-    TicketShowResponse, decode_operation_request, decode_routing_envelope,
+    TicketShowResponse, CycleTranscriptFileResponse, decode_operation_request,
+    decode_routing_envelope,
 };
 use miniserde::json;
 use sqlx::{PgPool, Row};
+use std::{fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
 
+use crate::cas::CasStore;
 use crate::storage::KernelStore;
+use factory_settings::CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM;
 
 macro_rules! publication_search_sql {
     ($column:literal) => {
@@ -95,6 +101,7 @@ impl OperatorNavigationCapability {
 #[derive(Clone, Debug)]
 pub(crate) struct OperatorNavigationRpc {
     pool: PgPool,
+    cas: Option<Arc<CasStore>>,
 }
 
 impl OperatorNavigationRpc {
@@ -104,7 +111,13 @@ impl OperatorNavigationRpc {
     ) -> Self {
         Self {
             pool: store.pool_for_authority(),
+            cas: None,
         }
+    }
+
+    pub(crate) fn with_transcript_cas(mut self, cas: Arc<CasStore>) -> Self {
+        self.cas = Some(cas);
+        self
     }
 
     pub(crate) async fn dispatch(
@@ -116,6 +129,7 @@ impl OperatorNavigationRpc {
         let operation = envelope.operation.clone();
         let response = match operation.as_str() {
             OP_OPERATOR_FACTORY_STATUS => self.factory_status(frame).await,
+            OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS => self.export_cycle_transcripts(frame).await,
             OP_OPERATOR_LIST_TICKETS => self.list_tickets(frame).await,
             OP_OPERATOR_SHOW_TICKET => self.show_ticket(frame).await,
             OP_OPERATOR_SHOW_CANDIDATE => self.show_candidate(frame).await,
@@ -233,6 +247,150 @@ impl OperatorNavigationRpc {
             session_total: count(&session_row, "session_total")?,
             running_session_count: count(&session_row, "running_session_count")?,
             unknown_cost_session_count: count(&session_row, "unknown_cost_session_count")?,
+        };
+        Ok(json::to_string(&response).into_bytes())
+    }
+
+    /// Reconstruct the most recently terminal campaign's session evidence
+    /// from durable artifact identities and kernel-owned CAS bytes. This keeps
+    /// transcript bytes off the operator protocol frame while making failed
+    /// campaigns inspectable through the same `make status` command.
+    async fn export_cycle_transcripts(
+        &self,
+        frame: &[u8],
+    ) -> Result<Vec<u8>, NavigationRejection> {
+        let request: OperatorCycleTranscriptExportRequest = decode_operation_request(
+            frame,
+            factory_protocol::REQUEST_FRAME_MAX_BYTES,
+            OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS,
+        )
+        .map_err(NavigationRejection::Frame)?;
+        let campaign_id = match request.campaign_id {
+            Some(id) => {
+                let id = positive(id, "campaign ID")?;
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT id
+                       FROM factory.campaigns
+                      WHERE id = $1 AND lifecycle IN (1, 2, 3)",
+                )
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(navigation_database)?
+            }
+            None => sqlx::query_scalar::<_, i64>(
+                "SELECT id
+                   FROM factory.campaigns
+                  WHERE lifecycle IN (1, 2, 3)
+                  ORDER BY id DESC
+                  LIMIT 1",
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(navigation_database)?,
+        };
+
+        let (directory, files, missing_session_ids) = if let Some(campaign_id) = campaign_id {
+            let rows = sqlx::query(
+                "SELECT s.id AS session_id,
+                        s.transcript_artifact_id,
+                        s.partial_transcript_artifact_id,
+                        transcript.digest AS transcript_digest,
+                        transcript.byte_length AS transcript_byte_length,
+                        partial.digest AS partial_digest,
+                        partial.byte_length AS partial_byte_length
+                   FROM factory.sessions s
+              LEFT JOIN factory.artifacts transcript
+                     ON transcript.id = s.transcript_artifact_id
+              LEFT JOIN factory.artifacts partial
+                     ON partial.id = s.partial_transcript_artifact_id
+                  WHERE s.campaign_id = $1
+                  ORDER BY s.id ASC
+                  LIMIT $2",
+            )
+            .bind(campaign_id)
+            .bind(i64::try_from(CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM + 1).map_err(|_| {
+                NavigationRejection::Navigation(NavigationError::Corrupt {
+                    field: "campaign session export limit",
+                })
+            })?)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(navigation_database)?;
+            if rows.len() > CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM {
+                return Err(NavigationRejection::Navigation(NavigationError::Export {
+                    message: "campaign has more sessions than the closed export bound".to_owned(),
+                }));
+            }
+            let cas = self.cas.as_ref().ok_or_else(|| {
+                NavigationRejection::Navigation(NavigationError::Export {
+                    message: "transcript export is not enabled on this daemon".to_owned(),
+                })
+            })?;
+            let directory = transcript_export_directory(campaign_id)?;
+            let mut files = Vec::new();
+            let mut missing_session_ids = Vec::new();
+            for row in rows {
+                let session_id = positive(row.try_get("session_id").map_err(navigation_database)?, "session ID")?;
+                let mut exported = false;
+                if row
+                    .try_get::<Option<i64>, _>("transcript_artifact_id")
+                    .map_err(navigation_database)?
+                    .is_some()
+                {
+                    let bytes = read_export_artifact(
+                        cas,
+                        &row,
+                        "transcript_digest",
+                        "transcript_byte_length",
+                    )?;
+                    let file_name = format!("session-{session_id}-transcript.ndjson.gz");
+                    write_export_file(&directory, &file_name, &bytes)?;
+                    files.push(CycleTranscriptFileResponse {
+                        session_id,
+                        kind: "transcript".to_owned(),
+                        file_name,
+                        byte_length: bytes.len() as u64,
+                    });
+                    exported = true;
+                }
+                if row
+                    .try_get::<Option<i64>, _>("partial_transcript_artifact_id")
+                    .map_err(navigation_database)?
+                    .is_some()
+                {
+                    let bytes = read_export_artifact(
+                        cas,
+                        &row,
+                        "partial_digest",
+                        "partial_byte_length",
+                    )?;
+                    let file_name = format!("session-{session_id}-partial.ndjson");
+                    write_export_file(&directory, &file_name, &bytes)?;
+                    files.push(CycleTranscriptFileResponse {
+                        session_id,
+                        kind: "partial_transcript".to_owned(),
+                        file_name,
+                        byte_length: bytes.len() as u64,
+                    });
+                    exported = true;
+                }
+                if !exported {
+                    missing_session_ids.push(session_id);
+                }
+            }
+            (Some(directory.display().to_string()), files, missing_session_ids)
+        } else {
+            (None, Vec::new(), Vec::new())
+        };
+        let response = OperatorCycleTranscriptExportResponse {
+            protocol_version: PROTOCOL_VERSION_V2,
+            request_id: request.request_id,
+            operation: OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS.to_owned(),
+            campaign_id,
+            directory,
+            files,
+            missing_session_ids,
         };
         Ok(json::to_string(&response).into_bytes())
     }
@@ -1276,6 +1434,8 @@ enum NavigationError {
     Corrupt { field: &'static str },
     #[error("institutional search limit must be between 1 and 50")]
     InvalidInstitutionalLimit,
+    #[error("transcript export unavailable: {message}")]
+    Export { message: String },
 }
 
 impl NavigationError {
@@ -1284,7 +1444,9 @@ impl NavigationError {
             Self::NotFound { .. } => "navigation_not_found",
             Self::InvalidSelector => "invalid_audit_selector",
             Self::InvalidInstitutionalLimit => "invalid_institutional_navigation",
-            Self::Database(_) | Self::Corrupt { .. } => "navigation_unavailable",
+            Self::Database(_) | Self::Corrupt { .. } | Self::Export { .. } => {
+                "navigation_unavailable"
+            }
         }
     }
 }
@@ -1504,6 +1666,100 @@ fn artifact(
         })?,
     })
 }
+
+fn transcript_export_directory(campaign_id: i64) -> Result<PathBuf, NavigationRejection> {
+    let directory = std::env::temp_dir().join(format!("cycle-{campaign_id}-status"));
+    match fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(NavigationRejection::Navigation(NavigationError::Export {
+                message: "transcript export directory is a symbolic link".to_owned(),
+            }));
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(NavigationRejection::Navigation(NavigationError::Export {
+                message: "transcript export path is not a directory".to_owned(),
+            }));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(&directory).map_err(|error| {
+                NavigationRejection::Navigation(NavigationError::Export {
+                    message: format!("create transcript export directory: {error}"),
+                })
+            })?;
+        }
+        Err(error) => {
+            return Err(NavigationRejection::Navigation(NavigationError::Export {
+                message: format!("inspect transcript export directory: {error}"),
+            }));
+        }
+    }
+    Ok(directory)
+}
+
+fn read_export_artifact(
+    cas: &CasStore,
+    row: &sqlx::postgres::PgRow,
+    digest_field: &str,
+    byte_length_field: &str,
+) -> Result<Vec<u8>, NavigationRejection> {
+    let digest = row
+        .try_get::<Option<Vec<u8>>, _>(digest_field)
+        .map_err(navigation_database)?
+        .ok_or_else(|| {
+            NavigationRejection::Navigation(NavigationError::Corrupt {
+                field: "transcript artifact digest",
+            })
+        })?;
+    let digest: [u8; 32] = digest.try_into().map_err(|_| {
+        NavigationRejection::Navigation(NavigationError::Corrupt {
+            field: "transcript artifact digest",
+        })
+    })?;
+    let bytes = cas
+        .read_verified(ContentDigest::from_bytes(digest))
+        .map_err(|error| {
+            NavigationRejection::Navigation(NavigationError::Export {
+                message: format!("read transcript artifact from CAS: {error}"),
+            })
+        })?;
+    let declared = row
+        .try_get::<Option<i64>, _>(byte_length_field)
+        .map_err(navigation_database)?
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| {
+            NavigationRejection::Navigation(NavigationError::Corrupt {
+                field: "transcript artifact byte length",
+            })
+        })?;
+    if declared != bytes.len() as u64 {
+        return Err(NavigationRejection::Navigation(NavigationError::Export {
+            message: "transcript artifact byte length changed".to_owned(),
+        }));
+    }
+    Ok(bytes)
+}
+
+fn write_export_file(
+    directory: &PathBuf,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<(), NavigationRejection> {
+    let path = directory.join(file_name);
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(NavigationRejection::Navigation(NavigationError::Export {
+                message: format!("transcript export target {file_name} is unsafe"),
+            }));
+        }
+    }
+    fs::write(&path, bytes).map_err(|error| {
+        NavigationRejection::Navigation(NavigationError::Export {
+            message: format!("write transcript export file {file_name}: {error}"),
+        })
+    })
+}
+
 fn positive(value: i64, field: &'static str) -> Result<i64, NavigationError> {
     if value > 0 {
         Ok(value)

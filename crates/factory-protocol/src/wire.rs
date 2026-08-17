@@ -76,6 +76,11 @@ pub const OP_OPERATOR_SEAL_ARTIFACT: &str = "operator.artifact.seal";
 pub const OP_OPERATOR_LIST_TICKETS: &str = "operator.ticket.list";
 /// One compact, read-only summary for the local operator's high-level view.
 pub const OP_OPERATOR_FACTORY_STATUS: &str = "operator.factory.status";
+/// Reconstructs the latest terminal campaign's session transcript artifacts
+/// into an operator-owned temporary directory. The daemon reads PostgreSQL
+/// and CAS; the client receives paths and bounded metadata, never transcript
+/// bytes over the operator frame.
+pub const OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS: &str = "operator.cycle.export_transcripts";
 pub const OP_OPERATOR_SHOW_TICKET: &str = "operator.ticket.show";
 pub const OP_OPERATOR_SHOW_CANDIDATE: &str = "operator.candidate.show";
 pub const OP_OPERATOR_SHOW_AUDIT: &str = "operator.audit.show";
@@ -268,6 +273,7 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_OPERATOR_ACTIVATE_APPLICATION
             | OP_OPERATOR_SEAL_ARTIFACT
             | OP_OPERATOR_FACTORY_STATUS
+            | OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS
             | OP_OPERATOR_LIST_TICKETS
             | OP_OPERATOR_SHOW_TICKET
             | OP_OPERATOR_SHOW_CANDIDATE
@@ -833,6 +839,9 @@ read_request!(OperatorApplicationShowRequest {
     application_revision_id: Option<i64>,
 });
 read_request!(OperatorFactoryStatusRequest {});
+read_request!(OperatorCycleTranscriptExportRequest {
+    campaign_id: Option<i64>
+});
 mutating_request!(OperatorApplicationRegisterRequest {
     expected_kernel_build_revision: u64,
     kernel_build_id: String,
@@ -1388,6 +1397,31 @@ pub struct FactoryStatusResponse {
     pub session_total: u32,
     pub running_session_count: u32,
     pub unknown_cost_session_count: u32,
+}
+
+/// One materialized transcript file written by the daemon for a terminal
+/// campaign status inspection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleTranscriptFileResponse {
+    pub session_id: i64,
+    pub kind: String,
+    pub file_name: String,
+    pub byte_length: u64,
+}
+
+/// Result of reconstructing one terminal campaign's transcript evidence from
+/// PostgreSQL artifact identities and kernel-owned CAS bytes. Missing
+/// sessions remain explicit so a failed campaign cannot appear complete just
+/// because no transcript was available to export.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorCycleTranscriptExportResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub campaign_id: Option<i64>,
+    pub directory: Option<String>,
+    pub files: Vec<CycleTranscriptFileResponse>,
+    pub missing_session_ids: Vec<i64>,
 }
 
 /// One bounded, read-only campaign projection. Its ticket counts and

@@ -435,6 +435,37 @@ fn factory_status_projection_round_trips_with_full_counts() {
 }
 
 #[test]
+fn cycle_transcript_export_projection_round_trips_with_missing_sessions() {
+    let request = OperatorCycleTranscriptExportRequest {
+        protocol_version: PROTOCOL_VERSION_V2,
+        request_id: "cycle-transcripts-request".to_owned(),
+        operation: OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS.to_owned(),
+        campaign_id: None,
+    };
+    let decoded: OperatorCycleTranscriptExportRequest =
+        json::from_str(&json::to_string(&request)).expect("export request round trip");
+    assert_eq!(decoded, request);
+
+    let response = OperatorCycleTranscriptExportResponse {
+        protocol_version: PROTOCOL_VERSION_V2,
+        request_id: request.request_id,
+        operation: OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS.to_owned(),
+        campaign_id: Some(9),
+        directory: Some("/tmp/cycle-9-status".to_owned()),
+        files: vec![CycleTranscriptFileResponse {
+            session_id: 12,
+            kind: "transcript".to_owned(),
+            file_name: "session-12-transcript.ndjson.gz".to_owned(),
+            byte_length: 128,
+        }],
+        missing_session_ids: vec![13],
+    };
+    let decoded: OperatorCycleTranscriptExportResponse =
+        json::from_str(&json::to_string(&response)).expect("export response round trip");
+    assert_eq!(decoded, response);
+}
+
+#[test]
 fn every_operation_golden_is_typed_parsed_and_serialized() {
     let root: json::Value = json::from_str(include_str!(
         "../../../tests/protocol-fixtures/operation-goldens.json"

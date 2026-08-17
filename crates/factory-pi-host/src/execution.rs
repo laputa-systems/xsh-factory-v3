@@ -13,12 +13,12 @@ use crate::tool_bridge::{
 };
 use factory_protocol::ContentDigest;
 use pi_agent_core::agent::Agent;
-use pi_agent_core::event::{AgentEvent, AgentEventKind};
+use pi_agent_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
 use pi_agent_core::hooks::{
     AfterToolCall, BeforeToolCall, ContextEnvelope, HookFuture, HookSet, NextTurn,
 };
 use pi_agent_core::provider::openai::OpenAiContextHook;
-use pi_agent_core::scheduler::ModelProvider;
+use pi_agent_core::scheduler::{CancellationToken, ModelProvider};
 use pi_agent_core::state::{RunSnapshot, StopReason};
 use pi_agent_core::tool::{AgentToolResult, ToolCall, ToolRegistry};
 use pi_agent_luau::tool_handler::{
@@ -115,6 +115,44 @@ pub struct PreparedExecution {
     cost_reader: Option<CostReader>,
     command_context: CommandContext,
     _policy: Arc<LuaPolicy>,
+}
+
+/// Enforce the admitted campaign allowance at provider-turn boundaries.
+///
+/// Provider accounting is refreshed when a provider turn settles, so a timer would only reread
+/// the same snapshot between turns. The core's awaited lifecycle observer gives the host a
+/// precise boundary immediately after each completed model usage event (and its corresponding
+/// turn end), preserving cancellation without a scheduler poll loop.
+struct TurnCostObserver {
+    reader: CostReader,
+    cancellation: CancellationToken,
+    allowance: u64,
+    reached: Arc<AtomicBool>,
+}
+
+impl EventObserver for TurnCostObserver {
+    fn observe<'a>(
+        &'a self,
+        event: &'a AgentEvent,
+        _event_cancellation: CancellationToken,
+    ) -> ObserverFuture<'a> {
+        Box::pin(async move {
+            if matches!(
+                &event.kind,
+                AgentEventKind::ModelTurnUsage { .. } | AgentEventKind::TurnEnd { .. }
+            ) {
+                let snapshot = (self.reader)();
+                if snapshot
+                    .reported_micro_usd
+                    .is_some_and(|cost| cost >= self.allowance)
+                {
+                    self.reached.store(true, Ordering::Release);
+                    self.cancellation.cancel();
+                }
+            }
+            Ok(())
+        })
+    }
 }
 
 impl fmt::Debug for PreparedExecution {
@@ -427,36 +465,19 @@ impl PreparedExecution {
             .map_err(ExecutionError::Core)?;
         let cancellation = handle.cancellation();
         let cost_limit_reached = Arc::new(AtomicBool::new(false));
-        let cost_monitor = self.cost_reader.as_ref().map(|reader| {
-            let reader = Arc::clone(reader);
-            let cancellation = cancellation.clone();
-            let reached = Arc::clone(&cost_limit_reached);
-            let allowance = self
-                .admission
-                .packet
-                .remaining_campaign_allowance_micro_usd;
-            smol::spawn(async move {
-                loop {
-                    if cancellation.is_cancelled() {
-                        break;
-                    }
-                    let snapshot = reader();
-                    if snapshot
-                        .reported_micro_usd
-                        .is_some_and(|cost| cost >= allowance)
-                    {
-                        reached.store(true, Ordering::Release);
-                        cancellation.cancel();
-                        break;
-                    }
-                    smol::Timer::after(factory_settings::PROVIDER_COST_POLL_INTERVAL).await;
-                }
-            })
+        let cost_observer = self.cost_reader.as_ref().map(|reader| {
+            Arc::new(TurnCostObserver {
+                reader: Arc::clone(reader),
+                cancellation: cancellation.clone(),
+                allowance: self
+                    .admission
+                    .packet
+                    .remaining_campaign_allowance_micro_usd,
+                reached: Arc::clone(&cost_limit_reached),
+            }) as Arc<dyn EventObserver>
         });
+        let _cost_subscription = cost_observer.map(|observer| self.agent.subscribe(observer));
         let drive_result = handle.drive().await;
-        if let Some(monitor) = cost_monitor {
-            monitor.cancel().await;
-        }
         let snapshot = handle.snapshot();
         let events = handle.events();
         if let Err(error) = drive_result {
@@ -755,7 +776,7 @@ mod tests {
     use super::*;
     use pi_agent_core::hooks::ContextEnvelope;
     use pi_agent_core::scheduler::CancellationToken;
-    use pi_agent_core::state::{Message, MessageId};
+    use pi_agent_core::state::{Message, MessageId, RunId, StopReason, TurnId};
     use pi_agent_luau::tool_handler::{
         CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
     };
@@ -880,6 +901,32 @@ mod tests {
             source_with_wrong_digest.text(),
             Err(ExecutionError::PolicyDigestMismatch)
         ));
+    }
+
+    #[test]
+    fn provider_cost_is_checked_at_turn_end_without_a_timer() {
+        let cancellation = CancellationToken::new();
+        let observer = TurnCostObserver {
+            reader: Arc::new(|| CostSnapshot {
+                reported_micro_usd: Some(101),
+                complete: false,
+            }),
+            cancellation: cancellation.clone(),
+            allowance: 100,
+            reached: Arc::new(AtomicBool::new(false)),
+        };
+        let event = AgentEvent {
+            run_id: RunId(1),
+            sequence: pi_agent_core::event::EventSequence(1),
+            kind: AgentEventKind::TurnEnd {
+                turn_id: TurnId(1),
+                reason: StopReason::Stop,
+            },
+        };
+        smol::block_on(observer.observe(&event, cancellation.clone()))
+            .expect("turn-boundary observer succeeds");
+        assert!(cancellation.is_cancelled());
+        assert!(observer.reached.load(Ordering::Acquire));
     }
 
     #[test]

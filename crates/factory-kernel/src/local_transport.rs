@@ -35,6 +35,7 @@ use factory_protocol::{
     OperatorApplicationRegisterRequest, OperatorApplicationShowRequest,
     OperatorArtifactSealReceiptResponse, OperatorArtifactSealRequest, OperatorAuditShowRequest,
     OperatorCampaignStatusRequest, OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
+    OperatorCycleTranscriptExportRequest, OperatorCycleTranscriptExportResponse,
     OperatorFactoryStatusRequest, OperatorInstitutionalSearchRequest,
     OperatorInstitutionalShowRequest, OperatorPublicationCreateRequest, OperatorShutdownRequest,
     OperatorShutdownResponse, OperatorStartCampaignRequest, OperatorStatusRequest,
@@ -736,6 +737,19 @@ impl OperatorClient {
             .await
     }
 
+    /// Materializes the latest terminal campaign's transcript artifacts into
+    /// a daemon-owned temporary directory and returns only bounded metadata.
+    pub async fn export_cycle_transcripts(
+        &self,
+        request: OperatorCycleTranscriptExportRequest,
+    ) -> Result<OperatorCycleTranscriptExportResponse, LocalTransportError> {
+        self.application_exchange(
+            &request,
+            factory_protocol::OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS,
+        )
+        .await
+    }
+
     pub async fn show_ticket(
         &self,
         request: OperatorTicketShowRequest,
@@ -1239,6 +1253,17 @@ impl LocalDaemon {
             OperatorNavigationCapability::from_operator_transport(),
             store,
         ));
+        self
+    }
+
+    /// Adds daemon-owned CAS custody to the read-only navigation router so
+    /// `make status` can materialize terminal-cycle transcripts without
+    /// exposing database or CAS access to `factoryctl`.
+    #[must_use]
+    pub fn with_navigation_transcript_export(mut self, cas: Arc<CasStore>) -> Self {
+        if let Some(router) = self.navigation_rpc.take() {
+            self.navigation_rpc = Some(router.with_transcript_cas(cas));
+        }
         self
     }
 
@@ -1940,6 +1965,7 @@ async fn serve_operator_connection(
             .await
         }
         factory_protocol::OP_OPERATOR_FACTORY_STATUS
+        | factory_protocol::OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS
         | factory_protocol::OP_OPERATOR_LIST_TICKETS
         | factory_protocol::OP_OPERATOR_SHOW_TICKET
         | factory_protocol::OP_OPERATOR_SHOW_CANDIDATE

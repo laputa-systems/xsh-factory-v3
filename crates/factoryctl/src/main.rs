@@ -37,7 +37,9 @@ use factory_protocol::{
     ForumTopicsResponseV2, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
-    OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorFactoryStatusRequest,
+    OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
+    OperatorCycleTranscriptExportRequest, OperatorCycleTranscriptExportResponse,
+    OperatorFactoryStatusRequest,
     OperatorStartCampaignRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
     PROTOCOL_VERSION_V2, RuntimeRelativePath, SealedArtifactReferenceWireV2, TicketListResponse,
     TicketShowResponse,
@@ -94,7 +96,15 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
                     operation: factory_protocol::OP_OPERATOR_FACTORY_STATUS.to_owned(),
                 })
                 .await?;
-            print_factory_status(&daemon, &factory, connection.json);
+            let transcript_export = client
+                .export_cycle_transcripts(OperatorCycleTranscriptExportRequest {
+                    protocol_version: PROTOCOL_VERSION_V2,
+                    request_id: navigation_request_id("cycle-transcripts"),
+                    operation: factory_protocol::OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS.to_owned(),
+                    campaign_id: None,
+                })
+                .await?;
+            print_factory_status(&daemon, &factory, &transcript_export, connection.json);
         }
         CliCommand::DaemonStop(connection) => {
             let shutdown = OperatorClient::new(connection.socket_path)
@@ -459,11 +469,12 @@ fn daemon_status_output(status: &factory_protocol::OperatorStatusResponse, json:
 fn print_factory_status(
     daemon: &factory_protocol::OperatorStatusResponse,
     factory: &FactoryStatusResponse,
+    transcript_export: &OperatorCycleTranscriptExportResponse,
     json: bool,
 ) {
     if json {
         println!(
-            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"operator.factory.status\",\"daemon_state\":\"{}\",\"kernel_build_id\":{},\"daemon_revision\":{},\"application_key\":{},\"application_revision_id\":{},\"application_aggregate_revision\":{},\"application_active\":{},\"ticket_total\":{},\"proposed_ticket_count\":{},\"sponsored_ticket_count\":{},\"in_flight_ticket_count\":{},\"delivered_ticket_count\":{},\"blocked_ticket_count\":{},\"other_ticket_count\":{},\"campaign_total\":{},\"running_campaign_count\":{},\"completed_campaign_count\":{},\"failed_campaign_count\":{},\"cancelled_campaign_count\":{},\"session_total\":{},\"running_session_count\":{},\"unknown_cost_session_count\":{}}}",
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"operator.factory.status\",\"daemon_state\":\"{}\",\"kernel_build_id\":{},\"daemon_revision\":{},\"application_key\":{},\"application_revision_id\":{},\"application_aggregate_revision\":{},\"application_active\":{},\"ticket_total\":{},\"proposed_ticket_count\":{},\"sponsored_ticket_count\":{},\"in_flight_ticket_count\":{},\"delivered_ticket_count\":{},\"blocked_ticket_count\":{},\"other_ticket_count\":{},\"campaign_total\":{},\"running_campaign_count\":{},\"completed_campaign_count\":{},\"failed_campaign_count\":{},\"cancelled_campaign_count\":{},\"session_total\":{},\"running_session_count\":{},\"unknown_cost_session_count\":{},\"transcript_export_campaign_id\":{},\"transcript_export_directory\":{},\"transcript_export_file_count\":{},\"transcript_export_missing_session_count\":{}}}",
             PROTOCOL_VERSION_V2,
             factory.request_id,
             daemon.state,
@@ -488,6 +499,10 @@ fn print_factory_status(
             factory.session_total,
             factory.running_session_count,
             factory.unknown_cost_session_count,
+            optional_i64(transcript_export.campaign_id),
+            optional_json_string(transcript_export.directory.as_deref()),
+            transcript_export.files.len(),
+            transcript_export.missing_session_ids.len(),
         );
         return;
     }
@@ -535,6 +550,14 @@ fn print_factory_status(
         "  sessions: {} total ({} running, {} unknown-cost)",
         factory.session_total, factory.running_session_count, factory.unknown_cost_session_count
     );
+    match (&transcript_export.campaign_id, &transcript_export.directory) {
+        (Some(campaign_id), Some(directory)) => println!(
+            "  transcripts: cycle #{campaign_id} -> {directory} ({} files, {} sessions without transcript)",
+            transcript_export.files.len(),
+            transcript_export.missing_session_ids.len(),
+        ),
+        _ => println!("  transcripts: no completed cycle"),
+    }
 }
 
 fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
