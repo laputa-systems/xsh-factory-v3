@@ -1500,6 +1500,10 @@ pub struct CampaignSessionCostResponse {
     pub cost_state: String,
     pub cost_micro_usd: Option<u64>,
     pub elapsed_millis: Option<u64>,
+    /// Absolute path to the live, flushed NDJSON transcript while this
+    /// session is prepared or running. Terminal sessions use the durable
+    /// transcript export projection instead.
+    pub transcript_path: Option<String>,
 }
 
 /// Complete campaign spend grouped by the identities an operator uses to

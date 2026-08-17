@@ -802,7 +802,7 @@ fn session_costs_json(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             output.push(',');
         }
         output.push_str(&format!(
-            "{{\"session_id\":{},\"assignment_id\":{},\"office\":\"{}\",\"model_provider\":\"{}\",\"model_id\":\"{}\",\"outcome\":\"{}\",\"cost_state\":\"{}\",\"cost_micro_usd\":{},\"elapsed_millis\":{}}}",
+            "{{\"session_id\":{},\"assignment_id\":{},\"office\":\"{}\",\"model_provider\":\"{}\",\"model_id\":\"{}\",\"outcome\":\"{}\",\"cost_state\":\"{}\",\"cost_micro_usd\":{},\"elapsed_millis\":{},\"transcript_path\":{}}}",
             row.session_id,
             row.assignment_id,
             row.assignment_role,
@@ -812,6 +812,7 @@ fn session_costs_json(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
             row.cost_state,
             optional_u64(row.cost_micro_usd),
             optional_u64(row.elapsed_millis),
+            optional_json_string(row.transcript_path.as_deref()),
         ));
     }
     output.push(']');
@@ -825,7 +826,7 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
     let mut output = String::from("\n  sessions:");
     for row in rows {
         output.push_str(&format!(
-            "\n    #{} assignment #{}: {} / {}/{} ({}, {}; cost {}{})",
+            "\n    #{} assignment #{}: {} / {}/{} ({}, {}; cost {}{}{})",
             row.session_id,
             row.assignment_id,
             row.assignment_role,
@@ -837,6 +838,9 @@ fn session_costs_text(rows: &[factory_protocol::CampaignSessionCostResponse]) ->
                 .map_or_else(|| "unknown".to_owned(), |cost| format!("{cost} μUSD")),
             row.elapsed_millis
                 .map_or_else(String::new, |elapsed| format!("; elapsed {elapsed} ms")),
+            row.transcript_path
+                .as_deref()
+                .map_or_else(String::new, |path| format!("; transcript {path}")),
         ));
     }
     output

@@ -46,6 +46,13 @@ bounded; embedded base64 payloads are redacted to lengths. This prevents an
 interactive UI representation from becoming the factory's permanent evidence
 format while retaining actionable actor and tool diagnostics.
 
+While a session is prepared or running, `factoryctl campaign status` exposes
+the absolute path to its flushed `staging/assignment-<id>/session.ndjson`
+stream. The host appends the same bounded compact projection as events settle,
+so an operator can follow live progress without reading the actor socket. The
+staging path is transient; after terminal cleanup, use the durable cycle
+transcript export path instead.
+
 Typed boundaries preserve the important authoritative material separately:
 required-read manifests, sealed artifacts, reproducer observations, regression
 and validation logs, candidate patches, reviews, and delivery receipts. A

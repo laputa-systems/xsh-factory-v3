@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::OpenOptions,
     future::Future,
-    io::{Read as _, Write as _},
+    io::{self, Read as _, Write as _},
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -2357,15 +2357,22 @@ async fn adopt_runtime_artifact(
 }
 
 fn ensure_partial_transcript(path: &Path) -> Result<(), SessionRuntimeError> {
-    let mut file = OpenOptions::new()
+    let mut file = match OpenOptions::new()
         .create(true)
+        .create_new(true)
         .truncate(true)
         .write(true)
         .open(path)
-        .map_err(|source| SessionRuntimeError::TerminalEvidenceIo {
-            path: path.to_owned(),
-            source,
-        })?;
+    {
+        Ok(file) => file,
+        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(source) => {
+            return Err(SessionRuntimeError::TerminalEvidenceIo {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    };
     file.write_all(
         format!(
             "{{\"type\":\"factory.partial_transcript.v1\",\"source\":\"{SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH}\",\"source_byte_length\":0,\"truncated\":false}}\n"
@@ -2860,6 +2867,22 @@ mod tests {
             "{\"type\":\"factory.partial_transcript.v1\",\"source\":\"session.ndjson\",\"source_byte_length\":0,\"truncated\":false}\n"
         );
         std::fs::remove_file(path).expect("remove partial transcript marker");
+    }
+
+    #[test]
+    fn existing_live_partial_transcript_is_not_overwritten_by_terminal_marker() {
+        let path = std::env::temp_dir().join(format!(
+            "factory-v3-live-partial-transcript-{}-{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        let live = b"{\"type\":\"turn_start\",\"sequence\":1}\n";
+        std::fs::write(&path, live).expect("write live transcript");
+
+        ensure_partial_transcript(&path).expect("preserve live transcript");
+
+        assert_eq!(std::fs::read(&path).expect("read live transcript"), live);
+        std::fs::remove_file(path).expect("remove live transcript");
     }
 
     #[test]

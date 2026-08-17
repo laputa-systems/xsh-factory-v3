@@ -16,7 +16,7 @@
 //! again; no resolver result can waive them.  Until that trusted composition
 //! exists, those operations reject before any durable authority call.
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, path::{Path, PathBuf}, pin::Pin, sync::Arc};
 
 use factory_protocol::{
     AggregateRevision, ArchitectDecideCandidateRequest, ArchitectDecisionKindV2,
@@ -50,6 +50,7 @@ use crate::{
     ticket_store::CurrentHeadRequalification,
     ticket_store::TicketStore,
 };
+use factory_settings::SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH;
 
 type DecisionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, DecisionStoreError>> + Send + 'a>>;
@@ -551,6 +552,7 @@ pub(crate) struct CampaignOperatorRpc {
     process: ProcessStore,
     tickets: TicketStore,
     active_sessions: ActiveSessionCancellationRegistry,
+    runtime_root: PathBuf,
 }
 
 impl CampaignOperatorRpc {
@@ -559,11 +561,13 @@ impl CampaignOperatorRpc {
         process: ProcessStore,
         tickets: TicketStore,
         active_sessions: ActiveSessionCancellationRegistry,
+        runtime_root: PathBuf,
     ) -> Self {
         Self {
             process,
             tickets,
             active_sessions,
+            runtime_root,
         }
     }
 
@@ -660,6 +664,7 @@ impl CampaignOperatorRpc {
             product_identity,
             &session_costs,
             &session_cost_aggregates,
+            &self.runtime_root,
         ))
     }
 
@@ -790,6 +795,7 @@ fn campaign_status_response(
     product_identity: crate::process::CampaignProductIdentity,
     session_costs: &[crate::process::SessionCostBreakdown],
     session_cost_aggregates: &[crate::process::SessionCostAggregate],
+    runtime_root: &Path,
 ) -> Vec<u8> {
     let (measured_cost_state, measured_cost_micro_usd, remaining_budget_micro_usd) =
         campaign_cost_projection(campaign.measured_cost, campaign.aggregate_budget);
@@ -906,6 +912,11 @@ fn campaign_status_response(
                     cost_state: cost_state.to_owned(),
                     cost_micro_usd,
                     elapsed_millis: session.elapsed_millis,
+                    transcript_path: live_transcript_path(
+                        runtime_root,
+                        session.assignment_id,
+                        session.outcome,
+                    ),
                 }
             })
             .collect(),
@@ -942,6 +953,27 @@ fn office_name(assignment_role: factory_protocol::AssignmentRole) -> &'static st
         factory_protocol::AssignmentRole::Engineering => "engineering",
         factory_protocol::AssignmentRole::Quality => "quality",
     }
+}
+
+fn live_transcript_path(
+    runtime_root: &Path,
+    assignment_id: factory_protocol::AssignmentId,
+    state: factory_protocol::SessionState,
+) -> Option<String> {
+    if !matches!(
+        state,
+        factory_protocol::SessionState::Prepared | factory_protocol::SessionState::Running
+    ) {
+        return None;
+    }
+    Some(
+        runtime_root
+            .join("staging")
+            .join(format!("assignment-{}", assignment_id.get()))
+            .join(SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH)
+            .display()
+            .to_string(),
+    )
 }
 
 fn session_state_name(state: factory_protocol::SessionState) -> &'static str {

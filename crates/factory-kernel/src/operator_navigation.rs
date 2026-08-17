@@ -347,6 +347,10 @@ impl OperatorNavigationRpc {
                 if should_export_complete_transcript(
                     transcript_artifact_id,
                     partial_transcript_artifact_id,
+                    row.try_get::<Option<Vec<u8>>, _>("transcript_digest")
+                        .map_err(navigation_database)?,
+                    row.try_get::<Option<Vec<u8>>, _>("partial_digest")
+                        .map_err(navigation_database)?,
                 ) {
                     let bytes = read_export_artifact(
                         cas,
@@ -1777,8 +1781,12 @@ fn positive(value: i64, field: &'static str) -> Result<i64, NavigationError> {
 fn should_export_complete_transcript(
     transcript_artifact_id: Option<i64>,
     partial_transcript_artifact_id: Option<i64>,
+    transcript_digest: Option<Vec<u8>>,
+    partial_digest: Option<Vec<u8>>,
 ) -> bool {
-    transcript_artifact_id.is_some() && transcript_artifact_id != partial_transcript_artifact_id
+    transcript_artifact_id.is_some()
+        && transcript_artifact_id != partial_transcript_artifact_id
+        && transcript_digest != partial_digest
 }
 
 fn revision(value: i64) -> Result<u64, NavigationError> {
@@ -1813,11 +1821,37 @@ mod tests {
 
     #[test]
     fn partial_transcript_is_not_projected_as_a_gzip_archive() {
-        assert!(should_export_complete_transcript(Some(1), None));
-        assert!(should_export_complete_transcript(Some(1), Some(2)));
-        assert!(!should_export_complete_transcript(Some(1), Some(1)));
-        assert!(!should_export_complete_transcript(None, Some(1)));
-        assert!(!should_export_complete_transcript(None, None));
+        assert!(should_export_complete_transcript(
+            Some(1),
+            None,
+            Some(vec![1]),
+            None,
+        ));
+        assert!(should_export_complete_transcript(
+            Some(1),
+            Some(2),
+            Some(vec![1]),
+            Some(vec![2]),
+        ));
+        assert!(!should_export_complete_transcript(
+            Some(1),
+            Some(1),
+            Some(vec![1]),
+            Some(vec![1]),
+        ));
+        assert!(!should_export_complete_transcript(
+            Some(1),
+            Some(2),
+            Some(vec![1]),
+            Some(vec![1]),
+        ));
+        assert!(!should_export_complete_transcript(
+            None,
+            Some(1),
+            None,
+            Some(vec![1]),
+        ));
+        assert!(!should_export_complete_transcript(None, None, None, None));
     }
 
     #[test]

@@ -1223,6 +1223,7 @@ impl LocalDaemon {
             process,
             tickets,
             self.active_sessions.clone(),
+            self.runtime.config.runtime_root().to_owned(),
         ));
         self
     }

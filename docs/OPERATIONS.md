@@ -135,6 +135,10 @@ Before requesting the projection, it compares the daemon's reported qualified
 build identity with the current release `factoryd` identity. A mismatch fails
 closed with the live and expected IDs, because an older resident daemon cannot
 serve newer status operations; restart it through `make factory-start`.
+For a prepared or running session, `factoryctl campaign status` also reports
+the absolute path to the flushed live `session.ndjson` staging stream; follow
+that transient file for progress and use the terminal export below after
+cleanup.
 After the aggregate projection, the daemon selects the newest terminal
 campaign (completed, failed, or cancelled), reads its session artifact IDs from
 PostgreSQL, verifies the corresponding CAS bytes, and writes available

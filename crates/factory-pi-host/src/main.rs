@@ -16,6 +16,8 @@ use pi_agent_core::provider::openrouter::{OpenRouterConfig, OpenRouterProvider};
 use pi_agent_core::scheduler::ModelProvider;
 use pi_agent_core::state::StopReason;
 use pi_agent_core::{AgentEvent, AgentEventKind};
+use pi_agent_core::event::{EventObserver, ObserverFuture};
+use pi_agent_core::scheduler::CancellationToken;
 use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use factory_settings::{
@@ -24,11 +26,11 @@ use factory_settings::{
 use flate2::{Compression, write::GzEncoder};
 use std::{
     env,
-    fs,
+    fs::{self, File, OpenOptions},
     io::Write,
     path::Path,
     process::ExitCode,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -90,6 +92,10 @@ async fn run() -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     let prepared = input.prepare().map_err(|e| e.to_string())?;
+    let live_transcript = Arc::new(LiveTranscriptWriter::new(&admission)?);
+    let _live_transcript_subscription = prepared
+        .agent()
+        .subscribe(Arc::clone(&live_transcript) as Arc<dyn EventObserver>);
     let result = match prepared.drive().await {
         Ok(result) => result,
         Err(error) => {
@@ -175,6 +181,79 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+struct LiveTranscriptState {
+    file: File,
+    byte_length: usize,
+    truncated: bool,
+    byte_limit: usize,
+}
+
+struct LiveTranscriptWriter {
+    state: Mutex<LiveTranscriptState>,
+}
+
+impl LiveTranscriptWriter {
+    fn new(admission: &Admission) -> Result<Self, String> {
+        let path = Path::new(&admission.packet.staging_root).join("session.ndjson");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&path)
+            .map_err(|error| format!("create live transcript {}: {error}", path.display()))?;
+        Ok(Self {
+            state: Mutex::new(LiveTranscriptState {
+                file,
+                byte_length: 0,
+                truncated: false,
+                byte_limit: admission.packet.limits.output_byte_limit as usize,
+            }),
+        })
+    }
+
+    fn append(&self, event: &AgentEvent) {
+        let line = match project_event(event) {
+            Ok(line) => line,
+            Err(error) => {
+                eprintln!("factory-pi-host live transcript projection failed: {error}");
+                return;
+            }
+        };
+        if line.is_empty() {
+            return;
+        }
+        let mut line = line.into_bytes();
+        line.push(b'\n');
+        let mut state = self.state.lock().expect("live transcript mutex poisoned");
+        if state.truncated {
+            return;
+        }
+        if state.byte_length.saturating_add(line.len()) > state.byte_limit {
+            state.truncated = true;
+            return;
+        }
+        if let Err(error) = state.file.write_all(&line).and_then(|()| state.file.flush()) {
+            eprintln!("factory-pi-host live transcript write failed: {error}");
+            state.truncated = true;
+            return;
+        }
+        state.byte_length = state.byte_length.saturating_add(line.len());
+    }
+}
+
+impl EventObserver for LiveTranscriptWriter {
+    fn observe<'a>(
+        &'a self,
+        event: &'a AgentEvent,
+        _cancellation: CancellationToken,
+    ) -> ObserverFuture<'a> {
+        Box::pin(async move {
+            self.append(event);
+            Ok(())
+        })
+    }
 }
 
 fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
