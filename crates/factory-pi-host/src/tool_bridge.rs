@@ -33,7 +33,9 @@ pub const FACTORY_CAPABILITY: &str = "factory";
 pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
 const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
-const MAX_ENGINEERING_TURNS: u32 = 32;
+const MAX_ENGINEERING_TURNS: u32 = 64;
+const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
+const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
@@ -267,6 +269,9 @@ struct EngineeringProgressState {
     phase: EngineeringPhase,
     owner_searches: u32,
     turns_started: u32,
+    last_tool_call: Option<String>,
+    identical_tool_calls: u32,
+    shell_calls: u32,
 }
 
 impl Default for EngineeringProgressState {
@@ -275,6 +280,9 @@ impl Default for EngineeringProgressState {
             phase: EngineeringPhase::Disabled,
             owner_searches: 0,
             turns_started: 0,
+            last_tool_call: None,
+            identical_tool_calls: 0,
+            shell_calls: 0,
         }
     }
 }
@@ -346,6 +354,9 @@ impl CommandContext {
             phase: EngineeringPhase::AwaitingCheckpoint,
             owner_searches: 0,
             turns_started: 0,
+            last_tool_call: None,
+            identical_tool_calls: 0,
+            shell_calls: 0,
         };
     }
 
@@ -426,6 +437,40 @@ impl CommandContext {
             return Err("Engineering candidate submission is outside the active phase");
         }
         state.phase = EngineeringPhase::Submitted;
+        Ok(())
+    }
+
+    pub(crate) fn record_engineering_tool_call(
+        &self,
+        tool: ToolName,
+        signature: &str,
+    ) -> Result<(), &'static str> {
+        let mut state = self
+            .engineering
+            .lock()
+            .map_err(|_| "Engineering phase state is unavailable")?;
+        if matches!(state.phase, EngineeringPhase::Disabled | EngineeringPhase::Submitted) {
+            return Ok(());
+        }
+        if tool == ToolName::Shell {
+            state.shell_calls = state.shell_calls.saturating_add(1);
+            if state.shell_calls > MAX_ENGINEERING_SHELL_CALLS {
+                return Err(
+                    "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit",
+                );
+            }
+        }
+        if state.last_tool_call.as_deref() == Some(signature) {
+            state.identical_tool_calls = state.identical_tool_calls.saturating_add(1);
+        } else {
+            state.last_tool_call = Some(signature.to_owned());
+            state.identical_tool_calls = 1;
+        }
+        if state.identical_tool_calls >= MAX_ENGINEERING_IDENTICAL_TOOL_CALLS {
+            return Err(
+                "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit",
+            );
+        }
         Ok(())
     }
 
@@ -511,6 +556,22 @@ impl CommandContext {
         {
             return Err(
                 "Engineering must call candidate_checkpoint_regression before shell, write, or edit",
+            );
+        }
+        if state.phase == EngineeringPhase::Implementing
+            && matches!(
+                tool,
+                ToolName::WorkspaceSearch
+                    | ToolName::WorkspaceList
+                    | ToolName::ArtifactRead
+                    | ToolName::ForumSearch
+                    | ToolName::ForumListTopics
+                    | ToolName::ForumListThreads
+                    | ToolName::ForumReadThread
+            )
+        {
+            return Err(
+                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners are under crates/xsh-registry/src/signature and src/runtime/eval)",
             );
         }
         Ok(())
@@ -831,6 +892,11 @@ where
             .to_json_string()
             .map(|arguments| format!("{name}:{arguments}"))
             .unwrap_or_else(|_| format!("{name}:<unserializable>"));
+        self.command_context
+            .record_engineering_tool_call(name, &product_tool_signature)
+            .map_err(|message| CapabilityError::Execution {
+                message: message.to_owned(),
+            })?;
         self.command_context
             .record_product_tool_call(&product_tool_signature);
         if name.defers_without_daemon() {
@@ -1972,6 +2038,17 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::Shell)
                 .is_ok()
         );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
+                .is_ok()
+        );
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
+            Err(
+                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners are under crates/xsh-registry/src/signature and src/runtime/eval)"
+            )
+        );
         assert!(!context.engineering_should_stop_after_turn());
         context
             .record_engineering_submission()
@@ -1992,6 +2069,60 @@ mod tests {
             assert!(!context.engineering_should_stop_after_turn());
         }
         assert!(context.engineering_should_stop_after_turn());
+    }
+
+    #[test]
+    fn engineering_phase_rejects_repeated_identical_tool_calls() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+
+        for _ in 0..(MAX_ENGINEERING_IDENTICAL_TOOL_CALLS - 1) {
+            assert!(context
+                .record_engineering_tool_call(
+                    ToolName::Shell,
+                    "shell:{\"command\":\"rg owner\"}"
+                )
+                .is_ok());
+        }
+        assert_eq!(
+            context.record_engineering_tool_call(
+                ToolName::Shell,
+                "shell:{\"command\":\"rg owner\"}"
+            ),
+            Err(
+                "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit"
+            )
+        );
+        assert!(context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceEdit,
+                "workspace_edit:{\"path\":\"src/lib.rs\"}"
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn engineering_phase_rejects_shell_search_budget() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+
+        for index in 0..MAX_ENGINEERING_SHELL_CALLS {
+            assert!(context
+                .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
+                .is_ok());
+        }
+        assert_eq!(
+            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
+            Err(
+                "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit"
+            )
+        );
     }
 
     #[test]
