@@ -128,6 +128,10 @@ explicit `FACTORY_STATUS_SOCKET` when supplied, otherwise the
 advertised by a running `factoryd`. It reports the daemon identity, active XSH
 revision, complete ticket-state counts, campaign totals, and session/cost
 warnings without opening PostgreSQL from the operator shell.
+Before requesting the projection, it compares the daemon's reported qualified
+build identity with the current release `factoryd` identity. A mismatch fails
+closed with the live and expected IDs, because an older resident daemon cannot
+serve newer status operations; restart it through `make factory-start`.
 After the aggregate projection, the daemon selects the newest terminal
 campaign (completed, failed, or cancelled), reads its session artifact IDs from
 PostgreSQL, verifies the corresponding CAS bytes, and writes available
