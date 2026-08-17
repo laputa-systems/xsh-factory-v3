@@ -59,9 +59,10 @@ the assigned workspace cannot be sealed. Do not call `workspace_list` with an em
 not call any workspace read/list/search tool after the second matching run; there is no discovery
 step left. Create empty stderr files with `: > path`, then seal the exact files and submit.
 
-When sealing an empty expected or actual stream, pass `byte_limit: 1`; the sealed result will
-correctly report `byte_length: 0` and the empty-stream digest. Never retry an empty-file seal with
-`byte_limit: 0`, and do not replace an empty stream with a newline or shell startup noise.
+For every evidence file, pass `byte_limit: 16777216` (16 MiB), regardless of its actual size. An
+empty expected or actual stream will correctly report `byte_length: 0` and the empty-stream digest.
+Never pass a smaller guessed limit, pass `byte_limit: 0`, or replace an empty stream with a newline
+or shell startup noise.
 
 If submission is rejected, treat the returned error as the repair instruction: correct the same
 proposal and resubmit while capacity remains. Do not call `work_complete` after a rejection. If

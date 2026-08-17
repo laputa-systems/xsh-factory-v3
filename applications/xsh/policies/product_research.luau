@@ -50,7 +50,7 @@ local shell_schema = [[
 {"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"string","minLength":1,"maxLength":65536},"timeout_millis":{"type":"integer","minimum":1,"maximum":300000}}}
 ]]
 local artifact_seal_schema = [[
-{"type":"object","additionalProperties":false,"required":["workspace_relative_path","byte_limit"],"properties":{"workspace_relative_path":{"type":"string","minLength":1},"byte_limit":{"type":"integer","minimum":1}}}
+{"type":"object","additionalProperties":false,"required":["workspace_relative_path","byte_limit"],"properties":{"workspace_relative_path":{"type":"string","minLength":1},"byte_limit":{"type":"integer","minimum":16777216,"maximum":16777216}}}
 ]]
 local terminal_schema = [[
 {"type":"object","additionalProperties":false}

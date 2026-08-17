@@ -332,12 +332,22 @@ impl OperatorNavigationRpc {
             let mut missing_session_ids = Vec::new();
             for row in rows {
                 let session_id = positive(row.try_get("session_id").map_err(navigation_database)?, "session ID")?;
-                let mut exported = false;
-                if row
+                let transcript_artifact_id = row
                     .try_get::<Option<i64>, _>("transcript_artifact_id")
-                    .map_err(navigation_database)?
-                    .is_some()
-                {
+                    .map_err(navigation_database)?;
+                let partial_transcript_artifact_id = row
+                    .try_get::<Option<i64>, _>("partial_transcript_artifact_id")
+                    .map_err(navigation_database)?;
+                let mut exported = false;
+                // When a host dies before sealing its compact transcript, the
+                // terminal transition stores the bounded partial marker in both
+                // transcript columns for the session-level evidence invariant.
+                // Do not mislabel that JSON marker as a gzip archive in the
+                // operator projection; export it only as the partial record.
+                if should_export_complete_transcript(
+                    transcript_artifact_id,
+                    partial_transcript_artifact_id,
+                ) {
                     let bytes = read_export_artifact(
                         cas,
                         &row,
@@ -354,11 +364,7 @@ impl OperatorNavigationRpc {
                     });
                     exported = true;
                 }
-                if row
-                    .try_get::<Option<i64>, _>("partial_transcript_artifact_id")
-                    .map_err(navigation_database)?
-                    .is_some()
-                {
+                if partial_transcript_artifact_id.is_some() {
                     let bytes = read_export_artifact(
                         cas,
                         &row,
@@ -1767,6 +1773,14 @@ fn positive(value: i64, field: &'static str) -> Result<i64, NavigationError> {
         Err(NavigationError::Corrupt { field })
     }
 }
+
+fn should_export_complete_transcript(
+    transcript_artifact_id: Option<i64>,
+    partial_transcript_artifact_id: Option<i64>,
+) -> bool {
+    transcript_artifact_id.is_some() && transcript_artifact_id != partial_transcript_artifact_id
+}
+
 fn revision(value: i64) -> Result<u64, NavigationError> {
     u64::try_from(value).map_err(|_| NavigationError::Corrupt {
         field: "aggregate revision",
@@ -1795,6 +1809,15 @@ mod tests {
         assert!(AuditSelector::parse("subject_kind:7").is_err());
         assert!(AuditSelector::parse("ticket:7:drop").is_err());
         assert!(ticket_state_code("anything").is_err());
+    }
+
+    #[test]
+    fn partial_transcript_is_not_projected_as_a_gzip_archive() {
+        assert!(should_export_complete_transcript(Some(1), None));
+        assert!(should_export_complete_transcript(Some(1), Some(2)));
+        assert!(!should_export_complete_transcript(Some(1), Some(1)));
+        assert!(!should_export_complete_transcript(None, Some(1)));
+        assert!(!should_export_complete_transcript(None, None));
     }
 
     #[test]

@@ -49,8 +49,9 @@ test replaces it. Seal a bounded rationale, risks, and additional-probes report,
 
 Create these three files in the assigned workspace before sealing them: `review_rationale.md`,
 `review_risks.md`, and `review_additional_probes.md`. Use those exact paths with `artifact_seal`
-after each file exists, and copy the complete receipt from each seal into the matching
-`quality_submit_review` field. Never call `artifact_seal` on a path that has not been created.
+and `byte_limit: 16777216` (16 MiB) after each file exists, then copy the complete receipt from
+each seal into the matching `quality_submit_review` field. Never call `artifact_seal` on a path that
+has not been created.
 
 Your verdict is qualitative. It cannot waive a failed or missing hard validation, an exact-tree
 mismatch, a missing required read, a cost stop, or a dirty checkout. Record your conclusion and

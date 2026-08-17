@@ -64,7 +64,7 @@ local publication_schema = [[
 {"type":"object","additionalProperties":false,"required":["anchor","kind","summary","body_artifact_id"],"properties":{"anchor":{"type":"object","additionalProperties":false,"required":["kind","id"],"properties":{"kind":{"enum":["project","rfc","rfc_revision","ticket","ticket_revision","experiment","claim","decision"]},"id":{"type":"integer","minimum":1}}},"kind":{"enum":["finding","question","challenge","correction","decision_link","note"]},"summary":{"type":"string","minLength":1,"maxLength":4096},"body_artifact_id":{"type":"integer","minimum":1},"attachments":{"type":"array","maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["artifact_id","label"],"properties":{"artifact_id":{"type":"integer","minimum":1},"label":{"type":"string","minLength":1,"maxLength":160}}}},"reply_to":{"type":["integer","null"],"minimum":1},"supersedes":{"type":["integer","null"],"minimum":1}}}
 ]]
 local artifact_seal_schema = [[
-{"type":"object","additionalProperties":false,"required":["workspace_relative_path","byte_limit"],"properties":{"workspace_relative_path":{"type":"string","minLength":1},"byte_limit":{"type":"integer","minimum":1}}}
+{"type":"object","additionalProperties":false,"required":["workspace_relative_path","byte_limit"],"properties":{"workspace_relative_path":{"type":"string","minLength":1},"byte_limit":{"type":"integer","minimum":16777216,"maximum":16777216}}}
 ]]
 local artifact_read_schema = [[
 {"type":"object","additionalProperties":false,"required":["artifact_id","expected_digest"],"properties":{"artifact_id":{"type":"integer","minimum":1},"expected_digest":{"type":"string"}}}

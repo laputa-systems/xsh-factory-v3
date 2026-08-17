@@ -39,6 +39,7 @@ assignment.
 
 Use the controller's exact sealed receipts; do not guess artifact IDs, digests, observations, or
 command shapes. Create those files in one shell call from the current assigned workspace with
-relative paths; do not `cd` to `/tmp`, and do not call `workspace_list` with an empty path. When an
-evidence stream is empty, seal its empty file with `byte_limit: 1`; the controller records the
-resulting zero-byte artifact. Do not pass `byte_limit: 0` or add placeholder bytes.
+relative paths; do not `cd` to `/tmp`, and do not call `workspace_list` with an empty path. For
+every evidence file, pass `byte_limit: 16777216` (16 MiB), regardless of its actual size. The
+controller records the exact resulting byte length, including zero for an empty file. Do not pass a
+smaller guessed limit, pass `byte_limit: 0`, or add placeholder bytes.

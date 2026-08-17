@@ -17,7 +17,7 @@ Invoke `quality_run_full_suite` with `validation_profile` exactly `full` before 
 review. Its receipt must be from this review assignment and the exact candidate tree. Do not invent
 an assignment, candidate, or validation profile name. Before sealing, create `review_rationale.md`,
 `review_risks.md`, and `review_additional_probes.md` in the assigned workspace. Seal those exact
-paths through `artifact_seal`, then copy each complete seal receipt into the matching review field;
+paths through `artifact_seal` with `byte_limit: 16777216` (16 MiB), then copy each complete seal receipt into the matching review field;
 do not put long report text into a terminal tool call or seal a path that does not exist. Use
 `quality_submit_review` once only after the full-suite receipt is available. Review workspace edits
 are intentionally discarded. Never treat a speculative probe, a focused shell check, or an

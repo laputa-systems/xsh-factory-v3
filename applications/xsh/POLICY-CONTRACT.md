@@ -14,6 +14,10 @@ source of truth in Pi's model catalog at
 bundle only after syncing the selected model's rates and limits from that
 catalog.
 
+Product and Quality evidence files use the full 16 MiB CAS object ceiling as
+their `artifact_seal` request limit. The receipt records the actual file length,
+so empty evidence remains a zero-byte artifact without a guessed one-byte limit.
+
 Every role policy returns the `pi-agent-luau` `factory_policy` declaration:
 
 - `system_prompt_append` is present and currently empty;

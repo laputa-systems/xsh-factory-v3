@@ -4,7 +4,7 @@
     {
       "assignment_role": "product_research",
       "assignment_template": {
-        "digest": "cd8d8fd0ac16a29023265019a3cd69181596bcc82d3451e7e946de7c0a6d37aa",
+        "digest": "4098c3d2cb2926ea3429d80aa78539993bc0d66483585b5f49a7856dffd2fdb2",
         "placeholders": [
           "ASSIGNMENT_ID",
           "TARGET"
@@ -32,12 +32,12 @@
       },
       "policy": {
         "byte_limit": 65536,
-        "digest": "3ac3cd6a8fdc210597640a8e3a2030c87b880fef7bcb43cb1b676189b5f7e0bc",
+        "digest": "2fa3afb7d7b27f57fbb1c6600b0a1563c2945107d7596519c5489fb8cda22f6d",
         "entrypoint": "factory_policy",
         "source_path": "policies/product_research.luau"
       },
       "system_template": {
-        "digest": "ab5ead279dae48d12ccb0aa1aa16cda68aaf6483ede87114de8b882dd9fbcbbb",
+        "digest": "7770740d0a0bb33d524c83bc1d4afcba1345e27cd2592e3abd209d57165adc4c",
         "placeholders": [
           "ASSIGNMENT_ID",
           "MISSION"
@@ -121,7 +121,7 @@
     {
       "assignment_role": "quality",
       "assignment_template": {
-        "digest": "9307ca252b80baa0b402612e8852d90b94530151f8badb7584c3ef93629ba889",
+        "digest": "87a6821519c614763ed3f9a6e7456c1e117b6840121e8ba250fa60ef60466a56",
         "placeholders": [
           "ASSIGNMENT_ID",
           "TARGET"
@@ -149,12 +149,12 @@
       },
       "policy": {
         "byte_limit": 65536,
-        "digest": "74df778cb541114d889ea25a7aa018aec333dfa240c8dcec6ac1d74f91fe7783",
+        "digest": "64d8102f58df7a90932acf559112011c222222e86ebfedbda6b6d1387f46770b",
         "entrypoint": "factory_policy",
         "source_path": "policies/quality.luau"
       },
       "system_template": {
-        "digest": "6468f88ec084a051b0cc1f4d6d5623c51c1892ed5e110cf36741c0d97842e36d",
+        "digest": "8f9ae59ef0036412583fc0cd7ab558745322936369ed32c039a0e6abdcfc1ac6",
         "placeholders": [
           "ASSIGNMENT_ID",
           "MISSION"
