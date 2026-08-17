@@ -41,8 +41,10 @@ make pi-agent-core-rs-acceptance
 `make factoryd-serve` keeps the OpenRouter credential out of the daemon
 environment. The daemon checks `vault OPENROUTER_API_KEY -- ...` before
 binding its socket and resolves the credential from Vault for each assignment.
-It requires explicit `FACTORY_DATABASE_URL` and `FACTORY_RUNTIME_ROOT`; it
-does not itself start paid work.
+The live lane must use the continuous `factory_live_v3` database through
+`FACTORY_DATABASE_URL`; lifecycle targets reject cycle-specific live names.
+`FACTORY_RUNTIME_ROOT` remains explicit, and the daemon does not itself start
+paid work.
 
 ## Application bundles
 

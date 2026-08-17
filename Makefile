@@ -26,7 +26,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build status paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build status factory-database-guard paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -109,20 +109,33 @@ paid-cycle-preflight:
 	  exit 1; \
 	 fi
 
+# One live XSH lane owns one continuous PostgreSQL authority.  Cycle-specific
+# database names are rejected before a daemon can initialize or serve, so a
+# caller cannot silently strand tickets by choosing a new database per cycle.
+factory-database-guard:
+	test -n "$$FACTORY_DATABASE_URL"
+	@set -eu; \
+	 database_url="$$FACTORY_DATABASE_URL"; \
+	 database_name="$${database_url##*/}"; \
+	 database_name="$${database_name%%\?*}"; \
+	 test "$$database_name" = factory_live_v3 || { \
+	  printf 'factory: FACTORY_DATABASE_URL must name %s (got %s); cycle-specific live databases are forbidden\n' \
+	   factory_live_v3 "$$database_name" >&2; \
+	  exit 1; \
+	 }
+
 # The daemon has no provider credential in its environment. It invokes Vault
 # for startup preflight and again at each provider-backed assignment launch.
 # Callers must choose the dedicated database and runtime root explicitly.
-factoryd-serve:
-	test -n "$$FACTORY_DATABASE_URL"
+factoryd-serve: factory-database-guard
 	test -n "$$FACTORY_RUNTIME_ROOT"
 	target/release/factoryd serve \
 		--database-url "$$FACTORY_DATABASE_URL" \
 		--runtime-root "$$FACTORY_RUNTIME_ROOT" \
 		--operation-deadline-ms "$(FACTORY_OPERATION_DEADLINE_MS)"
 
-factory-start:
+factory-start: factory-database-guard
 	test -x "$(FACTORYCTL)"
-	test -n "$$FACTORY_DATABASE_URL"
 	test -n "$$FACTORY_RUNTIME_ROOT"
 	test -d "$(CURDIR)/applications/xsh"
 	test -f "$(CURDIR)/applications/xsh/bundle.v2.json"
@@ -230,9 +243,8 @@ factory-stop:
 	 test ! -e "$(FACTORY_START_PID_FILE)" || rm -f -- "$(FACTORY_START_PID_FILE)"; \
 	 printf 'factory-stop: stopped cleanly\n'
 
-factory-reset:
+factory-reset: factory-database-guard
 	test "$(FACTORY_RESET_CONFIRM)" = "WIPE_FACTORY"
-	test -n "$$FACTORY_DATABASE_URL"
 	test -n "$$FACTORY_RUNTIME_ROOT"
 	command -v dropdb >/dev/null
 	command -v createdb >/dev/null

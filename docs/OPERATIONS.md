@@ -39,7 +39,7 @@ when needed, daemon launch under a tracked process group, readiness polling,
 and XSH application activation:
 
 ```sh
-FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_live_v3' \
 FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factory-start
 ```
@@ -52,11 +52,23 @@ a fresh pair merely because the previous campaign reached a terminal state.
 That would strand retained ticket and campaign history in an unrelated
 authority and make the apparent queue smaller than the durable one.
 
+The live database name is fixed at `factory_live_v3`. The lifecycle guard
+rejects cycle-specific names such as `factory_live_v3_20260817_cycle88` before
+initialization or service, so every fresh paid cycle stays in the same durable
+authority.
+
+If historical cycle databases already exist, renaming one of them is not a
+consolidation: it preserves only that database's rows and leaves the other
+authorities stranded. Do not drop or splice them manually. A real consolidation
+requires a qualified migration of every referenced row, ID relationship,
+artifact/CAS identity, and runtime-evidence boundary before the continuous
+authority can claim the historical backlog.
+
 Stop the same runtime through the typed operator socket and preserve all durable
 factory state:
 
 ```sh
-FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_live_v3' \
 FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factory-stop
 ```
@@ -65,10 +77,10 @@ The lower-level commands remain useful for diagnostics and deployment work:
 
 ```sh
 factoryctl init \
-  --database-url 'postgresql://USER@localhost/factory_v3' \
+  --database-url 'postgresql://USER@localhost/factory_live_v3' \
   --runtime-root /absolute/path/to/factory-runtime
 
-FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_live_v3' \
 FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factoryd-serve
 ```

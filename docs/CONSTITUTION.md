@@ -68,7 +68,7 @@ already-created PostgreSQL database and a runtime root outside source control,
 run:
 
 ```sh
-FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_live_v3' \
 FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factory-start
 ```
@@ -86,8 +86,9 @@ environment. Its startup and assignment preflight resolve
 `OPENROUTER_API_KEY` through Vault. Do not wrap lifecycle commands in a shell
 that exports the key or pass the key as an argument.
 
-The selected PostgreSQL database and runtime root are durable lane state, not
-per-cycle scratch space. Keep them stable across fresh paid-cycle admissions;
+The selected PostgreSQL database is the continuous `factory_live_v3` authority,
+and the runtime root is durable lane state, not per-cycle scratch space. Keep
+them stable across fresh paid-cycle admissions;
 `make paid-cycle` appends a campaign to the existing authority and never
 creates a new database. Rotate the pair only when a Factory source/build or
 other qualified runtime input changes. The current contract has no safe
@@ -97,7 +98,7 @@ or manually splicing their rows.
 When work is complete, stop through the typed operator socket:
 
 ```sh
-FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_v3' \
+FACTORY_DATABASE_URL='postgresql://USER@localhost/factory_live_v3' \
 FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factory-stop
 ```
