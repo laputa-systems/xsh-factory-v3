@@ -24,13 +24,15 @@ If an edit anchor is rejected because its old text is not present, use no more t
 `workspace_search` or `workspace_list` recovery calls, then correct the smallest edit and resume
 the focused check. Do not return to broad discovery after mutation.
 
-For an Int standard-API method, read these exact adjacent owners before checkpointing rather than
-running repeated searches: `crates/xsh-registry/src/signature/methods.rs`,
-`crates/xsh-registry/src/runtime_op.rs`, and `src/runtime/eval/lowered_ops.rs`.
+For an Int standard-API method, read these exact owners before checkpointing rather than running
+repeated searches: `crates/xsh-registry/src/signature/methods.rs`,
+`crates/xsh-registry/src/runtime_op.rs`, `src/runtime/eval/lowered_ops.rs`,
+`crates/xsh-registry/src/signature/docs.rs`, and `docs/SPEC.md` beside `.float()`.
 The lowered runtime implementation belongs in the receiver-specific helper in
 `src/runtime/eval/lowered_ops.rs` (for Int, `lowered_int_method_value`), next to the existing
 `"float" if args.is_empty()` arm. Do not search for a separate `RuntimeOp` execution dispatch in
 `src/runtime`; the registry enum is metadata for the standard API and the lowered helper dispatches
 by method name. Add the nearest behavior assertion directly to `tests/xsh/stdlib/methods.xsh`;
-do not search for another test owner. After those exact edits, run the focused check and call
-`candidate_submit` immediately.
+update the canonical Int method list in `docs/SPEC.md` beside `.float()`; do not search for
+another owner. After those exact edits, run the focused check and call `candidate_submit`
+immediately.
