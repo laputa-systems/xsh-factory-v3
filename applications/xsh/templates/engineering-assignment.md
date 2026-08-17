@@ -14,8 +14,7 @@ reproducer and one focused relevant check, and call `candidate_submit` once with
 `regression_test_identity` set to `${REGRESSION_COMMAND}`. The controller owns hard validation,
 commit construction, and delivery; do not commit or push.
 
-For the sealed `main()?` print lead, the nearest owner is the compact evaluator's explicit-main
-predicate in `src/runtime/eval.rs`. It must recognize a zero-argument `main()` call (including the
-`Try` wrapper) before deciding whether implicit main dispatch is required. Keep the patch within
-that predicate/decision boundary; do not redesign evaluator frames or investigate unrelated
-runtime paths.
+The sealed Product proposal and evidence identify the nearest owner and exact behavior boundary.
+Use that owner rather than any stale example from an earlier assignment. After the checkpoint,
+keep the patch within the named owner and do not redesign evaluator frames, call scheduling, or
+unrelated runtime paths.

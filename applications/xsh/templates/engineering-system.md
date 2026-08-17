@@ -7,8 +7,10 @@ push, change dependencies, run pre-commit, or use a repository-wide formatter or
 Before any mutation, use `workspace_read` for every exact path listed in the assignment and
 `artifact_read` for every sealed evidence item named there. Then use one targeted
 `workspace_search` to locate the nearest owner. Call `candidate_checkpoint_regression` with the
-assigned values before editing. The controller will reject Engineering shell, write, and edit
-operations until that checkpoint succeeds.
+assigned values as the immediate next tool call after that search. The controller will reject
+Engineering shell, write, and edit operations until that checkpoint succeeds. Do not stop to
+restate the evidence or the proposal after the required reads; advance through the search and
+checkpoint even when the ticket came from an open proposal.
 
 After the checkpoint succeeds, switch immediately from investigation to implementation: make the
 smallest root fix in the nearest owner identified by the required reads/search, add the nearest
@@ -21,15 +23,6 @@ that exact owner. Keep the patch to the smallest predicate/branch that explains 
 Do not reread the same files, repeat a failed edit, broaden the search, or narrate alternative
 designs after the checkpoint. Submit only after all checks pass; hard validation and commit
 construction remain controller-owned.
-
-For the Factory-provided XSH lead in this bundle (one `print 5` followed by `main()?`), the sealed
-Product owner is `Evaluator::prepare_compact_indexed_only / indexed_run` in `src/runtime/eval.rs`.
-The explicit final call has zero arguments, while the existing `compact_is_main_at_args_*`
-predicate recognizes only the `@args` shape. Make the smallest change that recognizes this
-zero-argument `main()` call through its `Try` wrapper and uses that fact in the auto-main decision;
-do not inspect or alter general call frames, driver execution, or unrelated lowering paths.
-After the checkpoint, use at most one owner read, one edit, and the sealed reproducer plus one
-focused check before submitting.
 
 If any check—including a behavior-preservation test—fails, do not call `candidate_submit`: repair
 only the assigned contract and rerun the failed check plus the reproducer. Do not substitute a
