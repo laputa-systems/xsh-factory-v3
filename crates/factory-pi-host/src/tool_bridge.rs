@@ -268,6 +268,7 @@ impl EngineeringPhase {
 struct EngineeringProgressState {
     phase: EngineeringPhase,
     owner_searches: u32,
+    post_checkpoint_owner_lists: u32,
     turns_started: u32,
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
@@ -280,6 +281,7 @@ impl Default for EngineeringProgressState {
         Self {
             phase: EngineeringPhase::Disabled,
             owner_searches: 0,
+            post_checkpoint_owner_lists: 0,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -355,6 +357,7 @@ impl CommandContext {
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
             owner_searches: 0,
+            post_checkpoint_owner_lists: 0,
             turns_started: 0,
             last_tool_call: None,
             identical_tool_calls: 0,
@@ -566,11 +569,19 @@ impl CommandContext {
                 "Engineering must call candidate_checkpoint_regression before shell, write, or edit",
             );
         }
+        if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
+            if state.post_checkpoint_owner_lists != 0 {
+                return Err(
+                    "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit",
+                );
+            }
+            state.post_checkpoint_owner_lists = 1;
+            return Ok(());
+        }
         if state.phase == EngineeringPhase::Implementing
             && matches!(
                 tool,
                 ToolName::WorkspaceSearch
-                    | ToolName::WorkspaceList
                     | ToolName::ArtifactRead
                     | ToolName::ForumSearch
                     | ToolName::ForumListTopics
@@ -2050,6 +2061,17 @@ mod tests {
             context
                 .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
                 .is_ok()
+        );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                .is_ok()
+        );
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
+            Err(
+                "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit"
+            )
         );
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
