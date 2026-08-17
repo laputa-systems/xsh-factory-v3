@@ -183,8 +183,18 @@ factory-start: factory-database-guard
 	 if test -S "$$socket"; then \
 	  if live_json="$$($(FACTORYCTL) daemon status --socket "$$socket" --format json 2>/dev/null)"; then \
 	   live_build="$$(printf '%s\n' "$$live_json" | sed -n 's/.*"current_kernel_build_id":"\([^"]*\)".*/\1/p')"; \
-	   test "$$live_build" = "$$expected_build" || { printf 'factory-start: live daemon build %s differs from release build %s; stop it and choose a fresh runtime/database pair\n' "$$live_build" "$$expected_build" >&2; exit 1; }; \
-	   daemon_ready=1; \
+	   if test "$$live_build" = "$$expected_build"; then \
+	    daemon_ready=1; \
+	   else \
+	    printf 'factory-start: shutting down stale daemon build %s before starting release build %s\n' "$$live_build" "$$expected_build" >&2; \
+	    "$(FACTORYCTL)" daemon stop --socket "$$socket" --format json >/dev/null; \
+	    stopped=0; \
+	    for attempt in $$(seq 1 "$(FACTORY_START_WAIT_SECONDS)"); do \
+	     if test ! -e "$$socket"; then stopped=1; break; fi; \
+	     sleep 1; \
+	    done; \
+	    test "$$stopped" = 1 || { printf 'factory-start: stale daemon acknowledged shutdown but socket remains: %s\n' "$$socket" >&2; exit 1; }; \
+	   fi; \
 	  else \
 	   printf 'factory-start: stale socket detected; daemon start will reclaim it under the runtime lock\n' >&2; \
 	  fi; \
