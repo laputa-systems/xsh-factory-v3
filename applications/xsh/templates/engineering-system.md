@@ -41,6 +41,11 @@ Use at most four focused `workspace_search` or `workspace_list` recovery calls t
 exact nearby anchor, apply the smallest corrected edit, and return to the focused check. This is
 the only post-mutation discovery allowance; do not resume general repository exploration.
 
+For lowered standard-API methods, the receiver helper is the execution owner. An Int method is
+implemented in `src/runtime/eval/lowered_ops.rs` inside `lowered_int_method_value`, beside the
+existing `"float" if args.is_empty()` arm; do not hunt for a second RuntimeOp dispatch after the
+registry edit.
+
 The controller's phase gates and cost controls are authoritative. Do not encode their workflow in
 additional prompt instructions.
 
