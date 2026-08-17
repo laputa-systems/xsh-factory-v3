@@ -27,6 +27,7 @@ use pi_agent_luau::tool_handler::{
 use pi_agent_luau::{LuaPolicy, LuaPolicyHookSet, PolicyError, PolicyLimits};
 use std::fmt;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// A caller-owned sealed policy source.  The host accepts bytes, never a path, and verifies the
@@ -56,12 +57,19 @@ impl SealedPolicySource {
     }
 }
 
+/// A provider accounting snapshot. The reported amount may be partial while a
+/// run is still active; `complete` is required before treating it as the
+/// terminal provider total.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CostSnapshot {
+    /// Provider-reported spend observed so far, in micro-USD.
+    pub reported_micro_usd: Option<u64>,
+    /// Whether every completed provider turn has known accounting.
+    pub complete: bool,
+}
+
 /// Optional provider accounting callback owned by the provider adapter.
-///
-/// The core's provider trait intentionally does not expose provider-specific cost.  An adapter
-/// that has an auditable cost snapshot may supply this callback; absent a callback, the result
-/// remains `None` rather than treating unknown cost as zero.
-pub type CostReader = Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+pub type CostReader = Arc<dyn Fn() -> CostSnapshot + Send + Sync>;
 
 /// Inputs needed to prepare exactly one actor run.
 pub struct ExecutionInput {
@@ -200,8 +208,6 @@ impl ExecutionInput {
             .ok_or(ExecutionError::Agent(AgentHostError::MissingModel))?;
         if self.admission.packet.assignment_role == "engineering" {
             self.command_context.configure_engineering();
-        } else if self.admission.packet.assignment_role == "product_research" {
-            self.command_context.configure_product();
         }
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
@@ -278,7 +284,6 @@ impl HookSet for PhaseHookSet {
         context: &ContextEnvelope,
     ) -> Result<bool, pi_agent_core::error::HookError> {
         Ok(self.command_context.engineering_should_stop_after_turn()
-            || self.command_context.product_should_stop_after_turn()
             || self.inner.should_stop_after_turn(context)?)
     }
 
@@ -336,9 +341,7 @@ impl HookSet for PhaseHookSet {
             .should_stop_after_turn_async(context, cancellation);
         let command_context = self.command_context.clone();
         Box::pin(async move {
-            Ok(command_context.engineering_should_stop_after_turn()
-                || command_context.product_should_stop_after_turn()
-                || inner.await?)
+            Ok(command_context.engineering_should_stop_after_turn() || inner.await?)
         })
     }
 
@@ -422,7 +425,38 @@ impl PreparedExecution {
             .agent
             .start_prompt(prompt)
             .map_err(ExecutionError::Core)?;
+        let cancellation = handle.cancellation();
+        let cost_limit_reached = Arc::new(AtomicBool::new(false));
+        let cost_monitor = self.cost_reader.as_ref().map(|reader| {
+            let reader = Arc::clone(reader);
+            let cancellation = cancellation.clone();
+            let reached = Arc::clone(&cost_limit_reached);
+            let allowance = self
+                .admission
+                .packet
+                .remaining_campaign_allowance_micro_usd;
+            smol::spawn(async move {
+                loop {
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+                    let snapshot = reader();
+                    if snapshot
+                        .reported_micro_usd
+                        .is_some_and(|cost| cost >= allowance)
+                    {
+                        reached.store(true, Ordering::Release);
+                        cancellation.cancel();
+                        break;
+                    }
+                    smol::Timer::after(factory_settings::PROVIDER_COST_POLL_INTERVAL).await;
+                }
+            })
+        });
         let drive_result = handle.drive().await;
+        if let Some(monitor) = cost_monitor {
+            monitor.cancel().await;
+        }
         let snapshot = handle.snapshot();
         let events = handle.events();
         if let Err(error) = drive_result {
@@ -432,13 +466,24 @@ impl PreparedExecution {
                 snapshot.phase,
                 events.len(),
             );
-            return Err(ExecutionError::Core(error));
+            if !matches!(error, pi_agent_core::CoreError::Cancelled) {
+                return Err(ExecutionError::Core(error));
+            }
         }
         Ok(ExecutionResult::from_run(
             snapshot,
             events,
             self.terminal.pending(),
-            self.cost_reader.as_ref().and_then(|reader| reader()),
+            self.cost_reader
+                .as_ref()
+                .and_then(|reader| {
+                    let snapshot = reader();
+                    snapshot
+                        .complete
+                        .then_some(snapshot.reported_micro_usd)
+                        .flatten()
+                }),
+            cost_limit_reached.load(Ordering::Acquire),
             &self.command_context,
         ))
     }
@@ -458,6 +503,8 @@ pub struct ExecutionResult {
     pub usage: UsageSummary,
     /// Provider-reported cost, if the explicit accounting callback had a known value.
     pub cost_micro_usd: Option<u64>,
+    /// Whether the host cancelled this run after live provider spend reached its allowance.
+    pub cost_limit_reached: bool,
     /// Bounded run diagnostics retained for operator and transcript inspection.
     pub diagnostics: ExecutionDiagnostics,
 }
@@ -479,6 +526,7 @@ impl ExecutionResult {
         events: Vec<AgentEvent>,
         terminal: Option<crate::tool_bridge::DeferredTerminal>,
         cost_micro_usd: Option<u64>,
+        cost_limit_reached: bool,
         command_context: &CommandContext,
     ) -> Self {
         let usage = UsageSummary::from_events(&events);
@@ -497,6 +545,7 @@ impl ExecutionResult {
             terminal,
             usage,
             cost_micro_usd,
+            cost_limit_reached,
             diagnostics,
         }
     }
@@ -704,7 +753,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool_bridge::MAX_ENGINEERING_TURNS;
     use pi_agent_core::hooks::ContextEnvelope;
     use pi_agent_core::scheduler::CancellationToken;
     use pi_agent_core::state::{Message, MessageId};
@@ -851,7 +899,7 @@ mod tests {
             host_messages: Vec::new(),
         };
 
-        for _ in 0..(MAX_ENGINEERING_TURNS - 1) {
+        for _ in 0..64 {
             assert!(
                 !smol::block_on(
                     hooks.should_stop_after_turn_async(&context, CancellationToken::new(),)

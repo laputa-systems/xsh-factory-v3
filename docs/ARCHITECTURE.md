@@ -28,7 +28,9 @@ host code import those bounded limits, deadlines, retry counts, paths, and
 runtime identities from that one source. Wire protocol versions, operation
 names, persisted state/audit codes, and evidence-format identities remain in
 their owning crates because changing them changes a durable contract rather
-than tuning runtime behavior.
+than tuning runtime behavior. The complete session-boundary inventory, including
+the deliberately open-ended actor/provider progress policy, lives in
+[session boundaries](SESSION-BOUNDARIES.md).
 
 ## Authority split
 

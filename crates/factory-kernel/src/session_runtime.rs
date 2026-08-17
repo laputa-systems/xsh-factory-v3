@@ -2510,6 +2510,7 @@ fn parse_stop_reason(value: &str) -> Option<StopReasonV2> {
         "output_limit" => StopReasonV2::OutputLimit,
         "protocol_error" => StopReasonV2::ProtocolError,
         "unknown_cost" => StopReasonV2::UnknownCost,
+        "cost_limit" => StopReasonV2::CostLimit,
         _ => return None,
     })
 }
@@ -3013,5 +3014,11 @@ mod tests {
             ),
             StopReasonV2::Cancelled,
         );
+    }
+
+    #[test]
+    fn parses_live_cost_cancellation_as_a_closed_stop_reason() {
+        assert_eq!(parse_stop_reason("cost_limit"), Some(StopReasonV2::CostLimit));
+        assert_eq!(parse_stop_reason("length"), None);
     }
 }

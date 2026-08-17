@@ -1748,6 +1748,12 @@ impl ProcessStore {
         let measured = u64::try_from(session.measured_cost_micro_usd)
             .map_err(|_| StoreError::CorruptCostColumn)?;
         let (next_cost_state, cost_value, next_measured, campaign_lifecycle) = match cost {
+            TerminalCostV2::Known(value) if report.stop_reason == StopReasonV2::CostLimit => {
+                let total = measured
+                    .checked_add(value.get())
+                    .ok_or(StoreError::CorruptCostColumn)?;
+                (COST_EXCEEDED, Some(value.get()), total, FAILED)
+            }
             TerminalCostV2::Known(value) if session.campaign_cost_state == COST_KNOWN => {
                 let total = measured
                     .checked_add(value.get())
@@ -3086,6 +3092,7 @@ fn session_state(reason: StopReasonV2) -> SessionState {
     match reason {
         StopReasonV2::Completed => SessionState::Succeeded,
         StopReasonV2::Cancelled => SessionState::Cancelled,
+        StopReasonV2::CostLimit => SessionState::Failed,
         StopReasonV2::DaemonDisconnected | StopReasonV2::Deadline => SessionState::Interrupted,
         _ => SessionState::Failed,
     }
@@ -3196,6 +3203,7 @@ mod tests {
             session_state(StopReasonV2::UnknownCost),
             SessionState::Failed
         );
+        assert_eq!(session_state(StopReasonV2::CostLimit), SessionState::Failed);
     }
 
     #[test]

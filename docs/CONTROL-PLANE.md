@@ -33,19 +33,13 @@
    waiver: broad rewrites remain forbidden, and a passing candidate is not yet
    delivered.
    The host enforces the Engineering phase order independently of prompt prose:
-   required reads and bounded owner discovery may continue around the checkpoint,
-   shell/write/edit operations are unavailable before it, and the run stops at
-   controller-owned discovery, checkpoint, and submission deadlines with phase
-   diagnostics. A narrow no-match search therefore cannot strand the assignment;
-   once an owner file is read, search/list discovery remains available only within
-   the larger bounded post-checkpoint budget; pre-mutation shell discovery closes.
-   Adjacent exact reads of the assigned product repository's owner files and
-   the smallest mutation remain available, and focused shell validation unlocks
-   only after that mutation. Once a mutation
-   starts, search/list discovery closes except for four narrowly bounded recovery
-   lookups when an edit anchor needs repair; the actor must then validate, repair
-   the focused edit, or submit. Repeated discovery still fails closed at the
-   finite budget.
+   shell/write/edit operations are unavailable before the checkpoint, and a
+   shell validation after an owner read requires the smallest mutation first.
+   Required exact reads and phase-valid discovery remain available without a
+   numeric actor-progress budget. The actor may continue until it submits, the
+   process custody boundary fires, or live provider spend reaches the campaign
+   allowance. The complete boundary inventory is maintained in
+   `docs/SESSION-BOUNDARIES.md`.
 7. Quality receives a fresh worktree from the exact candidate tree, reruns the
    independent full suite through the kernel, and submits a qualitative review.
 8. The Architect delivers, requests one bounded rework, or rejects. Delivery
@@ -71,8 +65,10 @@ non-fast-forward delivery.
 
 ## Failure and recovery
 
-The daemon owns the process group, deadline, output cap, cancellation, direct
-wait, and terminal reconciliation. A session with neither usable token usage
+The daemon owns the process group, deadline, output capture, cancellation,
+direct wait, and terminal reconciliation. The host also polls provider-reported
+spend during the run and cancels at the remaining campaign allowance, emitting
+the typed `cost_limit` stop reason. A session with neither usable token usage
 nor a provider cost is fail-closed; otherwise the kernel computes Factory cost
 from the admitted model rates rather than trusting a provider-reported zero. A
 released ticket requalifies again under

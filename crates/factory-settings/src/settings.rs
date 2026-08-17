@@ -90,19 +90,9 @@ pub const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(600);
 pub const MAX_PROVIDER_RETRIES: u32 = 2;
 pub const PROVIDER_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 pub const PROVIDER_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(8);
+/// How often the host checks provider-reported spend while an actor is running.
+pub const PROVIDER_COST_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub const HOST_FALLBACK_PATH: &str = "/usr/bin:/bin";
 pub const HOST_SHELL_EXECUTABLE: &str = "/bin/sh";
 pub const HOST_KILL_EXECUTABLE: &str = "/bin/kill";
-
-// Actor turn and progress guards.
-pub const MAX_PRODUCT_TURNS: u32 = 64;
-pub const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
-pub const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
-pub const MAX_ENGINEERING_TURNS: u32 = 64;
-pub const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
-pub const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
-pub const MAX_ENGINEERING_OWNER_DISCOVERY_CALLS: u32 = 8;
-pub const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 32;
-pub const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
-pub const MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS: u32 = 4;
 pub const FACTORY_CAPABILITY: &str = "factory";

@@ -21,7 +21,7 @@ pub use admission::{
 pub use factory_settings::{PI_AGENT_CORE_SOURCE, RUNTIME_NAME};
 pub use agent_host::{AgentHost, AgentHostError, BareAgentHost, load_luau_policy};
 pub use execution::{
-    CostReader, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,
+    CostReader, CostSnapshot, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,
     PreparedExecution, SealedPolicySource, UsageSummary, build_factory_execution_input,
     build_policy_tools, factory_capability_bindings,
 };

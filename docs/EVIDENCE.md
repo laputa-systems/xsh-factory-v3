@@ -33,7 +33,8 @@ terminal state. This retains the information useful for diagnosis:
 
 - bounded assistant text;
 - tool names, boundaries, inputs, results, retries, and terminal reason;
-- usage, provider cost when reported, and the admitted-rate Factory cost.
+- usage, provider cost when reported, the `cost_limit` stop reason when live
+  cancellation fires, and the admitted-rate Factory cost.
 
 It deliberately removes cumulative interactive message snapshots, session-tree
 and fork state, and provider thinking blocks. Tool arguments/results are size

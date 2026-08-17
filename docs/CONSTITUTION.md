@@ -40,6 +40,12 @@ runtime is qualified and serving, changes to the Factory source graph,
 dependencies, selected build, or installed host invalidate that runtime and
 require fresh build qualification and runtime initialization.
 
+Actor progress is not authorized by an independent turn or response-length
+budget. The host lets an admitted provider run until its phase/terminal contract,
+process custody boundary, or live cost cancellation. The complete inventory of
+remaining safety, evidence, protocol, and economic boundaries is maintained in
+[`SESSION-BOUNDARIES.md`](SESSION-BOUNDARIES.md).
+
 After two consecutive rounds with the same Engineering no-candidate or
 no-delivery failure, the office must treat the controller state machine and
 tool protocol as the primary suspects. It must stop adding prompt text until

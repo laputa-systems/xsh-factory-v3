@@ -16,12 +16,6 @@ use pi_agent_luau::tool_handler::{
 };
 use pi_agent_protocol::{JsonNumber, JsonValue};
 pub use factory_settings::FACTORY_CAPABILITY;
-pub(crate) use factory_settings::{
-    MAX_ENGINEERING_IDENTICAL_TOOL_CALLS, MAX_ENGINEERING_OWNER_DISCOVERY_CALLS,
-    MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS, MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS,
-    MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS, MAX_ENGINEERING_SHELL_CALLS, MAX_ENGINEERING_TURNS,
-    MAX_PRODUCT_IDENTICAL_TOOL_CALLS, MAX_PRODUCT_NO_TOOL_TURNS, MAX_PRODUCT_TURNS,
-};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
@@ -30,10 +24,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Product research is intentionally open-ended, but a run must still settle if the model
-/// keeps asking for the same work or never reaches a terminal operation. These are host-side
-/// safety bounds, not response-size limits: ordinary prose and distinct investigation steps are
-/// allowed until the run makes no bounded progress.
+/// Product research is open-ended.  The host preserves phase and terminal-operation
+/// contracts, while live campaign-cost cancellation supplies the economic stop condition.
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -270,59 +262,22 @@ impl EngineeringPhase {
 #[derive(Debug)]
 struct EngineeringProgressState {
     phase: EngineeringPhase,
-    owner_searches: u32,
-    post_checkpoint_owner_lists: u32,
-    post_checkpoint_owner_searches: u32,
-    post_mutation_discovery_calls: u32,
-    owner_discovery_calls: u32,
     implementation_discovery_closed: bool,
     implementation_mutation_started: bool,
     regression_identity: Option<String>,
     runtime_owner_read: bool,
-    turns_started: u32,
-    last_tool_call: Option<String>,
-    identical_tool_calls: u32,
-    shell_calls: u32,
-    protocol_violations: u8,
-    recovery_turns_remaining: u8,
-    protocol_violation_recorded_this_turn: bool,
-    stalled: bool,
 }
 
 impl Default for EngineeringProgressState {
     fn default() -> Self {
         Self {
             phase: EngineeringPhase::Disabled,
-            owner_searches: 0,
-            post_checkpoint_owner_lists: 0,
-            post_checkpoint_owner_searches: 0,
-            post_mutation_discovery_calls: 0,
-            owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
             regression_identity: None,
             runtime_owner_read: false,
-            turns_started: 0,
-            last_tool_call: None,
-            identical_tool_calls: 0,
-            shell_calls: 0,
-            protocol_violations: 0,
-            recovery_turns_remaining: 0,
-            protocol_violation_recorded_this_turn: false,
-            stalled: false,
         }
     }
-}
-
-#[derive(Debug, Default)]
-struct ProductProgressState {
-    enabled: bool,
-    turns_started: u32,
-    last_tool_call: Option<String>,
-    identical_tool_calls: u32,
-    no_tool_turns: u32,
-    tool_called_this_turn: bool,
-    stalled: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -356,7 +311,6 @@ pub struct CommandContext {
     next_command_id: Arc<AtomicU64>,
     product_submission_rejected: Arc<AtomicBool>,
     engineering: Arc<Mutex<EngineeringProgressState>>,
-    product: Arc<Mutex<ProductProgressState>>,
     tool_execution: Arc<Mutex<BTreeMap<ToolName, ToolExecutionStats>>>,
 }
 
@@ -369,7 +323,6 @@ impl CommandContext {
             next_command_id: Arc::new(AtomicU64::new(0)),
             product_submission_rejected: Arc::new(AtomicBool::new(false)),
             engineering: Arc::new(Mutex::new(EngineeringProgressState::default())),
-            product: Arc::new(Mutex::new(ProductProgressState::default())),
             tool_execution: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -380,80 +333,11 @@ impl CommandContext {
         };
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
-            owner_searches: 0,
-            post_checkpoint_owner_lists: 0,
-            post_checkpoint_owner_searches: 0,
-            post_mutation_discovery_calls: 0,
-            owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
             regression_identity: None,
             runtime_owner_read: false,
-            turns_started: 0,
-            last_tool_call: None,
-            identical_tool_calls: 0,
-            shell_calls: 0,
-            protocol_violations: 0,
-            recovery_turns_remaining: 0,
-            protocol_violation_recorded_this_turn: false,
-            stalled: false,
         };
-    }
-
-    pub(crate) fn configure_product(&self) {
-        let Ok(mut state) = self.product.lock() else {
-            return;
-        };
-        *state = ProductProgressState {
-            enabled: true,
-            ..ProductProgressState::default()
-        };
-    }
-
-    /// Record one Product tool invocation before dispatching it to the host capability.
-    /// Identical calls are allowed for normal retries, but a fourth consecutive identical call
-    /// trips the progress guard so the run can settle with known provider cost.
-    pub(crate) fn record_product_tool_call(&self, signature: &str) {
-        let Ok(mut state) = self.product.lock() else {
-            return;
-        };
-        if !state.enabled || state.stalled {
-            return;
-        }
-        if state.last_tool_call.as_deref() == Some(signature) {
-            state.identical_tool_calls = state.identical_tool_calls.saturating_add(1);
-        } else {
-            state.last_tool_call = Some(signature.to_owned());
-            state.identical_tool_calls = 1;
-        }
-        state.tool_called_this_turn = true;
-        if state.identical_tool_calls >= MAX_PRODUCT_IDENTICAL_TOOL_CALLS {
-            state.stalled = true;
-        }
-    }
-
-    /// Count one completed model turn and report whether Product research has stalled.
-    pub(crate) fn product_should_stop_after_turn(&self) -> bool {
-        let Ok(mut state) = self.product.lock() else {
-            return true;
-        };
-        if !state.enabled {
-            return false;
-        }
-        state.turns_started = state.turns_started.saturating_add(1);
-        if state.tool_called_this_turn {
-            state.no_tool_turns = 0;
-            state.tool_called_this_turn = false;
-        } else {
-            state.no_tool_turns = state.no_tool_turns.saturating_add(1);
-            if state.no_tool_turns >= MAX_PRODUCT_NO_TOOL_TURNS {
-                state.stalled = true;
-            }
-        }
-        if state.turns_started >= MAX_PRODUCT_TURNS {
-            state.stalled = true;
-        }
-        state.stalled
     }
 
     pub(crate) fn record_engineering_checkpoint(&self) -> Result<(), &'static str> {
@@ -516,7 +400,7 @@ impl CommandContext {
     pub(crate) fn record_engineering_tool_call(
         &self,
         tool: ToolName,
-        signature: &str,
+        _signature: &str,
     ) -> Result<(), &'static str> {
         let mut state = self
             .engineering
@@ -528,7 +412,7 @@ impl CommandContext {
         ) {
             return Ok(());
         }
-        if tool == ToolName::WorkspaceRead && signature.contains("src/runtime/eval/lowered_ops.rs")
+        if tool == ToolName::WorkspaceRead && _signature.contains("src/runtime/eval/lowered_ops.rs")
         {
             state.runtime_owner_read = true;
         }
@@ -540,66 +424,14 @@ impl CommandContext {
         {
             state.implementation_mutation_started = true;
         }
-        if tool == ToolName::Shell {
-            state.shell_calls = state.shell_calls.saturating_add(1);
-            if state.shell_calls > MAX_ENGINEERING_SHELL_CALLS {
-                state.stalled = true;
-                return Err(
-                    "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit",
-                );
-            }
-        }
-        if state.last_tool_call.as_deref() == Some(signature) {
-            state.identical_tool_calls = state.identical_tool_calls.saturating_add(1);
-        } else {
-            state.last_tool_call = Some(signature.to_owned());
-            state.identical_tool_calls = 1;
-        }
-        if state.identical_tool_calls >= MAX_ENGINEERING_IDENTICAL_TOOL_CALLS {
-            state.stalled = true;
-            return Err(
-                "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit",
-            );
-        }
-        state.protocol_violations = 0;
-        state.recovery_turns_remaining = 0;
         Ok(())
     }
 
-    fn mark_engineering_protocol_violation(state: &mut EngineeringProgressState) {
-        if state.protocol_violation_recorded_this_turn {
-            return;
-        }
-        state.protocol_violation_recorded_this_turn = true;
-        state.protocol_violations = state.protocol_violations.saturating_add(1);
-        if state.protocol_violations > MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS {
-            state.stalled = true;
-        } else {
-            state.recovery_turns_remaining = MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS;
-        }
-    }
-
     pub(crate) fn engineering_should_stop_after_turn(&self) -> bool {
-        let Ok(mut state) = self.engineering.lock() else {
+        let Ok(state) = self.engineering.lock() else {
             return true;
         };
-        if state.stalled {
-            return true;
-        }
-        if state.recovery_turns_remaining != 0 {
-            state.recovery_turns_remaining = state.recovery_turns_remaining.saturating_sub(1);
-            state.protocol_violation_recorded_this_turn = false;
-            return false;
-        }
-        state.protocol_violation_recorded_this_turn = false;
-        match state.phase {
-            EngineeringPhase::Submitted => true,
-            EngineeringPhase::Disabled => false,
-            EngineeringPhase::AwaitingCheckpoint | EngineeringPhase::Implementing => {
-                state.turns_started = state.turns_started.saturating_add(1);
-                state.turns_started >= MAX_ENGINEERING_TURNS
-            }
-        }
+        state.phase == EngineeringPhase::Submitted
     }
 
     pub(crate) fn engineering_diagnostics(&self) -> EngineeringPhase {
@@ -642,25 +474,10 @@ impl CommandContext {
         &self,
         tool: ToolName,
     ) -> Result<(), &'static str> {
-        let mut state = self
+        let state = self
             .engineering
             .lock()
             .map_err(|_| "Engineering phase state is unavailable")?;
-        if state.phase == EngineeringPhase::AwaitingCheckpoint
-            && matches!(tool, ToolName::WorkspaceSearch | ToolName::WorkspaceList)
-        {
-            if state.owner_discovery_calls >= MAX_ENGINEERING_OWNER_DISCOVERY_CALLS {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering exhausted its bounded owner-discovery budget; call candidate_checkpoint_regression now",
-                );
-            }
-            state.owner_discovery_calls = state.owner_discovery_calls.saturating_add(1);
-            if tool == ToolName::WorkspaceSearch {
-                state.owner_searches = state.owner_searches.saturating_add(1);
-            }
-            return Ok(());
-        }
         if state.phase == EngineeringPhase::AwaitingCheckpoint
             && matches!(
                 tool,
@@ -671,65 +488,11 @@ impl CommandContext {
                 "Engineering must call candidate_checkpoint_regression before shell, write, or edit",
             );
         }
-        if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
-            let discovery_calls = state
-                .post_checkpoint_owner_lists
-                .saturating_add(state.post_checkpoint_owner_searches);
-            if state.implementation_mutation_started {
-                if state.post_mutation_discovery_calls
-                    >= MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS
-                {
-                    Self::mark_engineering_protocol_violation(&mut state);
-                    return Err(
-                        "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit",
-                    );
-                }
-                state.post_mutation_discovery_calls =
-                    state.post_mutation_discovery_calls.saturating_add(1);
-                return Ok(());
-            }
-            if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit",
-                );
-            }
-            state.post_checkpoint_owner_lists = state.post_checkpoint_owner_lists.saturating_add(1);
-            return Ok(());
-        }
-        if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
-            let discovery_calls = state
-                .post_checkpoint_owner_lists
-                .saturating_add(state.post_checkpoint_owner_searches);
-            if state.implementation_mutation_started {
-                if state.post_mutation_discovery_calls
-                    >= MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS
-                {
-                    Self::mark_engineering_protocol_violation(&mut state);
-                    return Err(
-                        "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit",
-                    );
-                }
-                state.post_mutation_discovery_calls =
-                    state.post_mutation_discovery_calls.saturating_add(1);
-                return Ok(());
-            }
-            if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering exhausted its bounded post-checkpoint owner-discovery budget; use workspace_read on the exact owner file, then edit and submit",
-                );
-            }
-            state.post_checkpoint_owner_searches =
-                state.post_checkpoint_owner_searches.saturating_add(1);
-            return Ok(());
-        }
         if state.phase == EngineeringPhase::Implementing
             && tool == ToolName::Shell
             && state.implementation_discovery_closed
             && !state.implementation_mutation_started
         {
-            Self::mark_engineering_protocol_violation(&mut state);
             return Err(
                 "Engineering has read an owner file; read exact adjacent owner files, then edit or write the smallest fix before running shell validation",
             );
@@ -744,7 +507,6 @@ impl CommandContext {
                     | ToolName::ForumReadThread
             )
         {
-            Self::mark_engineering_protocol_violation(&mut state);
             return Err(
                 "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit",
             );
@@ -1073,15 +835,13 @@ where
                     message: message.to_owned(),
                 })?;
         }
-        let product_tool_signature = payload
+        let tool_signature = payload
             .to_json_string().map_or_else(|_| format!("{name}:<unserializable>"), |arguments| format!("{name}:{arguments}"));
         self.command_context
-            .record_engineering_tool_call(name, &product_tool_signature)
+            .record_engineering_tool_call(name, &tool_signature)
             .map_err(|message| CapabilityError::Execution {
                 message: message.to_owned(),
             })?;
-        self.command_context
-            .record_product_tool_call(&product_tool_signature);
         if name.defers_without_daemon() {
             self.terminal
                 .defer(name, payload)
@@ -2186,18 +1946,10 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
                 .is_ok()
         );
-        for _ in 0..(MAX_ENGINEERING_OWNER_DISCOVERY_CALLS - 2) {
-            assert!(
-                context
-                    .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-                    .is_ok()
-            );
-        }
-        assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
-            Err(
-                "Engineering exhausted its bounded owner-discovery budget; call candidate_checkpoint_regression now"
-            )
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
         );
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::Shell),
@@ -2307,101 +2059,6 @@ mod tests {
     }
 
     #[test]
-    fn engineering_phase_stops_after_bounded_turns() {
-        let context = CommandContext::new(1);
-        context.configure_engineering();
-
-        for _ in 0..(MAX_ENGINEERING_TURNS - 1) {
-            assert!(!context.engineering_should_stop_after_turn());
-        }
-        assert!(context.engineering_should_stop_after_turn());
-    }
-
-    #[test]
-    fn engineering_phase_rejects_repeated_identical_tool_calls() {
-        let context = CommandContext::new(1);
-        context.configure_engineering();
-        context
-            .record_engineering_checkpoint()
-            .expect("checkpoint advances the phase");
-        context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
-            )
-            .expect("runtime owner read enables shell checks");
-        context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceEdit,
-                "workspace_edit:{\"path\":\"src/runtime/eval/lowered_ops.rs\"}",
-            )
-            .expect("mutation enables focused shell validation");
-
-        for _ in 0..(MAX_ENGINEERING_IDENTICAL_TOOL_CALLS - 1) {
-            assert!(
-                context
-                    .record_engineering_tool_call(
-                        ToolName::Shell,
-                        "shell:{\"command\":\"rg owner\"}"
-                    )
-                    .is_ok()
-            );
-        }
-        assert_eq!(
-            context
-                .record_engineering_tool_call(ToolName::Shell, "shell:{\"command\":\"rg owner\"}"),
-            Err(
-                "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit"
-            )
-        );
-        assert!(context.engineering_should_stop_after_turn());
-        assert!(
-            context
-                .record_engineering_tool_call(
-                    ToolName::WorkspaceEdit,
-                    "workspace_edit:{\"path\":\"src/lib.rs\"}"
-                )
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn engineering_phase_rejects_shell_search_budget() {
-        let context = CommandContext::new(1);
-        context.configure_engineering();
-        context
-            .record_engineering_checkpoint()
-            .expect("checkpoint advances the phase");
-        context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
-            )
-            .expect("runtime owner read enables shell checks");
-        context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceEdit,
-                "workspace_edit:{\"path\":\"src/runtime/eval/lowered_ops.rs\"}",
-            )
-            .expect("mutation enables focused shell validation");
-
-        for index in 0..MAX_ENGINEERING_SHELL_CALLS {
-            assert!(
-                context
-                    .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
-                    .is_ok()
-            );
-        }
-        assert_eq!(
-            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
-            Err(
-                "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit"
-            )
-        );
-        assert!(context.engineering_should_stop_after_turn());
-    }
-
-    #[test]
     fn engineering_phase_blocks_shell_discovery_after_owner_read_until_mutation() {
         let context = CommandContext::new(1);
         context.configure_engineering();
@@ -2433,23 +2090,15 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::Shell)
                 .is_ok()
         );
-        for _ in 0..MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS {
-            assert!(
-                context
-                    .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-                    .is_ok()
-            );
-        }
-        assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
-            Err(
-                "Engineering exhausted its bounded post-mutation recovery discovery; repair the exact edit, run the focused check, then submit"
-            )
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
         );
     }
 
     #[test]
-    fn engineering_phase_allows_bounded_shell_discovery_after_search() {
+    fn engineering_phase_allows_shell_discovery_after_search() {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
@@ -2458,106 +2107,13 @@ mod tests {
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
-        for index in 0..MAX_ENGINEERING_SHELL_CALLS {
+        for index in 0..8 {
             assert!(
                 context
                     .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
                     .is_ok()
             );
         }
-        assert_eq!(
-            context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
-            Err(
-                "Engineering exceeded its post-checkpoint shell budget; stop searching, use workspace_edit/workspace_write for the smallest fix, run the focused check, then call candidate_submit"
-            )
-        );
-        assert!(context.engineering_should_stop_after_turn());
-    }
-
-    #[test]
-    fn engineering_protocol_violation_allows_one_retry_then_stalls() {
-        let context = CommandContext::new(1);
-        context.configure_engineering();
-        context
-            .record_engineering_checkpoint()
-            .expect("checkpoint advances the phase");
-
-        for _ in 0..MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
-            assert!(
-                context
-                    .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-                    .is_ok()
-            );
-        }
-        assert!(
-            context
-                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-                .is_err()
-        );
         assert!(!context.engineering_should_stop_after_turn());
-        assert!(
-            context
-                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-                .is_err()
-        );
-        assert!(context.engineering_should_stop_after_turn());
-    }
-
-    #[test]
-    fn product_phase_stops_after_repeated_identical_tool_arguments() {
-        let context = CommandContext::new(1);
-        context.configure_product();
-
-        for _ in 0..3 {
-            context.record_product_tool_call(
-                "workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}",
-            );
-            assert!(!context.product_should_stop_after_turn());
-        }
-        context.record_product_tool_call(
-            "workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}",
-        );
-        assert!(context.product_should_stop_after_turn());
-    }
-
-    #[test]
-    fn product_phase_stops_after_bounded_turns() {
-        let context = CommandContext::new(1);
-        context.configure_product();
-
-        for index in 0..(MAX_PRODUCT_TURNS - 1) {
-            context.record_product_tool_call(&format!(
-                "shell:{{\"command\":\"printf progress {index}\"}}"
-            ));
-            assert!(!context.product_should_stop_after_turn());
-        }
-        context.record_product_tool_call(&format!(
-            "shell:{{\"command\":\"printf progress {}\"}}",
-            MAX_PRODUCT_TURNS - 1
-        ));
-        assert!(context.product_should_stop_after_turn());
-    }
-
-    #[test]
-    fn product_phase_stops_after_repeated_toolless_turns() {
-        let context = CommandContext::new(1);
-        context.configure_product();
-
-        assert!(!context.product_should_stop_after_turn());
-        assert!(!context.product_should_stop_after_turn());
-        assert!(context.product_should_stop_after_turn());
-    }
-
-    #[test]
-    fn product_tool_call_resets_toolless_turn_guard() {
-        let context = CommandContext::new(1);
-        context.configure_product();
-
-        assert!(!context.product_should_stop_after_turn());
-        context.record_product_tool_call("shell:{\"command\":\"printf progress\"}");
-        assert!(!context.product_should_stop_after_turn());
-        assert!(!context.product_should_stop_after_turn());
-        assert!(!context.product_should_stop_after_turn());
-        assert!(context.product_should_stop_after_turn());
     }
 }

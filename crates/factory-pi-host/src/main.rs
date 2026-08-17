@@ -3,7 +3,8 @@
 mod runtime;
 
 use factory_pi_host::{
-    Admission, AdmissionConfig, CommandContext, CostReader, ExecutionDiagnostics, FramedDaemon,
+    Admission, AdmissionConfig, CommandContext, CostReader, CostSnapshot, ExecutionDiagnostics,
+    FramedDaemon,
     TerminalDeferral, ToolName, build_factory_execution_input, read_admission_from_fd0,
 };
 use factory_protocol::{
@@ -46,7 +47,6 @@ async fn run() -> Result<(), String> {
     let provider = Arc::new(OpenRouterProvider::new(
         OpenRouterConfig::try_new(api_key, admission.packet.model.model_id.clone())
             .map_err(|e| e.to_string())?
-            .with_max_tokens(u64::from(admission.packet.model.output_token_limit))
             .with_request_timeout(provider_request_timeout(
                 admission.packet.limits.wall_limit_millis,
             ))
@@ -103,7 +103,9 @@ async fn run() -> Result<(), String> {
     let transcript_id =
         seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
     let usage = provider.usage_snapshot();
-    let completed = result.terminal.is_some();
+    // A live cost cancellation is a failed economic stop, even if a terminal tool
+    // raced with the monitor.  Never submit the deferred operation in that case.
+    let completed = !result.cost_limit_reached && result.terminal.is_some();
     let terminal_operation = completed
         .then(|| {
             result
@@ -112,14 +114,20 @@ async fn run() -> Result<(), String> {
                 .map(|terminal| terminal.tool.as_str().to_owned())
         })
         .flatten();
-    let terminal_payload = result
-        .terminal
-        .as_ref()
-        .map(|terminal| terminal.payload.to_json_string())
-        .transpose()
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "{}".to_owned());
-    let stop_reason = if completed {
+    let terminal_payload = if completed {
+        result
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.payload.to_json_string())
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "{}".to_owned())
+    } else {
+        "{}".to_owned()
+    };
+    let stop_reason = if result.cost_limit_reached {
+        "cost_limit"
+    } else if completed {
         "completed"
     } else if result.cost_micro_usd.is_none() {
         "unknown_cost"
@@ -411,13 +419,15 @@ fn redact(value: JsonValue) -> JsonValue {
     }
 }
 
-fn provider_cost(provider: &OpenRouterProvider) -> Option<u64> {
+fn provider_cost(provider: &OpenRouterProvider) -> CostSnapshot {
     let report = provider.cost_report();
-    report
-        .complete
-        .then_some(report.reported_total_usd_exact)
-        .flatten()
-        .and_then(|value| micro_usd(&value))
+    CostSnapshot {
+        reported_micro_usd: report
+            .reported_total_usd_exact
+            .as_deref()
+            .and_then(micro_usd),
+        complete: report.complete,
+    }
 }
 
 fn micro_usd(value: &str) -> Option<u64> {
@@ -546,8 +556,8 @@ fn crc32(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        packet_verification_error, provider_request_timeout, provider_retry_policy,
-        provider_stall_timeout,
+        micro_usd, packet_verification_error, provider_request_timeout, provider_retry_policy,
+        provider_stall_timeout, CostSnapshot,
     };
     use pi_agent_protocol::JsonValue;
     use std::time::Duration;
@@ -598,5 +608,23 @@ mod tests {
         assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(225));
         assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(30));
         assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn provider_cost_conversion_rounds_up_to_micro_usd() {
+        assert_eq!(micro_usd("1.000000"), Some(1_000_000));
+        assert_eq!(micro_usd("0.0000011"), Some(2));
+        assert_eq!(micro_usd("0.1"), Some(100_000));
+        assert_eq!(micro_usd("invalid"), None);
+    }
+
+    #[test]
+    fn partial_cost_snapshots_are_not_terminal_costs() {
+        let snapshot = CostSnapshot {
+            reported_micro_usd: Some(25),
+            complete: false,
+        };
+        assert_eq!(snapshot.reported_micro_usd, Some(25));
+        assert!(!snapshot.complete);
     }
 }

@@ -408,6 +408,9 @@ pub enum StopReasonV2 {
     OutputLimit,
     ProtocolError,
     UnknownCost,
+    /// The host stopped after live provider-reported spend reached the
+    /// campaign allowance.
+    CostLimit,
 }
 
 /// Normalized provider usage. Provider-specific event streams are not stored
