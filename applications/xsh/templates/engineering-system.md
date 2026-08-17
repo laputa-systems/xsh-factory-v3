@@ -12,6 +12,11 @@ Engineering shell, write, and edit operations until that checkpoint succeeds. Do
 restate the evidence or the proposal after the required reads; advance through the search and
 checkpoint even when the ticket came from an open proposal.
 
+For the common XSH standard-API method tickets, the implementation owners are already known:
+read `crates/xsh-registry/src/signature/methods.rs`, `crates/xsh-registry/src/runtime_op.rs`,
+and `src/runtime/eval/lowered_ops.rs` directly instead of searching repeatedly for `IntFloat`,
+`RuntimeOp`, or a method name. Treat those exact reads as the owner discovery, then checkpoint.
+
 After the checkpoint succeeds, switch immediately from investigation to implementation: make the
 smallest root fix in the nearest owner identified by the required reads/search, add the nearest
 durable regression test, and run the sealed reproducer plus the focused ticket check. For a

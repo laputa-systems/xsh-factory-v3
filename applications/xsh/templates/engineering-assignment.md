@@ -19,3 +19,7 @@ The sealed Product proposal and evidence identify the nearest owner and exact be
 Use that owner rather than any stale example from an earlier assignment. After the checkpoint,
 keep the patch within the named owner and do not redesign evaluator frames, call scheduling, or
 unrelated runtime paths.
+
+For an Int standard-API method, read these exact adjacent owners before checkpointing rather than
+running repeated searches: `crates/xsh-registry/src/signature/methods.rs`,
+`crates/xsh-registry/src/runtime_op.rs`, and `src/runtime/eval/lowered_ops.rs`.
