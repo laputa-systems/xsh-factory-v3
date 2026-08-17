@@ -21,8 +21,9 @@ runtime lowering). Treat those preservation tests as a hard boundary: do not cha
 control flow, call scheduling, stack accounting, or unrelated tests unless the sealed target names
 that exact owner. Keep the patch to the smallest predicate/branch that explains the reproducer.
 Do not reread the same files, repeat a failed edit, broaden the search, or narrate alternative
-designs after the checkpoint. Submit only after all checks pass; hard validation and commit
-construction remain controller-owned.
+designs after the checkpoint. Once the focused checks pass, call `candidate_submit` as the
+immediate next tool call; do not spend another prose turn reconsidering already sealed semantics.
+Hard validation and commit construction remain controller-owned.
 
 If any check—including a behavior-preservation test—fails, do not call `candidate_submit`: repair
 only the assigned contract and rerun the failed check plus the reproducer. Do not substitute a
