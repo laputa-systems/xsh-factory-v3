@@ -36,6 +36,7 @@ const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
 const MAX_ENGINEERING_TURNS: u32 = 64;
 const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
+const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
@@ -275,6 +276,8 @@ struct EngineeringProgressState {
     last_tool_call: Option<String>,
     identical_tool_calls: u32,
     shell_calls: u32,
+    protocol_violations: u8,
+    recovery_turns_remaining: u8,
     stalled: bool,
 }
 
@@ -290,6 +293,8 @@ impl Default for EngineeringProgressState {
             last_tool_call: None,
             identical_tool_calls: 0,
             shell_calls: 0,
+            protocol_violations: 0,
+            recovery_turns_remaining: 0,
             stalled: false,
         }
     }
@@ -368,6 +373,8 @@ impl CommandContext {
             last_tool_call: None,
             identical_tool_calls: 0,
             shell_calls: 0,
+            protocol_violations: 0,
+            recovery_turns_remaining: 0,
             stalled: false,
         };
     }
@@ -471,7 +478,7 @@ impl CommandContext {
         }
         if tool == ToolName::Shell {
             if state.post_checkpoint_owner_searches != 0 && !state.runtime_owner_read {
-                state.stalled = true;
+                Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit",
                 );
@@ -496,7 +503,20 @@ impl CommandContext {
                 "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit",
             );
         }
+        state.protocol_violations = 0;
+        state.recovery_turns_remaining = 0;
         Ok(())
+    }
+
+    fn mark_engineering_protocol_violation(
+        state: &mut EngineeringProgressState,
+    ) {
+        state.protocol_violations = state.protocol_violations.saturating_add(1);
+        if state.protocol_violations > MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS {
+            state.stalled = true;
+        } else {
+            state.recovery_turns_remaining = MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS;
+        }
     }
 
     pub(crate) fn engineering_should_stop_after_turn(&self) -> bool {
@@ -505,6 +525,10 @@ impl CommandContext {
         };
         if state.stalled {
             return true;
+        }
+        if state.recovery_turns_remaining != 0 {
+            state.recovery_turns_remaining = state.recovery_turns_remaining.saturating_sub(1);
+            return false;
         }
         match state.phase {
             EngineeringPhase::Submitted => true,
@@ -570,7 +594,7 @@ impl CommandContext {
             && tool == ToolName::WorkspaceSearch
         {
             if state.owner_searches != 0 {
-                state.stalled = true;
+                Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering has completed its one owner search; call candidate_checkpoint_regression next",
                 );
@@ -589,7 +613,7 @@ impl CommandContext {
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
             if state.post_checkpoint_owner_lists != 0 {
-                state.stalled = true;
+                Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit",
                 );
@@ -599,7 +623,7 @@ impl CommandContext {
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
             if state.post_checkpoint_owner_searches != 0 {
-                state.stalled = true;
+                Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit",
                 );
@@ -617,7 +641,7 @@ impl CommandContext {
                     | ToolName::ForumReadThread
             )
         {
-            state.stalled = true;
+            Self::mark_engineering_protocol_violation(&mut state);
             return Err(
                 "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners: crates/xsh-registry/src/signature/methods.rs; runtime lowering: src/runtime/eval/lowered_ops.rs)",
             );
@@ -2066,7 +2090,7 @@ mod tests {
             )
         );
 
-        assert!(context.engineering_should_stop_after_turn());
+        assert!(!context.engineering_should_stop_after_turn());
     }
 
     #[test]
@@ -2207,7 +2231,7 @@ mod tests {
                 "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit"
             )
         );
-        assert!(context.engineering_should_stop_after_turn());
+        assert!(!context.engineering_should_stop_after_turn());
         assert!(context
             .record_engineering_tool_call(
                 ToolName::WorkspaceRead,
@@ -2217,6 +2241,27 @@ mod tests {
         assert!(context
             .record_engineering_tool_call(ToolName::Shell, "shell:focused-check")
             .is_ok());
+    }
+
+    #[test]
+    fn engineering_protocol_violation_allows_one_retry_then_stalls() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+        context
+            .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+            .expect("one bounded owner search is allowed");
+
+        assert!(context
+            .record_engineering_tool_call(ToolName::Shell, "shell:first")
+            .is_err());
+        assert!(!context.engineering_should_stop_after_turn());
+        assert!(context
+            .record_engineering_tool_call(ToolName::Shell, "shell:second")
+            .is_err());
+        assert!(context.engineering_should_stop_after_turn());
     }
 
     #[test]
