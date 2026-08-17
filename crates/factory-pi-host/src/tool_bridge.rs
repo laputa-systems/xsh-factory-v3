@@ -271,6 +271,7 @@ struct EngineeringProgressState {
     owner_searches: u32,
     post_checkpoint_owner_lists: u32,
     post_checkpoint_owner_searches: u32,
+    implementation_discovery_closed: bool,
     runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
@@ -288,6 +289,7 @@ impl Default for EngineeringProgressState {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            implementation_discovery_closed: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -368,6 +370,7 @@ impl CommandContext {
             owner_searches: 0,
             post_checkpoint_owner_lists: 0,
             post_checkpoint_owner_searches: 0,
+            implementation_discovery_closed: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -444,6 +447,10 @@ impl CommandContext {
             return Err("Engineering checkpoint is not the next required phase");
         }
         state.phase = EngineeringPhase::Implementing;
+        // The assignment already required one bounded owner search before this checkpoint.
+        // Once the regression is captured, implementation begins immediately; any further
+        // listing/search is a protocol violation that receives only the bounded recovery turn.
+        state.implementation_discovery_closed = true;
         Ok(())
     }
 
@@ -477,7 +484,7 @@ impl CommandContext {
             state.runtime_owner_read = true;
         }
         if tool == ToolName::Shell {
-            if state.post_checkpoint_owner_searches != 0 && !state.runtime_owner_read {
+            if !state.runtime_owner_read {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering must read src/runtime/eval/lowered_ops.rs before shell discovery; use workspace_read, then make the smallest edit and submit",
@@ -612,7 +619,7 @@ impl CommandContext {
             );
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceList {
-            if state.post_checkpoint_owner_lists != 0 {
+            if state.implementation_discovery_closed || state.post_checkpoint_owner_lists != 0 {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit",
@@ -622,7 +629,7 @@ impl CommandContext {
             return Ok(());
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceSearch {
-            if state.post_checkpoint_owner_searches != 0 {
+            if state.implementation_discovery_closed || state.post_checkpoint_owner_searches != 0 {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
                     "Engineering has completed its one post-checkpoint owner search; use workspace_read on the exact owner file, then edit and submit",
@@ -2115,22 +2122,13 @@ mod tests {
                 .require_engineering_checkpoint_before(ToolName::WorkspaceRead)
                 .is_ok()
         );
-        assert!(
-            context
-                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-                .is_ok()
-        );
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
             Err(
                 "Engineering has completed its one post-checkpoint owner listing; use workspace_read on the exact owner file, then edit and submit"
             )
         );
-        assert!(
-            context
-                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-                .is_ok()
-        );
+        assert!(!context.engineering_should_stop_after_turn());
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
             Err(
@@ -2166,6 +2164,12 @@ mod tests {
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
+            )
+            .expect("runtime owner read enables shell checks");
 
         for _ in 0..(MAX_ENGINEERING_IDENTICAL_TOOL_CALLS - 1) {
             assert!(context
@@ -2200,6 +2204,12 @@ mod tests {
         context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
+            )
+            .expect("runtime owner read enables shell checks");
 
         for index in 0..MAX_ENGINEERING_SHELL_CALLS {
             assert!(context
@@ -2220,11 +2230,11 @@ mod tests {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
-            .record_engineering_checkpoint()
-            .expect("checkpoint advances the phase");
-        context
             .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
             .expect("one bounded owner search is allowed");
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
         assert_eq!(
             context.record_engineering_tool_call(ToolName::Shell, "shell:search"),
             Err(
@@ -2248,11 +2258,11 @@ mod tests {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
-            .record_engineering_checkpoint()
-            .expect("checkpoint advances the phase");
-        context
             .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
             .expect("one bounded owner search is allowed");
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
 
         assert!(context
             .record_engineering_tool_call(ToolName::Shell, "shell:first")
