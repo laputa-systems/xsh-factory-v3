@@ -19,8 +19,7 @@ use pi_agent_core::{AgentEvent, AgentEventKind};
 use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use factory_settings::{
-    MAX_PROVIDER_REQUEST_TIMEOUT, MAX_PROVIDER_RETRIES, MAX_PROVIDER_STALL_TIMEOUT,
-    PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
+    MAX_PROVIDER_RETRIES, PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
 };
 use flate2::{Compression, write::GzEncoder};
 use std::{
@@ -179,11 +178,11 @@ async fn run() -> Result<(), String> {
 }
 
 fn provider_request_timeout(wall_limit_millis: u64) -> Duration {
-    Duration::from_millis((wall_limit_millis / 3).max(1)).min(MAX_PROVIDER_REQUEST_TIMEOUT)
+    Duration::from_millis(wall_limit_millis.max(1))
 }
 
 fn provider_stall_timeout(wall_limit_millis: u64) -> Duration {
-    Duration::from_millis((wall_limit_millis / 4).max(1)).min(MAX_PROVIDER_STALL_TIMEOUT)
+    Duration::from_millis(wall_limit_millis.max(1))
 }
 
 fn provider_retry_policy() -> RetryPolicy {
@@ -587,16 +586,16 @@ mod tests {
     }
 
     #[test]
-    fn provider_request_timeout_is_capped_below_assignment_wall() {
+    fn provider_request_timeout_matches_assignment_wall() {
         assert_eq!(
             provider_request_timeout(1_800_000),
-            Duration::from_secs(600)
+            Duration::from_mins(30)
         );
-        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(300));
-        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(40));
+        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(900));
+        assert_eq!(provider_request_timeout(120_000), Duration::from_secs(120));
         assert_eq!(
             provider_request_timeout(3_600_000),
-            Duration::from_mins(20)
+            Duration::from_secs(3_600)
         );
     }
 
@@ -606,11 +605,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_stall_timeout_is_bounded_within_assignment_wall() {
-        assert_eq!(provider_stall_timeout(1_800_000), Duration::from_secs(450));
-        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(225));
-        assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(30));
-        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(600));
+    fn provider_stall_timeout_matches_assignment_wall() {
+        assert_eq!(provider_stall_timeout(1_800_000), Duration::from_mins(30));
+        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(900));
+        assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(120));
+        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(3_600));
     }
 
     #[test]

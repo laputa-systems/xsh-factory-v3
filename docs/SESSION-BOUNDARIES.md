@@ -31,9 +31,10 @@ These are safety and evidence boundaries, not model-progress budgets:
   `context_token_limit` and `output_token_limit` remain packet identity and
   provider capability metadata; Factory no longer turns the latter into a
   request cap.
-- The host derives provider request and stall timeouts from the role wall limit,
-  capped by `MAX_PROVIDER_REQUEST_TIMEOUT` (20 minutes) and
-  `MAX_PROVIDER_STALL_TIMEOUT` (10 minutes), and allows at most
+- The host derives provider request and no-progress stall timeouts directly from
+  the role wall limit. There is no shorter provider-side thinking timeout: the
+  admitted assignment wall deadline, live cost cancellation, and campaign
+  deadline remain the controlling bounds. Provider retries remain capped at
   `MAX_PROVIDER_RETRIES` (2) with the configured backoff bounds.
 - Command supervision uses the settings-owned argument (128), argument-byte
   (32 KiB), environment (32 entries), environment-value (4 KiB), input (64 MiB),

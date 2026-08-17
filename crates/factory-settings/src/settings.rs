@@ -85,8 +85,6 @@ pub const STORAGE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Actor admission and provider execution policy.
 pub const DEFAULT_MAX_PACKET_BYTES: usize = 3 * 1024 * 1024 - 64 * 1024;
-pub const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_mins(20);
-pub const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(600);
 pub const MAX_PROVIDER_RETRIES: u32 = 2;
 pub const PROVIDER_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 pub const PROVIDER_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(8);
