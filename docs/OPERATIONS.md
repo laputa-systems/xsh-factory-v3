@@ -44,6 +44,14 @@ FACTORY_RUNTIME_ROOT=/absolute/path/to/factory-runtime \
 make factory-start
 ```
 
+Keep this database/runtime pair for the lifetime of the qualified application
+lane. Campaigns are rows in the same durable PostgreSQL authority; a paid cycle
+does not create, select, or rotate a database. Do not derive database names or
+runtime roots from a campaign number or date, and do not restart the daemon with
+a fresh pair merely because the previous campaign reached a terminal state.
+That would strand retained ticket and campaign history in an unrelated
+authority and make the apparent queue smaller than the durable one.
+
 Stop the same runtime through the typed operator socket and preserve all durable
 factory state:
 
@@ -102,6 +110,13 @@ Every mutation uses a client command ID and observed aggregate revision.
 show` are the navigation surface. The Architect must supply sealed rationale
 artifacts for sponsorship and final candidate decisions.
 
+For a compact read-only overview of the live lane, run `make status`. It uses an
+explicit `FACTORY_STATUS_SOCKET` when supplied, otherwise the
+`FACTORY_RUNTIME_ROOT` environment variable, and finally the runtime root
+advertised by a running `factoryd`. It reports the daemon identity, active XSH
+revision, complete ticket-state counts, campaign totals, and session/cost
+warnings without opening PostgreSQL from the operator shell.
+
 ## One-commit paid cycle
 
 The exact request for a bounded paid run is encoded by `make paid-cycle`. Before
@@ -114,6 +129,14 @@ campaign with `--delivery-target 1`, after checking that the installed
 and the application revision, budget, and deadline were supplied explicitly.
 The target does not make the two Architect decisions or bypass Product,
 Engineering, or Quality; those remain durable lifecycle gates in the daemon.
+
+This deployment boundary is distinct from campaign turnover: a source/build
+change requires a newly qualified runtime, but a new paid campaign on the same
+qualified build stays on the existing database. Factory V3 currently has no
+supported in-place merger for independent PostgreSQL authorities. Preserve old
+databases and their runtime/CAS roots until a dedicated, reference-preserving
+migration is qualified; copying ticket rows alone would leave their artifact,
+application-revision, attempt, and evidence links invalid.
 
 `factoryctl build identity --format json` is the read-only identity probe used
 by that guard. If it differs from `factoryctl daemon status`, stop the daemon,

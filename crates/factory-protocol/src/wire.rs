@@ -74,6 +74,8 @@ pub const OP_OPERATOR_SEAL_ARTIFACT: &str = "operator.artifact.seal";
 /// operations deliberately name fixed projections rather than accepting a
 /// filter language or a raw database query.
 pub const OP_OPERATOR_LIST_TICKETS: &str = "operator.ticket.list";
+/// One compact, read-only summary for the local operator's high-level view.
+pub const OP_OPERATOR_FACTORY_STATUS: &str = "operator.factory.status";
 pub const OP_OPERATOR_SHOW_TICKET: &str = "operator.ticket.show";
 pub const OP_OPERATOR_SHOW_CANDIDATE: &str = "operator.candidate.show";
 pub const OP_OPERATOR_SHOW_AUDIT: &str = "operator.audit.show";
@@ -265,6 +267,7 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_OPERATOR_REGISTER_APPLICATION
             | OP_OPERATOR_ACTIVATE_APPLICATION
             | OP_OPERATOR_SEAL_ARTIFACT
+            | OP_OPERATOR_FACTORY_STATUS
             | OP_OPERATOR_LIST_TICKETS
             | OP_OPERATOR_SHOW_TICKET
             | OP_OPERATOR_SHOW_CANDIDATE
@@ -829,6 +832,7 @@ read_request!(OperatorApplicationShowRequest {
     application_key: String,
     application_revision_id: Option<i64>,
 });
+read_request!(OperatorFactoryStatusRequest {});
 mutating_request!(OperatorApplicationRegisterRequest {
     expected_kernel_build_revision: u64,
     kernel_build_id: String,
@@ -1356,6 +1360,34 @@ pub struct OperatorStatusResponse {
     pub current_kernel_build_id: Option<String>,
     /// Current revision guard for kernel-build-scoped operator commands.
     pub aggregate_revision: u64,
+}
+
+/// Compact read-only authority summary used by `make status`. Counts are
+/// kernel-owned projections over the current durable database; they do not
+/// materialize ticket rows or create polling receipts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FactoryStatusResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub active_application_key: Option<String>,
+    pub active_application_revision_id: Option<i64>,
+    pub active_application_aggregate_revision: Option<u64>,
+    pub ticket_total: u32,
+    pub proposed_ticket_count: u32,
+    pub sponsored_ticket_count: u32,
+    pub in_flight_ticket_count: u32,
+    pub delivered_ticket_count: u32,
+    pub blocked_ticket_count: u32,
+    pub other_ticket_count: u32,
+    pub campaign_total: u32,
+    pub running_campaign_count: u32,
+    pub completed_campaign_count: u32,
+    pub failed_campaign_count: u32,
+    pub cancelled_campaign_count: u32,
+    pub session_total: u32,
+    pub running_session_count: u32,
+    pub unknown_cost_session_count: u32,
 }
 
 /// One bounded, read-only campaign projection. Its ticket counts and

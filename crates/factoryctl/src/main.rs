@@ -29,12 +29,14 @@ use factory_protocol::{
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, AuditShowResponse, CampaignReceiptResponse,
     CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV2,
+    FactoryStatusResponse,
     ForumListThreadsRequestV2, ForumListTopicsRequestV2, ForumPostsResponseV2,
     ForumReadThreadRequestV2, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadsResponseV2,
     ForumTopicsResponseV2, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
-    OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorStartCampaignRequest,
+    OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorFactoryStatusRequest,
+    OperatorStartCampaignRequest,
     OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2, RuntimeRelativePath,
     SealedArtifactReferenceWireV2, TicketListResponse, TicketShowResponse,
 };
@@ -79,6 +81,18 @@ async fn run(command: CliCommand) -> Result<(), Box<dyn std::error::Error>> {
                 .probe(status_request_id())
                 .await?;
             println!("{}", daemon_status_output(&status, connection.json));
+        }
+        CliCommand::FactoryStatus(connection) => {
+            let client = OperatorClient::new(connection.socket_path);
+            let daemon = client.probe(status_request_id()).await?;
+            let factory = client
+                .factory_status(OperatorFactoryStatusRequest {
+                    protocol_version: PROTOCOL_VERSION_V2,
+                    request_id: navigation_request_id("factory-status"),
+                    operation: factory_protocol::OP_OPERATOR_FACTORY_STATUS.to_owned(),
+                })
+                .await?;
+            print_factory_status(&daemon, &factory, connection.json);
         }
         CliCommand::DaemonStop(connection) => {
             let shutdown = OperatorClient::new(connection.socket_path)
@@ -438,6 +452,89 @@ fn daemon_status_output(status: &factory_protocol::OperatorStatusResponse, json:
             status.aggregate_revision,
         )
     }
+}
+
+fn print_factory_status(
+    daemon: &factory_protocol::OperatorStatusResponse,
+    factory: &FactoryStatusResponse,
+    json: bool,
+) {
+    if json {
+        println!(
+            "{{\"protocol_version\":{},\"request_id\":\"{}\",\"operation\":\"operator.factory.status\",\"daemon_state\":\"{}\",\"kernel_build_id\":{},\"daemon_revision\":{},\"application_key\":{},\"application_revision_id\":{},\"application_aggregate_revision\":{},\"application_active\":{},\"ticket_total\":{},\"proposed_ticket_count\":{},\"sponsored_ticket_count\":{},\"in_flight_ticket_count\":{},\"delivered_ticket_count\":{},\"blocked_ticket_count\":{},\"other_ticket_count\":{},\"campaign_total\":{},\"running_campaign_count\":{},\"completed_campaign_count\":{},\"failed_campaign_count\":{},\"cancelled_campaign_count\":{},\"session_total\":{},\"running_session_count\":{},\"unknown_cost_session_count\":{}}}",
+            PROTOCOL_VERSION_V2,
+            factory.request_id,
+            daemon.state,
+            optional_json_string(daemon.current_kernel_build_id.as_deref()),
+            daemon.aggregate_revision,
+            optional_json_string(factory.active_application_key.as_deref()),
+            optional_i64(factory.active_application_revision_id),
+            optional_u64(factory.active_application_aggregate_revision),
+            factory.active_application_key.is_some(),
+            factory.ticket_total,
+            factory.proposed_ticket_count,
+            factory.sponsored_ticket_count,
+            factory.in_flight_ticket_count,
+            factory.delivered_ticket_count,
+            factory.blocked_ticket_count,
+            factory.other_ticket_count,
+            factory.campaign_total,
+            factory.running_campaign_count,
+            factory.completed_campaign_count,
+            factory.failed_campaign_count,
+            factory.cancelled_campaign_count,
+            factory.session_total,
+            factory.running_session_count,
+            factory.unknown_cost_session_count,
+        );
+        return;
+    }
+    println!("factory status");
+    println!(
+        "  daemon: {} (build {}, revision {})",
+        daemon.state,
+        daemon.current_kernel_build_id.as_deref().unwrap_or("none"),
+        daemon.aggregate_revision
+    );
+    println!(
+        "  application: {} revision #{} (aggregate {}, {})",
+        factory.active_application_key.as_deref().unwrap_or("none"),
+        factory
+            .active_application_revision_id
+            .map_or_else(|| "none".to_owned(), |id| id.to_string()),
+        factory
+            .active_application_aggregate_revision
+            .map_or_else(|| "none".to_owned(), |revision| revision.to_string()),
+        if factory.active_application_key.is_some() {
+            "active"
+        } else {
+            "inactive"
+        }
+    );
+    println!(
+        "  tickets: {} total ({} proposed, {} sponsored, {} in_flight, {} delivered, {} blocked, {} other)",
+        factory.ticket_total,
+        factory.proposed_ticket_count,
+        factory.sponsored_ticket_count,
+        factory.in_flight_ticket_count,
+        factory.delivered_ticket_count,
+        factory.blocked_ticket_count,
+        factory.other_ticket_count
+    );
+    println!(
+        "  campaigns: {} total ({} running, {} completed, {} failed, {} cancelled)",
+        factory.campaign_total,
+        factory.running_campaign_count,
+        factory.completed_campaign_count,
+        factory.failed_campaign_count,
+        factory.cancelled_campaign_count
+    );
+    println!(
+        "  sessions: {} total ({} running, {} unknown-cost)",
+        factory.session_total,
+        factory.running_session_count,
+        factory.unknown_cost_session_count
+    );
 }
 
 fn print_campaign_receipt(receipt: &CampaignReceiptResponse, json: bool) {
@@ -1302,6 +1399,7 @@ enum CliCommand {
     BuildIdentity(BuildIdentityArgs),
     BackupRestore(backup_restore::BackupRestoreArguments),
     DaemonStatus(ConnectionArgs),
+    FactoryStatus(ConnectionArgs),
     DaemonStop(ConnectionArgs),
     DaemonStart(DaemonStartArgs),
     Sponsor {
@@ -1416,6 +1514,10 @@ fn parse_args(arguments: Vec<String>) -> Result<CliCommand, String> {
             Some("start") => parse_daemon_start(values.collect()),
             _ => Err("expected `daemon start|status|stop`".to_owned()),
         },
+        Some("status") => parse_status(values.collect()).map(|command| match command {
+            CliCommand::DaemonStatus(connection) => CliCommand::FactoryStatus(connection),
+            _ => unreachable!("parse_status only returns daemon status"),
+        }),
         Some("ticket") => match values.next().as_deref() {
             Some("list") => parse_ticket_list(values.collect()).map(CliCommand::TicketList),
             Some("show") => {
@@ -2928,7 +3030,7 @@ fn forum_request_id(operation: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  factoryctl <init|build identity|daemon start|daemon status|daemon stop|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
+    "usage:\n  factoryctl <init|build identity|status|daemon start|daemon status|daemon stop|application|artifact|campaign|ticket|candidate|audit> ...\n  factoryctl backup-restore qualify --source-database-url URL --source-runtime-root PATH --restore-database-url URL --restore-runtime-root PATH --dump-file PATH --pg-dump PATH --pg-restore PATH --psql PATH --cargo PATH\n  factoryctl forum <topics|threads|read|search> ..."
 }
 
 #[cfg(test)]
@@ -3058,6 +3160,21 @@ mod tests {
         assert!(matches!(
             parsed,
             CliCommand::DaemonStatus(ConnectionArgs { json: true, .. })
+        ));
+    }
+
+    #[test]
+    fn factory_status_uses_the_same_explicit_unix_socket_guard() {
+        assert!(parse_args(vec!["status".to_owned()]).is_err());
+        let parsed = parse_args(vec![
+            "status".to_owned(),
+            "--socket".to_owned(),
+            "/tmp/factory.sock".to_owned(),
+        ])
+        .expect("valid factory status command");
+        assert!(matches!(
+            parsed,
+            CliCommand::FactoryStatus(ConnectionArgs { json: false, .. })
         ));
     }
 

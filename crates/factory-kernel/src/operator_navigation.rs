@@ -11,10 +11,11 @@ use factory_protocol::{
     CandidateValidationNavigationResponse, ContentDigest, ContractError,
     DeliveryNavigationResponse, ErrorResponse, EvidenceArtifactResponse, FrameError,
     InstitutionalObjectKind, InstitutionalReference, InstitutionalSearchHitResponse,
-    InstitutionalSearchResponse, InstitutionalShowResponse, OP_OPERATOR_INSTITUTIONAL_SEARCH,
-    OP_OPERATOR_INSTITUTIONAL_SHOW, OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT,
+    FactoryStatusResponse, InstitutionalSearchResponse, InstitutionalShowResponse,
+    OP_OPERATOR_FACTORY_STATUS, OP_OPERATOR_INSTITUTIONAL_SEARCH, OP_OPERATOR_INSTITUTIONAL_SHOW,
+    OP_OPERATOR_LIST_TICKETS, OP_OPERATOR_SHOW_AUDIT,
     OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET, OperatorAuditShowRequest,
-    OperatorCandidateShowRequest, OperatorInstitutionalSearchRequest,
+    OperatorCandidateShowRequest, OperatorFactoryStatusRequest, OperatorInstitutionalSearchRequest,
     OperatorInstitutionalShowRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
     PROTOCOL_VERSION_V2, TicketAttemptNavigationResponse, TicketListItemResponse,
     TicketListResponse, TicketShowResponse, decode_operation_request, decode_routing_envelope,
@@ -114,6 +115,7 @@ impl OperatorNavigationRpc {
         let request_id = envelope.request_id.clone();
         let operation = envelope.operation.clone();
         let response = match operation.as_str() {
+            OP_OPERATOR_FACTORY_STATUS => self.factory_status(frame).await,
             OP_OPERATOR_LIST_TICKETS => self.list_tickets(frame).await,
             OP_OPERATOR_SHOW_TICKET => self.show_ticket(frame).await,
             OP_OPERATOR_SHOW_CANDIDATE => self.show_candidate(frame).await,
@@ -126,6 +128,113 @@ impl OperatorNavigationRpc {
             Ok(response) => response,
             Err(rejection) => rejection.response(request_id, envelope.operation),
         })
+    }
+
+    async fn factory_status(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {
+        let request: OperatorFactoryStatusRequest = decode_operation_request(
+            frame,
+            factory_protocol::REQUEST_FRAME_MAX_BYTES,
+            OP_OPERATOR_FACTORY_STATUS,
+        )
+        .map_err(NavigationRejection::Frame)?;
+
+        let ticket_row = sqlx::query(
+            "SELECT COUNT(*) AS ticket_total,
+                    COUNT(*) FILTER (WHERE lifecycle = 0) AS proposed_ticket_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 1) AS sponsored_ticket_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 2) AS in_flight_ticket_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 3) AS delivered_ticket_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 4) AS blocked_ticket_count,
+                    COUNT(*) FILTER (WHERE lifecycle IN (5, 6, 7)) AS other_ticket_count
+             FROM factory.tickets",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(navigation_database)?;
+        let application_row = sqlx::query(
+            "SELECT application_key, id, aggregate_revision
+             FROM factory.application_revisions
+             WHERE is_active
+             ORDER BY id DESC
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(navigation_database)?;
+        let campaign_row = sqlx::query(
+            "SELECT COUNT(*) AS campaign_total,
+                    COUNT(*) FILTER (WHERE lifecycle = 0) AS running_campaign_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 1) AS completed_campaign_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 2) AS failed_campaign_count,
+                    COUNT(*) FILTER (WHERE lifecycle = 3) AS cancelled_campaign_count
+             FROM factory.campaigns",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(navigation_database)?;
+        let session_row = sqlx::query(
+            "SELECT COUNT(*) AS session_total,
+                    COUNT(*) FILTER (WHERE lifecycle = 1) AS running_session_count,
+                    COUNT(*) FILTER (WHERE cost_state = 1) AS unknown_cost_session_count
+             FROM factory.sessions",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(navigation_database)?;
+
+        let count = |row: &sqlx::postgres::PgRow, field: &'static str| {
+            row.try_get::<i64, _>(field)
+                .map_err(navigation_database)
+                .and_then(|value| {
+                    u32::try_from(value).map_err(|_| {
+                        NavigationRejection::Navigation(NavigationError::Corrupt { field })
+                    })
+                })
+        };
+        let response = FactoryStatusResponse {
+            protocol_version: PROTOCOL_VERSION_V2,
+            request_id: request.request_id,
+            operation: OP_OPERATOR_FACTORY_STATUS.to_owned(),
+            active_application_key: application_row
+                .as_ref()
+                .map(|row| row.try_get::<String, _>("application_key"))
+                .transpose()
+                .map_err(navigation_database)?,
+            active_application_revision_id: application_row
+                .as_ref()
+                .map(|row| row.try_get::<i64, _>("id"))
+                .transpose()
+                .map_err(navigation_database)?,
+            active_application_aggregate_revision: application_row
+                .as_ref()
+                .map(|row| row.try_get::<i64, _>("aggregate_revision"))
+                .transpose()
+                .map_err(navigation_database)?
+                .map(|value| {
+                    u64::try_from(value).map_err(|_| {
+                        NavigationRejection::Navigation(NavigationError::Corrupt {
+                            field: "application aggregate revision",
+                        })
+                    })
+                })
+                .transpose()?,
+            ticket_total: count(&ticket_row, "ticket_total")?,
+            proposed_ticket_count: count(&ticket_row, "proposed_ticket_count")?,
+            sponsored_ticket_count: count(&ticket_row, "sponsored_ticket_count")?,
+            in_flight_ticket_count: count(&ticket_row, "in_flight_ticket_count")?,
+            delivered_ticket_count: count(&ticket_row, "delivered_ticket_count")?,
+            blocked_ticket_count: count(&ticket_row, "blocked_ticket_count")?,
+            other_ticket_count: count(&ticket_row, "other_ticket_count")?,
+            campaign_total: count(&campaign_row, "campaign_total")?,
+            running_campaign_count: count(&campaign_row, "running_campaign_count")?,
+            completed_campaign_count: count(&campaign_row, "completed_campaign_count")?,
+            failed_campaign_count: count(&campaign_row, "failed_campaign_count")?,
+            cancelled_campaign_count: count(&campaign_row, "cancelled_campaign_count")?,
+            session_total: count(&session_row, "session_total")?,
+            running_session_count: count(&session_row, "running_session_count")?,
+            unknown_cost_session_count: count(&session_row, "unknown_cost_session_count")?,
+        };
+        Ok(json::to_string(&response).into_bytes())
     }
 
     async fn institutional_search(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {

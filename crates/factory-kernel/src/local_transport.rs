@@ -27,7 +27,8 @@ use factory_protocol::{
     ArchitectDecideCandidateRequest, ArchitectDecisionReceiptResponse,
     ArchitectReleaseTicketAttemptRequest, ArchitectSponsorTicketRevisionRequest, AssignmentId,
     AssignmentRole, AuditShowResponse, CampaignId, CampaignReceiptResponse, CampaignStatusResponse,
-    CandidateShowResponse, ConflictResponse, ErrorResponse, FRAME_PREFIX_BYTES,
+    CandidateShowResponse, ConflictResponse, ErrorResponse, FactoryStatusResponse,
+    FRAME_PREFIX_BYTES,
     ForumListThreadsRequestV2, ForumListTopicsRequestV2, ForumPostsResponseV2,
     ForumReadThreadRequestV2, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadsResponseV2,
     ForumTopicsResponseV2, FrameError, InstitutionalSearchResponse, InstitutionalShowResponse,
@@ -35,6 +36,7 @@ use factory_protocol::{
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
+    OperatorFactoryStatusRequest,
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
     OperatorPublicationCreateRequest, OperatorShutdownRequest, OperatorShutdownResponse,
     OperatorStartCampaignRequest, OperatorStatusRequest, OperatorStatusResponse,
@@ -726,6 +728,17 @@ impl OperatorClient {
         request: OperatorTicketListRequest,
     ) -> Result<TicketListResponse, LocalTransportError> {
         self.application_exchange(&request, factory_protocol::OP_OPERATOR_LIST_TICKETS)
+            .await
+    }
+
+    /// Reads the compact durable authority summary used by the operator's
+    /// high-level status command. The kernel performs the aggregate counts so
+    /// status remains correct beyond the twenty-row ticket navigation view.
+    pub async fn factory_status(
+        &self,
+        request: OperatorFactoryStatusRequest,
+    ) -> Result<FactoryStatusResponse, LocalTransportError> {
+        self.application_exchange(&request, factory_protocol::OP_OPERATOR_FACTORY_STATUS)
             .await
     }
 
@@ -1932,7 +1945,8 @@ async fn serve_operator_connection(
             )
             .await
         }
-        factory_protocol::OP_OPERATOR_LIST_TICKETS
+        factory_protocol::OP_OPERATOR_FACTORY_STATUS
+        | factory_protocol::OP_OPERATOR_LIST_TICKETS
         | factory_protocol::OP_OPERATOR_SHOW_TICKET
         | factory_protocol::OP_OPERATOR_SHOW_CANDIDATE
         | factory_protocol::OP_OPERATOR_SHOW_AUDIT

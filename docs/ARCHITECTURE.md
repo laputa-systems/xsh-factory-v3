@@ -22,6 +22,12 @@ identity, repository qualification, worktree/tree capture, validation, commit
 construction, and delivery. PostgreSQL holds mutable lifecycle and audit
 relations; CAS holds immutable bytes.
 
+One qualified application lane retains its campaign and ticket history in that
+same authority across paid cycles. Database rotation is a deployment/runtime
+replacement boundary, not a campaign boundary; independent authorities are
+not implicitly mergeable because their IDs and CAS provenance are local to the
+qualified runtime/evidence set.
+
 `factory-pi-host` validates closed host shapes, adapts the sealed assignment
 packet to `pi-agent-core-rs`, and speaks the framed kernel descriptor. It has
 no independent lifecycle authority.

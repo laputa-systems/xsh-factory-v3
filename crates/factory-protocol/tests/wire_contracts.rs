@@ -394,6 +394,47 @@ where
 }
 
 #[test]
+fn factory_status_projection_round_trips_with_full_counts() {
+    let request = OperatorFactoryStatusRequest {
+        protocol_version: PROTOCOL_VERSION_V2,
+        request_id: "status-request".to_owned(),
+        operation: OP_OPERATOR_FACTORY_STATUS.to_owned(),
+    };
+    let encoded = json::to_string(&request);
+    let decoded: OperatorFactoryStatusRequest =
+        json::from_str(&encoded).expect("status request round trip");
+    assert_eq!(decoded, request);
+
+    let response = FactoryStatusResponse {
+        protocol_version: PROTOCOL_VERSION_V2,
+        request_id: "status-request".to_owned(),
+        operation: OP_OPERATOR_FACTORY_STATUS.to_owned(),
+        active_application_key: Some("xsh".to_owned()),
+        active_application_revision_id: Some(7),
+        active_application_aggregate_revision: Some(9),
+        ticket_total: 48,
+        proposed_ticket_count: 1,
+        sponsored_ticket_count: 12,
+        in_flight_ticket_count: 33,
+        delivered_ticket_count: 1,
+        blocked_ticket_count: 1,
+        other_ticket_count: 0,
+        campaign_total: 88,
+        running_campaign_count: 0,
+        completed_campaign_count: 1,
+        failed_campaign_count: 67,
+        cancelled_campaign_count: 20,
+        session_total: 190,
+        running_session_count: 0,
+        unknown_cost_session_count: 3,
+    };
+    let encoded = json::to_string(&response);
+    let decoded: FactoryStatusResponse =
+        json::from_str(&encoded).expect("status response round trip");
+    assert_eq!(decoded, response);
+}
+
+#[test]
 fn every_operation_golden_is_typed_parsed_and_serialized() {
     let root: json::Value = json::from_str(include_str!(
         "../../../tests/protocol-fixtures/operation-goldens.json"

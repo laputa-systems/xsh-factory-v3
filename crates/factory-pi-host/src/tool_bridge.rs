@@ -278,6 +278,7 @@ struct EngineeringProgressState {
     owner_discovery_calls: u32,
     implementation_discovery_closed: bool,
     implementation_mutation_started: bool,
+    regression_identity: Option<String>,
     runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
@@ -300,6 +301,7 @@ impl Default for EngineeringProgressState {
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
+            regression_identity: None,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -385,6 +387,7 @@ impl CommandContext {
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
             implementation_mutation_started: false,
+            regression_identity: None,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -464,6 +467,38 @@ impl CommandContext {
         state.phase = EngineeringPhase::Implementing;
         // The checkpoint unlocks mutation, but owner resolution remains bounded. A no-match
         // search before the checkpoint must not strand the actor with an unusable owner path.
+        Ok(())
+    }
+
+    pub(crate) fn set_engineering_regression_identity(&self, identity: &str) {
+        if let Ok(mut state) = self.engineering.lock() {
+            if !identity.is_empty() {
+                state.regression_identity = Some(identity.to_owned());
+            }
+        }
+    }
+
+    pub(crate) fn validate_engineering_submission_identity(
+        &self,
+        payload: &JsonValue,
+    ) -> Result<(), &'static str> {
+        let submitted = payload
+            .get("regression_test_identity")
+            .and_then(JsonValue::as_str)
+            .ok_or("Engineering candidate submission must include regression_test_identity")?;
+        let state = self
+            .engineering
+            .lock()
+            .map_err(|_| "Engineering phase state is unavailable")?;
+        let expected = state
+            .regression_identity
+            .as_deref()
+            .ok_or("Engineering must complete a regression checkpoint before candidate_submit")?;
+        if submitted != expected {
+            return Err(
+                "Engineering regression_test_identity must exactly match the completed regression checkpoint",
+            );
+        }
         Ok(())
     }
 
@@ -1035,6 +1070,13 @@ where
             .map_err(|message| CapabilityError::Execution {
                 message: message.to_owned(),
             })?;
+        if name == ToolName::CandidateSubmit {
+            self.command_context
+                .validate_engineering_submission_identity(&payload)
+                .map_err(|message| CapabilityError::Execution {
+                    message: message.to_owned(),
+                })?;
+        }
         let product_tool_signature = payload
             .to_json_string()
             .map(|arguments| format!("{name}:{arguments}"))
@@ -1098,6 +1140,13 @@ where
                     })?;
             }
             if name == ToolName::CandidateCheckpointRegression {
+                if let Some(identity) = payload
+                    .get("regression_command")
+                    .and_then(JsonValue::as_str)
+                {
+                    self.command_context
+                        .set_engineering_regression_identity(identity);
+                }
                 self.command_context
                     .record_engineering_checkpoint()
                     .map_err(|message| CapabilityError::Execution {
@@ -2178,6 +2227,35 @@ mod tests {
         );
 
         assert!(!context.engineering_should_stop_after_turn());
+    }
+
+    #[test]
+    fn engineering_submission_requires_the_checkpoint_regression_identity() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        let payload = JsonValue::object([(
+            "regression_test_identity",
+            JsonValue::String("cargo test -p xsh".to_owned()),
+        )]);
+        assert_eq!(
+            context.validate_engineering_submission_identity(&payload),
+            Err("Engineering must complete a regression checkpoint before candidate_submit")
+        );
+
+        context.set_engineering_regression_identity("cargo test -p xsh");
+        assert!(context
+            .validate_engineering_submission_identity(&payload)
+            .is_ok());
+        let wrong = JsonValue::object([(
+            "regression_test_identity",
+            JsonValue::String("cargo test -p other".to_owned()),
+        )]);
+        assert_eq!(
+            context.validate_engineering_submission_identity(&wrong),
+            Err(
+                "Engineering regression_test_identity must exactly match the completed regression checkpoint"
+            )
+        );
     }
 
     #[test]

@@ -8,6 +8,11 @@ FACTORY_PAID_CYCLE_PRINCIPAL ?= grand-architect
 FACTORY_START_PRINCIPAL ?= grand-architect
 FACTORY_START_WAIT_SECONDS ?= 30
 FACTORY_START_SOCKET ?= $(FACTORY_RUNTIME_ROOT)/factoryd.operator.sock
+# Status is read-only and can discover the socket from the daemon command line
+# when the caller has not exported the runtime root.  Keep this override empty
+# by default so an empty FACTORY_RUNTIME_ROOT does not become the bogus path
+# `/factoryd.operator.sock`.
+FACTORY_STATUS_SOCKET ?=
 FACTORY_START_PID_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.pid
 FACTORY_START_LOG_FILE ?= $(FACTORY_RUNTIME_ROOT)/factoryd.log
 
@@ -21,7 +26,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build status paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -46,6 +51,40 @@ lint: pi-agent-core-rs-test
 
 release-build: cache
 	cargo build --locked --release --workspace
+
+# Read-only high-level operator view. The daemon owns the aggregate counts;
+# this target never opens PostgreSQL or mutates Factory state.  An explicit
+# FACTORY_STATUS_SOCKET wins; otherwise use FACTORY_RUNTIME_ROOT when present,
+# then recover runtime roots advertised by a running factoryd process.  This
+# keeps `make status` useful from a fresh shell without making the status view
+# guess a database or aggregate across independent authorities.
+status:
+	test -x "$(FACTORYCTL)"
+	@set -eu; \
+	 socket="$(FACTORY_STATUS_SOCKET)"; \
+	 advertised_runtime_root=""; \
+	 if test -z "$$socket" && test -n "$(FACTORY_RUNTIME_ROOT)"; then \
+	  socket="$(FACTORY_RUNTIME_ROOT)/factoryd.operator.sock"; \
+	 fi; \
+	 if test -z "$$socket"; then \
+	  for runtime_root in $$(ps -axo command= 2>/dev/null | awk '$$0 ~ /factoryd serve/ { for (i = 1; i < NF; i++) if ($$i == "--runtime-root") print $$(i + 1) }'); do \
+	   advertised_runtime_root="$$runtime_root"; \
+	   candidate="$$runtime_root/factoryd.operator.sock"; \
+	   test -S "$$candidate" || continue; \
+	   if test -n "$$socket" && test "$$socket" != "$$candidate"; then \
+	    printf 'make status: multiple factoryd operator sockets found; set FACTORY_STATUS_SOCKET explicitly\n' >&2; \
+	    exit 1; \
+	   fi; \
+	   socket="$$candidate"; \
+	  done; \
+	 fi; \
+	 if test -z "$$socket" && test -n "$$advertised_runtime_root"; then \
+	  printf 'make status: factoryd advertises runtime root %s, but its operator socket is missing; perform a controlled daemon restart\n' "$$advertised_runtime_root" >&2; \
+	  exit 1; \
+	 fi; \
+	 test -n "$$socket" || { printf 'make status: no factoryd operator socket found; set FACTORY_STATUS_SOCKET or FACTORY_RUNTIME_ROOT\n' >&2; exit 1; }; \
+	 test -S "$$socket" || { printf 'make status: operator socket is not live: %s\n' "$$socket" >&2; exit 1; }; \
+	 "$(FACTORYCTL)" status --socket "$$socket"
 
 # Requalify the complete release source graph before paid admission. The
 # identity check deliberately compares the freshly built local graph with the
