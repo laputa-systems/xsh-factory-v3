@@ -738,7 +738,7 @@ impl CommandContext {
         {
             Self::mark_engineering_protocol_violation(&mut state);
             return Err(
-                "Engineering has read an owner file; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit or write the smallest fix before running shell validation",
+                "Engineering has read an owner file; read exact adjacent owner files, then edit or write the smallest fix before running shell validation",
             );
         }
         if state.phase == EngineeringPhase::Implementing
@@ -753,7 +753,7 @@ impl CommandContext {
         {
             Self::mark_engineering_protocol_violation(&mut state);
             return Err(
-                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit (Int method owners: crates/xsh-registry/src/signature/methods.rs; runtime lowering: src/runtime/eval/lowered_ops.rs)",
+                "Engineering checkpoint succeeded; implement with workspace_edit/workspace_write or shell, then call candidate_submit",
             );
         }
         Ok(())
@@ -2235,14 +2235,14 @@ mod tests {
         context.configure_engineering();
         let payload = JsonValue::object([(
             "regression_test_identity",
-            JsonValue::String("cargo test -p xsh".to_owned()),
+            JsonValue::String("cargo test --workspace --lib".to_owned()),
         )]);
         assert_eq!(
             context.validate_engineering_submission_identity(&payload),
             Err("Engineering must complete a regression checkpoint before candidate_submit")
         );
 
-        context.set_engineering_regression_identity("cargo test -p xsh");
+        context.set_engineering_regression_identity("cargo test --workspace --lib");
         assert!(context
             .validate_engineering_submission_identity(&payload)
             .is_ok());
@@ -2283,7 +2283,7 @@ mod tests {
         context
             .record_engineering_tool_call(
                 ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+                "workspace_read:{\"repository_relative_path\":\"src/module/owner.rs\"}",
             )
             .expect("owner read is admitted");
         assert!(
@@ -2294,7 +2294,7 @@ mod tests {
         context
             .record_engineering_tool_call(
                 ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/docs.rs\"}",
+                "workspace_read:{\"repository_relative_path\":\"src/module/docs.rs\"}",
             )
             .expect("adjacent owner read is admitted");
         assert!(context
@@ -2415,21 +2415,21 @@ mod tests {
         context
             .record_engineering_tool_call(
                 ToolName::WorkspaceRead,
-                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+                "workspace_read:{\"repository_relative_path\":\"src/module/owner.rs\"}",
             )
             .expect("owner read closes discovery");
 
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::Shell),
             Err(
-                "Engineering has read an owner file; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit or write the smallest fix before running shell validation"
+                "Engineering has read an owner file; read exact adjacent owner files, then edit or write the smallest fix before running shell validation"
             )
         );
         assert!(!context.engineering_should_stop_after_turn());
         context
             .record_engineering_tool_call(
                 ToolName::WorkspaceEdit,
-                "workspace_edit:{\"path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+                "workspace_edit:{\"path\":\"src/module/owner.rs\"}",
             )
             .expect("mutation unlocks focused validation");
         assert!(context

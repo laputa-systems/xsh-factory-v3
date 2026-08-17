@@ -26,7 +26,7 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build status factory-database-guard paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test xsh-bundle-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build status factory-database-guard paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test application-contract-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
@@ -370,12 +370,11 @@ decision-test:
 	cargo test -p factory-kernel decision_store::tests --lib
 	cargo test -p factory-kernel decision_store::tests::postgres_authority_schema_has_exactly_thirty_six_named_tables --lib -- --ignored --test-threads=1
 
-# The real XSH bundle is independently compiled twice by Rust and admitted
-# through the typed Rust/CAS/activation boundary. This is a provider-free
-# source qualification and does not need a database.
-xsh-bundle-test:
-	cargo test -p factoryctl --test xsh_bundle
-	cargo test -p factory-kernel --test provider_free_application
+# The generic application contract is exercised without selecting a product
+# or opening a database. Product bundle data remains under applications/<key>;
+# daemon admission supplies the explicit source root at runtime.
+application-contract-test:
+	cargo test -p factory-protocol --test application_v2
 
 # The direct Rust host is qualified with its real Agent, sealed policy bridge,
 # frame contract, terminal gate, and transcript primitives without selecting a
@@ -412,35 +411,30 @@ backup-restore-test:
 		--cargo "$${FACTORY_BACKUP_CARGO:?set FACTORY_BACKUP_CARGO to an absolute cargo path}"
 
 # Complete provider-free qualification. The caller, not Make, supplies an
-# already-created disposable database for each of the ordinary, decision, XSH,
-# and generic Product-to-delivery judges, plus the source/blank restore clone
-# pair consumed by backup-restore-test. No target here creates or drops a
-# PostgreSQL database.
+# already-created disposable database for each database-backed judge plus the
+# source/blank restore clone pair consumed by backup-restore-test. The generic
+# application contract test is Rust-only and needs no database. No target here
+# creates or drops a PostgreSQL database.
 provider-free-acceptance:
 	test -n "$$FACTORY_ACCEPTANCE_POSTGRES_URL"
 	test -n "$$FACTORY_ACCEPTANCE_DECISION_URL"
-	test -n "$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL"
 	test -n "$$FACTORY_ACCEPTANCE_VERTICAL_URL"
 	@set -eu; \
 	acceptance_postgres_name="$${FACTORY_ACCEPTANCE_POSTGRES_URL##*/}"; acceptance_postgres_name="$${acceptance_postgres_name%%\?*}"; \
 	acceptance_decision_name="$${FACTORY_ACCEPTANCE_DECISION_URL##*/}"; acceptance_decision_name="$${acceptance_decision_name%%\?*}"; \
-	acceptance_xsh_bundle_name="$${FACTORY_ACCEPTANCE_XSH_BUNDLE_URL##*/}"; acceptance_xsh_bundle_name="$${acceptance_xsh_bundle_name%%\?*}"; \
 	acceptance_vertical_name="$${FACTORY_ACCEPTANCE_VERTICAL_URL##*/}"; acceptance_vertical_name="$${acceptance_vertical_name%%\?*}"; \
-	for database_name in "$$acceptance_postgres_name" "$$acceptance_decision_name" "$$acceptance_xsh_bundle_name" "$$acceptance_vertical_name"; do \
+	for database_name in "$$acceptance_postgres_name" "$$acceptance_decision_name" "$$acceptance_vertical_name"; do \
 		printf '%s\n' "$$database_name" | grep -Eq '^factory_test_v3_[0-9]+$$'; \
 	done; \
 	test "$$acceptance_postgres_name" != "$$acceptance_decision_name"; \
-	test "$$acceptance_postgres_name" != "$$acceptance_xsh_bundle_name"; \
 	test "$$acceptance_postgres_name" != "$$acceptance_vertical_name"; \
-	test "$$acceptance_decision_name" != "$$acceptance_xsh_bundle_name"; \
-	test "$$acceptance_decision_name" != "$$acceptance_vertical_name"; \
-	test "$$acceptance_xsh_bundle_name" != "$$acceptance_vertical_name"
+	test "$$acceptance_decision_name" != "$$acceptance_vertical_name"
 	$(MAKE) lint
 	$(MAKE) provider-free-host
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) postgres-test
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_DECISION_URL" $(MAKE) decision-test
 	DATABASE_URL="$$FACTORY_ACCEPTANCE_POSTGRES_URL" $(MAKE) sqlx-check
-	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_XSH_BUNDLE_URL" $(MAKE) xsh-bundle-test
+	$(MAKE) application-contract-test
 	FACTORY_TEST_DATABASE_URL="$$FACTORY_ACCEPTANCE_VERTICAL_URL" $(MAKE) provider-free-vertical
 	$(MAKE) backup-restore-test
 

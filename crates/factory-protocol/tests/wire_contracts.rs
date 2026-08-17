@@ -409,7 +409,7 @@ fn factory_status_projection_round_trips_with_full_counts() {
         protocol_version: PROTOCOL_VERSION_V2,
         request_id: "status-request".to_owned(),
         operation: OP_OPERATOR_FACTORY_STATUS.to_owned(),
-        active_application_key: Some("xsh".to_owned()),
+        active_application_key: Some("sample-app".to_owned()),
         active_application_revision_id: Some(7),
         active_application_aggregate_revision: Some(9),
         ticket_total: 48,

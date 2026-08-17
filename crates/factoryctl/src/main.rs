@@ -8,7 +8,6 @@
 //! listener.
 
 mod backup_restore;
-mod xsh_bundle;
 
 use std::{
     env,

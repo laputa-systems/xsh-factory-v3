@@ -32,19 +32,19 @@ migration.
 ## Complete provider-free acceptance
 
 `make pi-agent-core-rs-acceptance` composes ordinary checks, PostgreSQL
-authority,
-candidate/delivery transitions, real XSH bundle admission, generic vertical
-flow, and backup/restore qualification. It requires distinct externally
-created disposable databases and explicit backup variables; see
+authority, candidate/delivery transitions, the generic application-bundle
+contract, generic vertical flow, and backup/restore qualification. It requires
+distinct externally created disposable databases and explicit backup variables;
+see
 [`provider-free-dry-run.md`](provider-free-dry-run.md) for the exact inputs.
 
 The gate is the complete Rust runtime qualification, not a partial host test.
 It proves the pinned local core checkout and toolchain, the installed host
-receipt, deterministic V2 bundle compilation, inherited-descriptor packet
+receipt, deterministic V2 bundle contracts, inherited-descriptor packet
 verification, exact role-policy/tool allowlists, required-read accounting,
 terminal reconciliation, cancellation, unknown-cost rejection, denied
 capabilities, the generic Product → Engineering → Quality → delivery flow,
-real-XSH bundle admission, SQLx metadata, and backup/restore integrity. The
+generic application admission, SQLx metadata, and backup/restore integrity. The
 qualified source, build, installation, and operational paths are all Rust-only
 inputs to this gate.
 

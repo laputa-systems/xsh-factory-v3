@@ -63,7 +63,12 @@ the missing value would change the campaign contract or cannot be established
 without guessing, stop before spending budget and ask the user.
 
 `V1.md` is the deferred-work backlog, not an implementation contract. Keep the
-Rust kernel generic;
+every tracked file under `crates/` generic (including tests, fixtures,
+diagnostics, and comments); product keys, checkout paths, owner paths,
+prompts, and bundle fixtures belong only under the matching
+`applications/<key>/` directory. Generic Rust may consume an explicit
+application source root, but may not embed or discover an application
+identity. The current
 `applications/xsh` may declare closed policy and templates but cannot control
 the database, CAS, Git, or session lifecycle.
 

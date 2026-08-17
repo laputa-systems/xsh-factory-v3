@@ -201,7 +201,7 @@ fn domain_command_profile_spelling_is_exactly_parseable() {
 
 #[test]
 fn malformed_command_profile_reports_actionable_canonicality() {
-    let error = parse_command_profile_v2(b"./target/debug/xsh script.xsh").unwrap_err();
+    let error = parse_command_profile_v2(b"./target/debug/product fixture.script").unwrap_err();
     assert!(error.to_string().contains("command bytes are not canonical V2 JSON"));
 }
 

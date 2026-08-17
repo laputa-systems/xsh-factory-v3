@@ -676,18 +676,18 @@ mod tests {
     #[test]
     fn canonicalizes_process_local_executable_paths_only_for_replay_identity() {
         let first = canonicalize_executable_path(
-            b"executable: /tmp/worktree-a/target/debug/xsh\n",
-            b"/tmp/worktree-a/target/debug/xsh",
+            b"executable: /tmp/worktree-a/target/debug/product\n",
+            b"/tmp/worktree-a/target/debug/product",
         );
         let second = canonicalize_executable_path(
-            b"executable: /Users/josh/d/xsh/target/debug/xsh\n",
-            b"/Users/josh/d/xsh/target/debug/xsh",
+            b"executable: /Users/josh/d/product/target/debug/product\n",
+            b"/Users/josh/d/product/target/debug/product",
         );
         assert_eq!(first, second);
         assert_eq!(first, b"executable: <approved-executable>\n");
         assert_ne!(
-            canonicalize_executable_path(b"expected: first\n", b"/tmp/xsh"),
-            canonicalize_executable_path(b"expected: second\n", b"/tmp/xsh"),
+            canonicalize_executable_path(b"expected: first\n", b"/tmp/product"),
+            canonicalize_executable_path(b"expected: second\n", b"/tmp/product"),
         );
     }
 }

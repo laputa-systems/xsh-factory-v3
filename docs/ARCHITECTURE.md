@@ -14,6 +14,14 @@ Rust pi-agent-core host -> local framed descriptor -> Rust kernel -> PostgreSQL 
                                              validated commit + local delivery
 ```
 
+The Rust crate graph is strictly product-neutral. No file under `crates/`
+(including tests and diagnostics) may embed the current application's key,
+checkout paths, executable names, owner paths, prompts, or bundle fixtures.
+Those facts live under `applications/<key>/` and cross into Rust only through
+the typed application-bundle boundary. The generic command-line layer may
+accept an application source root supplied by the operator, but it must not
+select or name a product in crate code.
+
 ## Authority split
 
 Rust owns facts whose failure would make accepted work false, unsafe,

@@ -39,9 +39,9 @@
    diagnostics. A narrow no-match search therefore cannot strand the assignment;
    once an owner file is read, search/list discovery remains available only within
    the larger bounded post-checkpoint budget; pre-mutation shell discovery closes.
-   Adjacent exact reads (for example, `crates/xsh-registry/src/runtime_op.rs` or
-   `src/runtime/eval/lowered_ops.rs`) and the smallest mutation remain available,
-   and focused shell validation unlocks only after that mutation. Once a mutation
+   Adjacent exact reads of the assigned product repository's owner files and
+   the smallest mutation remain available, and focused shell validation unlocks
+   only after that mutation. Once a mutation
    starts, search/list discovery closes except for four narrowly bounded recovery
    lookups when an edit anchor needs repair; the actor must then validate, repair
    the focused edit, or submit. Repeated discovery still fails closed at the

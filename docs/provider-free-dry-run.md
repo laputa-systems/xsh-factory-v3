@@ -4,18 +4,18 @@ This document is the operator record for `make provider-free-acceptance`. It
 does not authorize a paid campaign and must never point at a live factory
 database or `../xsh`.
 
-The target requires four distinct externally created PostgreSQL 18 databases,
+The target requires three distinct externally created PostgreSQL 18 databases,
 each named `factory_test_v3_<digits>`, plus a quiescent source runtime/database
-pair and an empty restore database/runtime root for backup verification:
+pair and an empty restore database/runtime root for backup verification. The
+generic application contract judge is Rust-only and does not need a database:
 
 ```sh
 FACTORY_ACCEPTANCE_POSTGRES_URL='postgresql://USER@localhost/factory_test_v3_101' \
 FACTORY_ACCEPTANCE_DECISION_URL='postgresql://USER@localhost/factory_test_v3_102' \
-FACTORY_ACCEPTANCE_XSH_BUNDLE_URL='postgresql://USER@localhost/factory_test_v3_103' \
-FACTORY_ACCEPTANCE_VERTICAL_URL='postgresql://USER@localhost/factory_test_v3_104' \
+FACTORY_ACCEPTANCE_VERTICAL_URL='postgresql://USER@localhost/factory_test_v3_103' \
 FACTORY_BACKUP_SOURCE_DATABASE_URL='postgresql://USER@localhost/factory_v3_live' \
 FACTORY_BACKUP_SOURCE_RUNTIME_ROOT=/absolute/path/to/live-runtime \
-FACTORY_BACKUP_RESTORE_DATABASE_URL='postgresql://USER@localhost/factory_restore_v3_105' \
+FACTORY_BACKUP_RESTORE_DATABASE_URL='postgresql://USER@localhost/factory_restore_v3_104' \
 FACTORY_BACKUP_RESTORE_RUNTIME_ROOT=/absolute/path/to/empty-restore-runtime \
 FACTORY_BACKUP_DUMP_FILE=/absolute/path/to/retained/factory-v3.backup \
 FACTORY_BACKUP_PG_DUMP="$(command -v pg_dump)" \
@@ -26,8 +26,10 @@ make provider-free-acceptance
 ```
 
 The acceptance sequence verifies local source/host checks, serial PostgreSQL
-authority, SQLx metadata, exact XSH bundle admission, a generic Product →
-Engineering → Quality → delivery composition, and backup/restore integrity.
+authority, SQLx metadata, the generic application-bundle contract, a generic
+Product → Engineering → Quality → delivery composition, and backup/restore
+integrity. Product-specific bundle data is admitted from its
+`applications/<key>/` source root by the ordinary daemon registration path.
 It uses scripted actors and synthetic repositories where appropriate. It never
 spends provider budget, starts a live campaign, or pushes Git.
 
