@@ -30,7 +30,7 @@ use crate::{
     storage::{KernelStore, StoreError},
     ticket_store::{
         ClaimOutcome, ClaimTicketReceipt, DownstreamActionContext, DownstreamActionStage,
-        FailTicketAttempt, RetryQualityAttempt,
+        FailTicketAttempt, RetryEngineeringAttempt, RetryQualityAttempt,
     },
 };
 
@@ -56,6 +56,10 @@ pub enum CampaignDriverOutcome {
     },
     ProductRetryScheduled {
         campaign_id: CampaignId,
+    },
+    EngineeringRetryScheduled {
+        campaign_id: CampaignId,
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
     },
     TicketAttemptFailed {
         campaign_id: CampaignId,
@@ -152,6 +156,27 @@ impl CampaignDriver {
         };
         let campaign = process.campaign_status(campaign_id).await?;
         let ticket = self.store.ticket_store();
+        if let Some(recovery) = ticket.recoverable_engineering_failure(campaign_id).await? {
+            self.retry_engineering_attempt(
+                recovery.ticket_attempt_id,
+                recovery.attempt_revision,
+                recovery.ticket_revision,
+                "retrying Engineering after a bounded assignment or protocol fault",
+            )
+            .await?;
+            return self
+                .launch(
+                    daemon,
+                    campaign_id,
+                    campaign.application_revision_id,
+                    ExpectedRevision::new(campaign.revision),
+                    DurableAssignmentTarget::Engineering {
+                        ticket_attempt_id: recovery.ticket_attempt_id,
+                    },
+                    "engineering-retry",
+                )
+                .await;
+        }
         if let Some(recovery) = ticket.recoverable_quality_failure(campaign_id).await? {
             self.retry_quality_attempt(
                 recovery.ticket_attempt_id,
@@ -451,6 +476,28 @@ impl CampaignDriver {
                 }
                 Ok(CampaignDriverOutcome::Assignment(assignment))
             }
+            Ok(assignment)
+                if matches!(target, DurableAssignmentTarget::Engineering { .. })
+                    && engineering_terminal_retryable(
+                        assignment.session.terminal.session_state,
+                        assignment.session.terminal.cost,
+                    ) => {
+                let ticket_attempt_id = match target {
+                    DurableAssignmentTarget::Engineering { ticket_attempt_id } => ticket_attempt_id,
+                    DurableAssignmentTarget::Product | DurableAssignmentTarget::Quality { .. } => {
+                        unreachable!("Engineering guard selected a non-Engineering target")
+                    }
+                };
+                let reason = failure_reason(
+                    action,
+                    "Engineering session terminated with a known failure; scheduling one bounded retry",
+                );
+                self.fail_ticket_attempt(ticket_attempt_id, &reason).await?;
+                Ok(CampaignDriverOutcome::EngineeringRetryScheduled {
+                    campaign_id,
+                    ticket_attempt_id,
+                })
+            }
             Ok(_) => {
                 let reason =
                     failure_reason(action, "session reached a non-succeeded terminal state");
@@ -545,6 +592,32 @@ impl CampaignDriver {
             campaign_id,
             failure_detail: reason.to_owned(),
         })
+    }
+
+    async fn retry_engineering_attempt(
+        &self,
+        ticket_attempt_id: factory_protocol::TicketAttemptId,
+        attempt_revision: AggregateRevision,
+        ticket_revision: AggregateRevision,
+        reason: &str,
+    ) -> Result<(), CampaignDriverError> {
+        self.store
+            .ticket_store()
+            .retry_engineering_attempt(&RetryEngineeringAttempt {
+                principal: DRIVER_PRINCIPAL.to_owned(),
+                command_id: format!(
+                    "attempt-{}-engineering-retry-ar{}-tr{}",
+                    ticket_attempt_id.get(),
+                    attempt_revision.get(),
+                    ticket_revision.get(),
+                ),
+                ticket_attempt_id,
+                expected_attempt_revision: ExpectedRevision::new(attempt_revision),
+                expected_ticket_revision: ExpectedRevision::new(ticket_revision),
+                reason: reason.to_owned(),
+            })
+            .await?;
+        Ok(())
     }
 
     async fn fail_running_campaign(
@@ -656,6 +729,17 @@ fn failure_reason(action: &str, detail: &str) -> String {
     reason
 }
 
+fn engineering_terminal_retryable(
+    session_state: factory_protocol::SessionState,
+    cost: factory_protocol::TerminalCostV2,
+) -> bool {
+    matches!(
+        session_state,
+        factory_protocol::SessionState::Failed | factory_protocol::SessionState::Interrupted
+    )
+        && matches!(cost, factory_protocol::TerminalCostV2::Known(_))
+}
+
 fn command_id(
     action: &str,
     campaign_id: CampaignId,
@@ -744,6 +828,30 @@ mod tests {
         assert!(product_retry_available(2));
         assert!(!product_retry_available(3));
         assert!(!product_retry_available(u32::MAX));
+    }
+
+    #[test]
+    fn engineering_retries_require_known_cost_failed_sessions() {
+        assert!(engineering_terminal_retryable(
+            factory_protocol::SessionState::Failed,
+            factory_protocol::TerminalCostV2::Known(factory_protocol::MicroUsd::new(1)),
+        ));
+        assert!(engineering_terminal_retryable(
+            factory_protocol::SessionState::Interrupted,
+            factory_protocol::TerminalCostV2::Known(factory_protocol::MicroUsd::new(1)),
+        ));
+        assert!(!engineering_terminal_retryable(
+            factory_protocol::SessionState::Succeeded,
+            factory_protocol::TerminalCostV2::Known(factory_protocol::MicroUsd::new(1)),
+        ));
+        assert!(!engineering_terminal_retryable(
+            factory_protocol::SessionState::Failed,
+            factory_protocol::TerminalCostV2::Unknown,
+        ));
+        assert!(!engineering_terminal_retryable(
+            factory_protocol::SessionState::Failed,
+            factory_protocol::TerminalCostV2::Exceeded(factory_protocol::MicroUsd::new(1)),
+        ));
     }
 
     #[test]

@@ -16,7 +16,8 @@ use factory_kernel::storage::{
 };
 use factory_kernel::ticket_store::{
     ClaimOutcome, ClaimSponsoredTicket, CurrentHeadRequalification, FailTicketAttempt,
-    ReleaseOutcome, ReleaseTicketAttempt, SponsorTicketRevision, SubmitTicketProposal,
+    ReleaseOutcome, ReleaseTicketAttempt, RetryEngineeringAttempt, SponsorTicketRevision,
+    SubmitTicketProposal,
 };
 use factory_protocol::{
     AggregateRevision, ApplicationKey, ArchitectPrincipalV2, ContentDigest, ExpectedRevision,
@@ -571,6 +572,49 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
             })
             .await
             .expect("terminal attempt failure");
+        let recoverable = ticket_store
+            .recoverable_engineering_failure(campaign.campaign_id)
+            .await
+            .expect("read recoverable Engineering failure")
+            .expect("first Engineering failure has one bounded retry");
+        assert_eq!(recoverable.ticket_attempt_id, ticket_attempt_id);
+        assert_eq!(
+            recoverable.attempt_revision,
+            failed.resulting_attempt_revision
+        );
+        let engineering_retry = ticket_store
+            .retry_engineering_attempt(&RetryEngineeringAttempt {
+                principal: "driver".to_owned(),
+                command_id: unique("ticket-engineering-retry"),
+                ticket_attempt_id,
+                expected_attempt_revision: ExpectedRevision::new(failed.resulting_attempt_revision),
+                expected_ticket_revision: ExpectedRevision::new(claimed.resulting_ticket_revision),
+                reason: "bounded protocol recovery".to_owned(),
+            })
+            .await
+            .expect("bounded Engineering retry");
+        assert!(!engineering_retry.was_idempotent_retry);
+        assert!(
+            ticket_store
+                .recoverable_engineering_failure(campaign.campaign_id)
+                .await
+                .expect("read retry state")
+                .is_none(),
+            "an Engineering retry is consumed before another failure"
+        );
+        let failed_again = ticket_store
+            .fail_ticket_attempt(&FailTicketAttempt {
+                principal: "engineering".to_owned(),
+                command_id: unique("ticket-attempt-fail-again"),
+                ticket_attempt_id,
+                expected_attempt_revision: ExpectedRevision::new(
+                    engineering_retry.resulting_attempt_revision,
+                ),
+                expected_ticket_revision: ExpectedRevision::new(claimed.resulting_ticket_revision),
+                reason: "synthetic second child failure".to_owned(),
+            })
+            .await
+            .expect("second terminal attempt failure");
         assert!(matches!(
             ticket_store
                 .claim_sponsored_ticket(&ClaimSponsoredTicket {
@@ -592,7 +636,9 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
                 principal: "architect".to_owned(),
                 command_id: unique("ticket-release"),
                 ticket_attempt_id,
-                expected_attempt_revision: ExpectedRevision::new(failed.resulting_attempt_revision),
+                expected_attempt_revision: ExpectedRevision::new(
+                    failed_again.resulting_attempt_revision,
+                ),
                 expected_ticket_revision: ExpectedRevision::new(claimed.resulting_ticket_revision),
                 reason: "explicit fresh-head release".to_owned(),
                 requalification,

@@ -11,7 +11,7 @@ use factory_protocol::{
     CandidateId, ContentDigest, ExpectedRevision, ReviewId, TicketAttemptId, TicketAttemptStage,
     TicketBoundsV2, TicketId, TicketRevisionId, TicketState, ValidationId,
 };
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use crate::storage::{KernelStore, StoreError};
 
@@ -62,6 +62,7 @@ const CAMPAIGN_COMPLETED_SUBJECT: i16 = 39;
 // Subject kind 40 is the stable candidate subject family. Quality retry was
 // added later and must retain its own ticket-attempt subject family.
 const QUALITY_RETRY_SUBJECT: i16 = 45;
+const ENGINEERING_RETRY_SUBJECT: i16 = 46;
 
 const PROPOSE_OPERATION: &str = "ticket.propose";
 const SPONSOR_OPERATION: &str = "ticket.sponsor";
@@ -69,6 +70,7 @@ const CLAIM_OPERATION: &str = "ticket.claim";
 const FAIL_OPERATION: &str = "ticket_attempt.fail";
 const RELEASE_OPERATION: &str = "ticket_attempt.release";
 const QUALITY_RETRY_OPERATION: &str = "ticket_attempt.retry_quality";
+const ENGINEERING_RETRY_OPERATION: &str = "ticket_attempt.retry_engineering";
 const COMPLETE_CAMPAIGN_OPERATION: &str = "campaign.complete_delivery_target";
 
 /// The narrow, named ticket authority over the kernel's fixed PostgreSQL
@@ -207,6 +209,27 @@ pub struct RetryQualityAttempt {
     pub expected_attempt_revision: ExpectedRevision,
     pub expected_ticket_revision: ExpectedRevision,
     pub reason: String,
+}
+
+/// One kernel-owned Engineering recovery for a terminal assignment/session
+/// fault. It retains the claimed base and ticket identity, clears the failed
+/// stage, and permits exactly one fresh Engineering packet/session. A second
+/// fault remains terminal and requires the ordinary Architect release path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetryEngineeringAttempt {
+    pub principal: String,
+    pub command_id: String,
+    pub ticket_attempt_id: TicketAttemptId,
+    pub expected_attempt_revision: ExpectedRevision,
+    pub expected_ticket_revision: ExpectedRevision,
+    pub reason: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineeringFailureContext {
+    pub ticket_attempt_id: TicketAttemptId,
+    pub attempt_revision: AggregateRevision,
+    pub ticket_revision: AggregateRevision,
 }
 
 /// The current pair of durable optimistic-concurrency fences needed to close
@@ -1234,6 +1257,172 @@ impl TicketStore {
             audit_log_id,
             was_idempotent_retry: false,
         })
+    }
+
+    /// Retries Engineering exactly once after a terminal assignment/session
+    /// fault without changing the claimed ticket or base snapshot. The
+    /// failed stage is cleared before the driver creates a fresh assignment;
+    /// a second failure remains terminal for Architect release.
+    pub async fn retry_engineering_attempt(
+        &self,
+        command: &RetryEngineeringAttempt,
+    ) -> Result<TicketAttemptReceipt, StoreError> {
+        validate_command(command.principal.as_str(), command.command_id.as_str())?;
+        validate_reason(&command.reason, "Engineering retry reason")?;
+        let fingerprint = engineering_retry_fingerprint(command);
+        let mut transaction = self.pool.begin().await?;
+        if let Some(receipt) = find_ticket_audit(
+            &mut transaction,
+            &command.principal,
+            &command.command_id,
+            ENGINEERING_RETRY_OPERATION,
+            fingerprint,
+        )
+        .await?
+        {
+            require_ticket_subject(&receipt, ENGINEERING_RETRY_SUBJECT)?;
+            transaction.commit().await?;
+            return Ok(TicketAttemptReceipt {
+                ticket_attempt_id: command.ticket_attempt_id,
+                resulting_attempt_revision: receipt.resulting_revision,
+                audit_log_id: receipt.audit_log_id,
+                was_idempotent_retry: true,
+            });
+        }
+        let attempt = lock_ticket_attempt(&mut transaction, command.ticket_attempt_id).await?;
+        require_expected(command.expected_attempt_revision, attempt.revision)?;
+        require_expected(command.expected_ticket_revision, attempt.ticket_revision)?;
+        require_ticket_state(TicketState::InFlight, attempt.ticket_state)?;
+        if attempt.released || attempt.stage != ATTEMPT_FAILED {
+            return Err(StoreError::TicketAttemptNotReleasable);
+        }
+        let campaign = sqlx::query(
+            "SELECT c.lifecycle, c.cost_state
+             FROM factory.campaigns AS c
+             JOIN factory.ticket_attempts AS ta ON ta.campaign_id = c.id
+             WHERE ta.id = $1
+             FOR SHARE",
+        )
+        .bind(command.ticket_attempt_id.get())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(StoreError::TicketAttemptNotReleasable)?;
+        if campaign.get::<i16, _>("lifecycle") != CAMPAIGN_RUNNING
+            || campaign.get::<i16, _>("cost_state") != COST_KNOWN
+        {
+            return Err(StoreError::TicketAttemptNotReleasable);
+        }
+        let candidate_exists = sqlx::query(
+            "SELECT EXISTS(
+                 SELECT 1 FROM factory.candidates WHERE ticket_attempt_id = $1
+             ) AS candidate_exists",
+        )
+        .bind(command.ticket_attempt_id.get())
+        .fetch_one(&mut *transaction)
+        .await?
+        .get::<bool, _>("candidate_exists");
+        let prior_retry_exists = sqlx::query(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM factory.audit_log
+                 WHERE operation = $1
+                   AND subject_kind = $2
+                   AND subject_id = $3
+             ) AS retry_exists",
+        )
+        .bind(ENGINEERING_RETRY_OPERATION)
+        .bind(ENGINEERING_RETRY_SUBJECT)
+        .bind(command.ticket_attempt_id.get())
+        .fetch_one(&mut *transaction)
+        .await?
+        .get::<bool, _>("retry_exists");
+        if !can_retry_engineering_attempt(attempt.stage, candidate_exists, prior_retry_exists) {
+            return Err(StoreError::TicketAttemptNotReleasable);
+        }
+        let next = attempt.revision.next()?;
+        sqlx::query(
+            "UPDATE factory.ticket_attempts
+             SET stage = $1, failed_at = NULL, failure_reason = NULL, revision = $2
+             WHERE id = $3",
+        )
+        .bind(ATTEMPT_ENGINEERING)
+        .bind(revision_to_sql(next)?)
+        .bind(command.ticket_attempt_id.get())
+        .execute(&mut *transaction)
+        .await?;
+        let audit_log_id = insert_ticket_audit(
+            &mut transaction,
+            &command.principal,
+            &command.command_id,
+            ENGINEERING_RETRY_OPERATION,
+            fingerprint,
+            ENGINEERING_RETRY_SUBJECT,
+            command.ticket_attempt_id.get(),
+            next,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(TicketAttemptReceipt {
+            ticket_attempt_id: command.ticket_attempt_id,
+            resulting_attempt_revision: next,
+            audit_log_id,
+            was_idempotent_retry: false,
+        })
+    }
+
+    /// Finds one failed, candidate-less Engineering attempt that has not yet
+    /// consumed its single automatic retry. The campaign driver immediately
+    /// consumes this read through [`Self::retry_engineering_attempt`].
+    pub async fn recoverable_engineering_failure(
+        &self,
+        campaign_id: CampaignId,
+    ) -> Result<Option<EngineeringFailureContext>, StoreError> {
+        let row = sqlx::query(
+            "SELECT ta.id AS ticket_attempt_id, ta.revision AS attempt_revision,
+                    tr.revision AS ticket_revision
+             FROM factory.ticket_attempts AS ta
+             JOIN factory.ticket_revisions AS tr ON tr.id = ta.ticket_revision_id
+             JOIN factory.tickets AS t ON t.id = tr.ticket_id
+             JOIN factory.campaigns AS c ON c.id = ta.campaign_id
+             WHERE ta.campaign_id = $1
+               AND ta.stage = $2
+               AND ta.released_at IS NULL
+               AND t.current_ticket_revision_id = tr.id
+               AND t.lifecycle = $3
+               AND tr.lifecycle = $3
+               AND c.lifecycle = $4
+               AND c.cost_state = $5
+               AND NOT EXISTS (
+                   SELECT 1 FROM factory.candidates
+                   WHERE ticket_attempt_id = ta.id
+               )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM factory.audit_log AS retry
+                   WHERE retry.operation = $6
+                     AND retry.subject_kind = $7
+                     AND retry.subject_id = ta.id
+               )
+             ORDER BY ta.failed_at ASC NULLS LAST, ta.id ASC
+             LIMIT 1",
+        )
+        .bind(campaign_id.get())
+        .bind(ATTEMPT_FAILED)
+        .bind(TICKET_IN_FLIGHT)
+        .bind(CAMPAIGN_RUNNING)
+        .bind(COST_KNOWN)
+        .bind(ENGINEERING_RETRY_OPERATION)
+        .bind(ENGINEERING_RETRY_SUBJECT)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(EngineeringFailureContext {
+                ticket_attempt_id: TicketAttemptId::new(row.get("ticket_attempt_id"))?,
+                attempt_revision: revision_from_sql(row.get("attempt_revision"))?,
+                ticket_revision: revision_from_sql(row.get("ticket_revision"))?,
+            })
+        })
+        .transpose()
     }
 
     /// Finds one failed Quality attempt that can be recovered without changing
@@ -2488,6 +2677,19 @@ fn quality_retry_fingerprint(command: &RetryQualityAttempt) -> ContentDigest {
     finish_hash(hasher)
 }
 
+fn engineering_retry_fingerprint(command: &RetryEngineeringAttempt) -> ContentDigest {
+    let mut hasher = ticket_fingerprint_prefix(
+        ENGINEERING_RETRY_OPERATION,
+        &command.principal,
+        &command.command_id,
+    );
+    hasher.update(&command.ticket_attempt_id.get().to_be_bytes());
+    hash_revision(&mut hasher, command.expected_attempt_revision);
+    hash_revision(&mut hasher, command.expected_ticket_revision);
+    hash_string(&mut hasher, &command.reason);
+    finish_hash(hasher)
+}
+
 fn can_retry_quality_attempt(
     attempt_stage: i16,
     candidate_lifecycle: i16,
@@ -2498,6 +2700,14 @@ fn can_retry_quality_attempt(
         && candidate_lifecycle == CANDIDATE_VALIDATED
         && candidate_commit_present
         && !prior_quality_retry_exists
+}
+
+fn can_retry_engineering_attempt(
+    attempt_stage: i16,
+    candidate_exists: bool,
+    prior_engineering_retry_exists: bool,
+) -> bool {
+    attempt_stage == ATTEMPT_FAILED && !candidate_exists && !prior_engineering_retry_exists
 }
 
 fn release_fingerprint(command: &ReleaseTicketAttempt) -> ContentDigest {
@@ -2641,5 +2851,13 @@ mod tests {
             false,
             false,
         ));
+    }
+
+    #[test]
+    fn engineering_retry_is_bounded_to_one_candidate_less_failure() {
+        assert!(can_retry_engineering_attempt(ATTEMPT_FAILED, false, false));
+        assert!(!can_retry_engineering_attempt(ATTEMPT_FAILED, false, true));
+        assert!(!can_retry_engineering_attempt(ATTEMPT_ENGINEERING, false, false));
+        assert!(!can_retry_engineering_attempt(ATTEMPT_FAILED, true, false));
     }
 }

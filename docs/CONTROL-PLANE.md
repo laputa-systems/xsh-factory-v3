@@ -101,8 +101,10 @@ only the directory of the already-qualified Cargo executable, plus their exact
 `rustc` and `rustdoc` siblings, so a product integration test may invoke Cargo
 without inheriting an ambient operator `PATH`.
 
-The current remaining weakness is intentional and explicit: Engineering work
-is only admitted as a candidate after its actor calls `candidate_submit`. A
-tool/protocol failure after a useful checkout can therefore lose an otherwise
-recoverable patch. The next architecture change moves that recovery boundary
-into controller-owned terminal reconciliation; see the [V1 backlog](../V1.md).
+Engineering work is only admitted as a candidate after its actor calls
+`candidate_submit`. A known-cost Engineering assignment/session failure is
+therefore first recorded as a failed attempt, then receives one controller-
+owned retry that reuses the claimed base and exact ticket identity. The retry
+has its own assignment/session evidence and audit fence; a second failure stays
+terminal and requires the ordinary Architect release path. Unknown or exceeded
+cost remains fail-closed and is never retried.
