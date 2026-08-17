@@ -264,12 +264,14 @@ impl EngineeringPhase {
 #[derive(Debug)]
 struct EngineeringProgressState {
     phase: EngineeringPhase,
+    owner_searches: u32,
 }
 
 impl Default for EngineeringProgressState {
     fn default() -> Self {
         Self {
             phase: EngineeringPhase::Disabled,
+            owner_searches: 0,
         }
     }
 }
@@ -339,6 +341,7 @@ impl CommandContext {
         };
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
+            owner_searches: 0,
         };
     }
 
@@ -478,10 +481,20 @@ impl CommandContext {
         &self,
         tool: ToolName,
     ) -> Result<(), &'static str> {
-        let state = self
+        let mut state = self
             .engineering
             .lock()
             .map_err(|_| "Engineering phase state is unavailable")?;
+        if state.phase == EngineeringPhase::AwaitingCheckpoint
+            && tool == ToolName::WorkspaceSearch
+        {
+            if state.owner_searches != 0 {
+                return Err(
+                    "Engineering has completed its one owner search; call candidate_checkpoint_regression next",
+                );
+            }
+            state.owner_searches = 1;
+        }
         if state.phase == EngineeringPhase::AwaitingCheckpoint
             && matches!(
                 tool,
@@ -1911,6 +1924,12 @@ mod tests {
             context
                 .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
                 .is_ok()
+        );
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
+            Err(
+                "Engineering has completed its one owner search; call candidate_checkpoint_regression next"
+            )
         );
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::Shell),
