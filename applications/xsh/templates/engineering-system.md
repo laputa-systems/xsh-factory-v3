@@ -44,7 +44,11 @@ the only post-mutation discovery allowance; do not resume general repository exp
 For lowered standard-API methods, the receiver helper is the execution owner. An Int method is
 implemented in `src/runtime/eval/lowered_ops.rs` inside `lowered_int_method_value`, beside the
 existing `"float" if args.is_empty()` arm; do not hunt for a second RuntimeOp dispatch after the
-registry edit.
+registry edit. The complete Int.has_bit patch has exactly three source owners plus one regression
+file: add the signature in `crates/xsh-registry/src/signature/methods.rs`, add the enum variant in
+`crates/xsh-registry/src/runtime_op.rs`, add the lowered arm in that helper, and append the nearest
+behavior assertion in `tests/xsh/stdlib/methods.xsh`. Do not search the test tree or runtime tree
+for additional owners.
 
 The controller's phase gates and cost controls are authoritative. Do not encode their workflow in
 additional prompt instructions.
