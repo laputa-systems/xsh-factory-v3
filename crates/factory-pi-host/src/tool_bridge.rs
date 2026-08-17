@@ -275,6 +275,7 @@ struct EngineeringProgressState {
     post_checkpoint_owner_searches: u32,
     owner_discovery_calls: u32,
     implementation_discovery_closed: bool,
+    implementation_mutation_started: bool,
     runtime_owner_read: bool,
     turns_started: u32,
     last_tool_call: Option<String>,
@@ -295,6 +296,7 @@ impl Default for EngineeringProgressState {
             post_checkpoint_owner_searches: 0,
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
+            implementation_mutation_started: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -378,6 +380,7 @@ impl CommandContext {
             post_checkpoint_owner_searches: 0,
             owner_discovery_calls: 0,
             implementation_discovery_closed: false,
+            implementation_mutation_started: false,
             runtime_owner_read: false,
             turns_started: 0,
             last_tool_call: None,
@@ -491,6 +494,11 @@ impl CommandContext {
         }
         if state.phase == EngineeringPhase::Implementing && tool == ToolName::WorkspaceRead {
             state.implementation_discovery_closed = true;
+        }
+        if state.phase == EngineeringPhase::Implementing
+            && matches!(tool, ToolName::WorkspaceEdit | ToolName::WorkspaceWrite)
+        {
+            state.implementation_mutation_started = true;
         }
         if tool == ToolName::Shell {
             state.shell_calls = state.shell_calls.saturating_add(1);
@@ -669,6 +677,16 @@ impl CommandContext {
             state.post_checkpoint_owner_searches =
                 state.post_checkpoint_owner_searches.saturating_add(1);
             return Ok(());
+        }
+        if state.phase == EngineeringPhase::Implementing
+            && tool == ToolName::Shell
+            && state.implementation_discovery_closed
+            && !state.implementation_mutation_started
+        {
+            Self::mark_engineering_protocol_violation(&mut state);
+            return Err(
+                "Engineering has read an owner file; edit or write the smallest fix before running shell validation",
+            );
         }
         if state.phase == EngineeringPhase::Implementing
             && matches!(
@@ -2231,6 +2249,12 @@ mod tests {
                 "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
             )
             .expect("runtime owner read enables shell checks");
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceEdit,
+                "workspace_edit:{\"path\":\"src/runtime/eval/lowered_ops.rs\"}",
+            )
+            .expect("mutation enables focused shell validation");
 
         for _ in 0..(MAX_ENGINEERING_IDENTICAL_TOOL_CALLS - 1) {
             assert!(context
@@ -2271,6 +2295,12 @@ mod tests {
                 "workspace_read:{\"repository_relative_path\":\"src/runtime/eval/lowered_ops.rs\"}",
             )
             .expect("runtime owner read enables shell checks");
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceEdit,
+                "workspace_edit:{\"path\":\"src/runtime/eval/lowered_ops.rs\"}",
+            )
+            .expect("mutation enables focused shell validation");
 
         for index in 0..MAX_ENGINEERING_SHELL_CALLS {
             assert!(context
@@ -2284,6 +2314,38 @@ mod tests {
             )
         );
         assert!(context.engineering_should_stop_after_turn());
+    }
+
+    #[test]
+    fn engineering_phase_blocks_shell_discovery_after_owner_read_until_mutation() {
+        let context = CommandContext::new(1);
+        context.configure_engineering();
+        context
+            .record_engineering_checkpoint()
+            .expect("checkpoint advances the phase");
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceRead,
+                "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+            )
+            .expect("owner read closes discovery");
+
+        assert_eq!(
+            context.require_engineering_checkpoint_before(ToolName::Shell),
+            Err(
+                "Engineering has read an owner file; edit or write the smallest fix before running shell validation"
+            )
+        );
+        assert!(!context.engineering_should_stop_after_turn());
+        context
+            .record_engineering_tool_call(
+                ToolName::WorkspaceEdit,
+                "workspace_edit:{\"path\":\"crates/xsh-registry/src/signature/methods.rs\"}",
+            )
+            .expect("mutation unlocks focused validation");
+        assert!(context
+            .require_engineering_checkpoint_before(ToolName::Shell)
+            .is_ok());
     }
 
     #[test]
