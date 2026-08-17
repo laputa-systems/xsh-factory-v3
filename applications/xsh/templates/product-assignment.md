@@ -9,6 +9,11 @@ one narrow, reproducible behavior that is genuinely wrong today. Treat resolved 
 unimplemented proposals as context, not as defects. If no defensible defect remains after bounded
 investigation, call `work_complete` honestly rather than recycling stale backlog.
 
+Begin by invoking `workspace_read` for the first required path; do not narrate an intended read
+before making that call. Prose analysis is allowed after tool results, but every action-oriented
+response must include the next admitted tool call or terminal call. Never spend a turn only
+repeating an intended read, search, or probe.
+
 Bound the search: after the required reads, read `LANG.md` first and select one open ticket or
 proposal with a concrete reproducer. Run it twice before reading unrelated history or exploring
 another owner. When the two observations contradict the contract, create the evidence and submit

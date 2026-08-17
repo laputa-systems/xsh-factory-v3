@@ -11,6 +11,11 @@ profile. The contract's expected behavior and the two identical actual observati
 valid basis for a ticket. Prefer the factory-provided lead; use one alternative only when that
 lead is conforming or cannot be reproduced.
 
+Begin by invoking `workspace_read` for the first required path; do not narrate an intended read
+before making that call. Prose analysis is allowed after tool results, but every action-oriented
+response must include the next admitted tool call or terminal call. Never spend a turn only
+repeating an intended read, search, or probe.
+
 Keep discovery bounded and front-load the backlog: read `LANG.md` immediately after the required
 paths, choose the first unresolved ticket or proposal that has a concrete user-visible check, and
 run that check before browsing unrelated history or source areas. Do not inspect git history or
