@@ -30,13 +30,12 @@ use std::{
 };
 
 use factory_protocol::ProcessCustodyV2;
+use factory_settings::KERNEL_ENVIRONMENT_NAMES;
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
 
 /// Environment names supplied by the kernel itself rather than by an
 /// application command or credential descriptor.
-const KERNEL_ENVIRONMENT_NAMES: [&str; 2] = ["NO_COLOR", "PATH"];
-
 /// Immutable process inputs for one Rust agent host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PiHostSpawnSpec {

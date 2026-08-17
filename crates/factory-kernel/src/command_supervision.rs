@@ -36,38 +36,22 @@ use std::{
 use factory_protocol::{
     ApprovedToolV2, CommandProfileV2, ContentDigest, ExecutableV2, RepositoryRelativePath,
 };
+use factory_settings::{
+    CARGO_TOOLCHAIN_ENVIRONMENT_NAMES, MINIMAL_ENVIRONMENT,
+};
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
-
-/// Upper bound on one profile's declared arguments.
-pub const COMMAND_ARGUMENT_LIMIT: usize = 128;
-/// Upper bound on one declared argument's UTF-8 bytes.
-pub const COMMAND_ARGUMENT_BYTE_LIMIT: usize = 32 * 1024;
-/// Upper bound on declared environment additions.
-pub const COMMAND_ENVIRONMENT_LIMIT: usize = 32;
-/// Upper bound on one declared environment value's bytes.
-pub const COMMAND_ENVIRONMENT_VALUE_BYTE_LIMIT: usize = 4 * 1024;
-/// Upper bound on either captured stream.
-pub const COMMAND_STREAM_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
-/// Upper bound on a single deterministic command's wall duration.
-pub const COMMAND_TIMEOUT_LIMIT: Duration = Duration::from_secs(60 * 60);
-/// Upper bound on bytes supplied through inline or adopted-artifact seams.
-pub const COMMAND_INPUT_BYTE_LIMIT: usize = 64 * 1024 * 1024;
-/// Bounded default between TERM and KILL for deterministic children.
-pub const DEFAULT_TERMINATION_GRACE: Duration = Duration::from_secs(1);
 
 /// The process environment that every command starts with.
 ///
 /// A profile may add environment entries but cannot replace these values. The
 /// explicit `PATH` permits ordinary interpreter shebangs and tool-internal
 /// subcommands while avoiding an ambient operator path.
-const MINIMAL_ENVIRONMENT: [(&str, &str); 4] = [
-    ("LANG", "C"),
-    ("LC_ALL", "C"),
-    ("PATH", "/usr/bin:/bin"),
-    ("TZ", "UTC"),
-];
-const CARGO_TOOLCHAIN_ENVIRONMENT_NAMES: [&str; 2] = ["RUSTC", "RUSTDOC"];
+pub use factory_settings::{
+    COMMAND_ARGUMENT_BYTE_LIMIT, COMMAND_ARGUMENT_LIMIT, COMMAND_ENVIRONMENT_LIMIT,
+    COMMAND_ENVIRONMENT_VALUE_BYTE_LIMIT, COMMAND_INPUT_BYTE_LIMIT, COMMAND_STREAM_BYTE_LIMIT,
+    COMMAND_TIMEOUT_LIMIT, DEFAULT_TERMINATION_GRACE,
+};
 
 /// A canonical regular executable selected outside an application command
 /// profile. It represents the installed location of one approved host tool.

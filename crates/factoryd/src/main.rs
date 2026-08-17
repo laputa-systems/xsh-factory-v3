@@ -30,6 +30,10 @@ use factory_kernel::{
     storage::{InstallQualifiedKernelBuild, KernelBuildStatus, KernelStore, SCHEMA_IDENTITY},
 };
 use factory_protocol::{AggregateRevision, ExpectedRevision, KernelBuildId, RuntimeRelativePath};
+use factory_settings::{
+    DEFAULT_OPERATION_DEADLINE, DEFAULT_READ_DEADLINE, DEFAULT_WRITE_DEADLINE,
+    FACTORYD_ASSIGNMENT_POLL_INTERVAL, FACTORYD_PRINTENV_COMMAND, FACTORYD_VAULT_COMMAND,
+};
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt().with_target(false).init();
@@ -161,7 +165,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
                     | CampaignDriverOutcome::Blocked(_),
                 ) => {
                     last_error = None;
-                    Duration::from_millis(250)
+                    FACTORYD_ASSIGNMENT_POLL_INTERVAL
                 }
                 Ok(_) => {
                     last_error = None;
@@ -176,7 +180,7 @@ async fn run_serve(args: DaemonArgs) -> Result<(), Box<dyn std::error::Error>> {
                     // A transition rejection is durable evidence, not a busy
                     // loop. The next poll rereads all authority after the
                     // bounded pause and lets an operator repair a real gate.
-                    Duration::from_millis(250)
+                    FACTORYD_ASSIGNMENT_POLL_INTERVAL
                 }
             };
             if !wait.is_zero() {
@@ -227,7 +231,7 @@ fn verify_vault_credential_preflight(name: &str) -> Result<(), io::Error> {
 }
 
 fn vault_credential(name: &str) -> Result<std::ffi::OsString, io::Error> {
-    vault_credential_with_command(Path::new("vault"), name)
+    vault_credential_with_command(Path::new(FACTORYD_VAULT_COMMAND), name)
 }
 
 fn vault_credential_with_command(
@@ -237,7 +241,7 @@ fn vault_credential_with_command(
     let output = Command::new(vault)
         .arg(name)
         .arg("--")
-        .arg("/usr/bin/printenv")
+        .arg(FACTORYD_PRINTENV_COMMAND)
         .arg(name)
         .env_remove(name)
         .output()
@@ -446,9 +450,9 @@ fn parse_serve_args(arguments: Vec<String>) -> Result<DaemonArgs, String> {
     Ok(DaemonArgs {
         database_url: database_url.ok_or_else(|| "--database-url is required".to_owned())?,
         runtime_root: runtime_root.ok_or_else(|| "--runtime-root is required".to_owned())?,
-        read_deadline: read_deadline.unwrap_or(Duration::from_secs(5)),
-        operation_deadline: operation_deadline.unwrap_or(Duration::from_secs(30)),
-        write_deadline: write_deadline.unwrap_or(Duration::from_secs(5)),
+        read_deadline: read_deadline.unwrap_or(DEFAULT_READ_DEADLINE),
+        operation_deadline: operation_deadline.unwrap_or(DEFAULT_OPERATION_DEADLINE),
+        write_deadline: write_deadline.unwrap_or(DEFAULT_WRITE_DEADLINE),
     })
 }
 

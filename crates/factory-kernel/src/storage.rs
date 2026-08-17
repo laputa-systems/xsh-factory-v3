@@ -5,10 +5,11 @@
 //! fact and one audit receipt in the same transaction; the audit receipt is
 //! also its bounded retry identity.
 
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
 
 use crate::cas::{CasArtifact, CasStore};
 use crate::installed_runtime::InstalledKernelBuildReceiptV2;
+use factory_settings::{STORAGE_ACQUIRE_TIMEOUT, STORAGE_MAX_CONNECTIONS};
 use factory_protocol::{
     AggregateRevision, ApplicationKey, ApplicationRevisionId, ArtifactId, ContentDigest,
     ExpectedRevision, KernelBuildId, RepositoryId,
@@ -61,8 +62,8 @@ impl KernelStore {
         let options = PgConnectOptions::from_str(database_url)
             .map_err(|source| StoreError::InvalidDatabaseUrl { source })?;
         let pool = PgPoolOptions::new()
-            .max_connections(4)
-            .acquire_timeout(Duration::from_secs(10))
+            .max_connections(STORAGE_MAX_CONNECTIONS)
+            .acquire_timeout(STORAGE_ACQUIRE_TIMEOUT)
             .connect_with(options)
             .await?;
         Ok(Self { pool })

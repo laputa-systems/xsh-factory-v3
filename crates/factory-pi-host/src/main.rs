@@ -17,14 +17,11 @@ use pi_agent_core::state::StopReason;
 use pi_agent_core::{AgentEvent, AgentEventKind};
 use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
+use factory_settings::{
+    MAX_PROVIDER_REQUEST_TIMEOUT, MAX_PROVIDER_RETRIES, MAX_PROVIDER_STALL_TIMEOUT,
+    PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
+};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
-
-const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_mins(20);
-// OpenRouter is used in finite-response mode: a partial JSON body can pause
-// while the model continues generating. Keep this below the request timeout,
-// but give long Product generations several minutes before declaring a stall.
-const MAX_PROVIDER_STALL_TIMEOUT: Duration = Duration::from_secs(600);
-const MAX_PROVIDER_RETRIES: u32 = 2;
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -175,8 +172,8 @@ fn provider_stall_timeout(wall_limit_millis: u64) -> Duration {
 fn provider_retry_policy() -> RetryPolicy {
     RetryPolicy::new(
         MAX_PROVIDER_RETRIES,
-        Duration::from_millis(250),
-        Duration::from_secs(8),
+        PROVIDER_RETRY_INITIAL_BACKOFF,
+        PROVIDER_RETRY_MAX_BACKOFF,
     )
 }
 

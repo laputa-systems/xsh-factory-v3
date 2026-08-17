@@ -18,6 +18,7 @@ pub use admission::{
     Admission, AdmissionConfig, AdmissionError, DEFAULT_MAX_PACKET_BYTES,
     MAX_ADMISSION_FRAME_BYTES, read_admission, read_admission_from_fd0,
 };
+pub use factory_settings::{PI_AGENT_CORE_SOURCE, RUNTIME_NAME};
 pub use agent_host::{AgentHost, AgentHostError, BareAgentHost, load_luau_policy};
 pub use execution::{
     CostReader, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,
@@ -33,17 +34,3 @@ pub use transport::{
     FrameClient, FrameTransportError, MAX_REQUEST_FRAME_BYTES, MAX_RESPONSE_FRAME_BYTES,
     read_frame, write_frame,
 };
-
-/// The local Rust runtime identity used by the host build receipt.
-///
-/// This does not discover or read a provider credential.  The process supervisor supplies a
-/// provider implementation explicitly after admission, keeping credentials out of packets and
-/// out of the generic host boundary.
-pub const RUNTIME_NAME: &str = "factory-pi-host";
-
-/// The pi-agent-core checkout used by this temporary local bootstrap.
-///
-/// Cargo resolves this path from the manifest.  Qualification must record the checkout's exact
-/// revision before launching a host; this constant is descriptive and is not a qualification
-/// substitute.
-pub const PI_AGENT_CORE_SOURCE: &str = "/Users/josh/d/pi-agent-core-rs";

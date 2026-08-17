@@ -23,13 +23,11 @@ use factory_protocol::{
     ApplicationRevisionId, CampaignId, CandidateId, ContentDigest, KernelBuildId, TicketId,
     ValidationId,
 };
+use factory_settings::DEFAULT_TERMINATION_GRACE;
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
 
-/// Default bounded Git process contract.
-pub const DEFAULT_STREAM_LIMIT: u64 = 4 * 1024 * 1024;
-pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
-const TERMINATION_GRACE: Duration = Duration::from_secs(1);
+pub use factory_settings::{DEFAULT_DEADLINE, DEFAULT_STREAM_LIMIT};
 
 /// A safe default-branch component, never an arbitrary ref expression.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2186,7 +2184,7 @@ fn terminate_process_group(
             .map_err(|source| GitCustodyError::Wait { operation, source })?
         {
             Some(status) => return Ok(status),
-            None if grace_started.elapsed() >= TERMINATION_GRACE => {
+            None if grace_started.elapsed() >= DEFAULT_TERMINATION_GRACE => {
                 signal_process_group(pid, Signal::KILL, operation)?;
                 return child
                     .wait()

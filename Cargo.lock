@@ -467,6 +467,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "factory-protocol",
+ "factory-settings",
  "fastrand",
  "miniserde",
  "rustix",
@@ -481,6 +482,7 @@ name = "factory-pi-host"
 version = "0.1.0"
 dependencies = [
  "factory-protocol",
+ "factory-settings",
  "miniserde",
  "pi-agent-core",
  "pi-agent-luau",
@@ -499,11 +501,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "factory-settings"
+version = "0.1.0"
+
+[[package]]
 name = "factoryctl"
 version = "0.1.0"
 dependencies = [
  "factory-kernel",
  "factory-protocol",
+ "factory-settings",
  "smol",
  "tracing-subscriber",
 ]
@@ -514,6 +521,7 @@ version = "0.1.0"
 dependencies = [
  "factory-kernel",
  "factory-protocol",
+ "factory-settings",
  "smol",
  "tracing",
  "tracing-subscriber",

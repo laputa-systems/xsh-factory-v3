@@ -6,6 +6,7 @@
 //! read can only become a typed, fenced claim through [`TicketStore`].
 
 use factory_protocol::{AggregateRevision, CampaignId, ExpectedRevision};
+pub use factory_settings::IN_FLIGHT_TICKET_MAXIMUM;
 
 use crate::{
     storage::{KernelStore, StoreError},
@@ -19,8 +20,6 @@ use crate::{
 /// The MVP permits one application-global Engineering claim at a time. This
 /// is a kernel concurrency invariant, not a replaceable product policy: V2
 /// concurrency requires a separate aggregate-cost reservation design.
-pub const IN_FLIGHT_TICKET_MAXIMUM: u32 = 1;
-
 /// Narrow read/action facade for the resident daemon. It owns no process
 /// handles and therefore cannot start a paid actor by itself.
 #[derive(Clone, Debug)]

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/factory-settings",
   "crates/factory-protocol",
   "crates/factory-pi-host",
   "crates/factory-kernel",

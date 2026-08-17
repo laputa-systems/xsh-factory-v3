@@ -20,6 +20,7 @@ use factory_protocol::{
     WorkspaceReadResponse, decode_operation_request,
 };
 use miniserde::{Serialize, json};
+pub use factory_settings::WORKSPACE_READ_MAX_BYTES;
 use thiserror::Error;
 
 use crate::{
@@ -28,8 +29,6 @@ use crate::{
 };
 
 /// The read response must fit in a 4 MiB frame after base64 and JSON overhead.
-pub const WORKSPACE_READ_MAX_BYTES: u64 = 2 * 1024 * 1024;
-
 #[derive(Debug)]
 pub struct WorkspaceReadAuthority {
     binding: ActorConnectionBinding,

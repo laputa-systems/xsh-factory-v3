@@ -19,6 +19,10 @@ use factory_protocol::{
     RepositoryObjectIdV2, SealedArtifactReferenceV2, SessionId, TerminalOperationV2,
     TicketAttemptId, TicketId, TicketRevisionId, ValidationId,
 };
+use factory_settings::{
+    COMMAND_SET_LIMIT, TREE_PROBE_STREAM_LIMIT, TREE_PROBE_TIMEOUT_MILLIS,
+    VALIDATION_LOG_LIMIT,
+};
 use miniserde::{Serialize, json};
 use thiserror::Error;
 
@@ -47,10 +51,6 @@ const TREE_COMPARISON_REVISION: &str = "candidate-runtime-tree-v1";
 const COMMAND_SET_FORMAT: &str = "factory-validation-command-set-v1";
 const VALIDATION_LOG_FORMAT: &str = "factory-validation-log-v1";
 const CHECKPOINT_LOG_FORMAT: &str = "factory-regression-checkpoint-log-v1";
-const COMMAND_SET_LIMIT: usize = 256 * 1024;
-const VALIDATION_LOG_LIMIT: usize = 16 * 1024 * 1024;
-const TREE_PROBE_TIMEOUT_MILLIS: u64 = 30_000;
-const TREE_PROBE_STREAM_LIMIT: u32 = 64 * 1024;
 
 /// Immutable actor/session facts supplied by the local transport owner, not
 /// by the actor request.  The packet remains the authority binding for every

@@ -4,6 +4,7 @@ use factory_protocol::{
     AssignmentPacketWireV2, FrameError, RESPONSE_FRAME_MAX_BYTES, SessionAdmissionFrameV2,
     verify_assignment_packet_v2,
 };
+pub use factory_settings::DEFAULT_MAX_PACKET_BYTES;
 use miniserde::json;
 use pi_agent_protocol::JsonValue;
 use std::fmt;
@@ -14,8 +15,6 @@ use std::io::{self, Read};
 /// The bound is kept below the response-frame limit so the startup line and the later framed
 /// transport cannot cause an unbounded allocation.  V2 may replace this constant as part of an
 /// explicit protocol revision.
-pub const DEFAULT_MAX_PACKET_BYTES: usize = 3 * 1024 * 1024 - 64 * 1024;
-
 /// Maximum admission-line bytes, excluding its required trailing newline.
 pub const MAX_ADMISSION_FRAME_BYTES: usize = RESPONSE_FRAME_MAX_BYTES - 1;
 

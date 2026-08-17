@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 blake3.workspace = true
+factory-settings = { path = "../factory-settings" }
 factory-protocol = { path = "../factory-protocol" }
 fastrand.workspace = true
 miniserde.workspace = true

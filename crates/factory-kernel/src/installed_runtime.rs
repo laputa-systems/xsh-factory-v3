@@ -27,6 +27,11 @@ use factory_protocol::{
     RuntimeIdentityV2, RuntimeRelativePath, parse_assignment_packet_v2,
     unsigned_assignment_packet_digest_v2,
 };
+use factory_settings::{
+    MAX_HOST_SOURCE_GRAPH_FILES, MAX_RECEIPT_BYTES, MAX_SOURCE_GRAPH_FILES,
+    MAX_VERSION_OUTPUT_BYTES, OPENROUTER_PROVIDER, PI_AGENT_CORE_HEAD_MAX_BYTES,
+    PI_AGENT_CORE_SOURCE, RUST_HOST_IDENTITY, RUST_TOOLCHAIN,
+};
 use thiserror::Error;
 
 use crate::{
@@ -39,24 +44,14 @@ use crate::{
     session_runtime::{RuntimeVerificationError, SessionRuntimeVerifier},
 };
 
-const MAX_SOURCE_GRAPH_FILES: usize = 1_024;
 /// The Pi host root is intentionally small and closed. Qualification inventories
 /// every local file below it, so a future local import cannot be omitted from
 /// the packet-visible source graph.
-const MAX_HOST_SOURCE_GRAPH_FILES: usize = 256;
-const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
 const SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-installed-source-graph-v1\0";
 const PI_AGENT_CORE_SOURCE_DOMAIN: &[u8] = b"factory-v3-pi-agent-core-source-v1\0";
 const KERNEL_SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-kernel-source-graph-v1\0";
 const KERNEL_BUILD_DOMAIN: &[u8] = b"factory-v3-kernel-build-v1\0";
 const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-rust-host-v1\0";
-const MAX_RECEIPT_BYTES: usize = 256 * 1024;
-const OPENROUTER_PROVIDER: &str = "openrouter";
-const PI_AGENT_CORE_ROOT: &str = "/Users/josh/d/pi-agent-core-rs";
-const RUST_HOST_IDENTITY: &str = "factory-pi-host-rust-v1";
-const RUST_TOOLCHAIN: &str = "nightly-2026-07-24";
-const PI_AGENT_CORE_HEAD_MAX_BYTES: usize = 128;
-
 /// Explicit installation inputs for one immutable Rust agent runtime.
 ///
 /// This is kernel/operator input during a stopped-daemon deployment, never an
@@ -1449,7 +1444,7 @@ fn pi_agent_core_source_digest(
 /// output; all tracked or untracked project material that can affect Cargo
 /// resolution is otherwise bound by digest.
 fn qualify_pi_agent_core() -> Result<PiAgentCoreQualification, InstalledRuntimeError> {
-    let root = canonical_directory("pi-agent-core checkout", Path::new(PI_AGENT_CORE_ROOT))?;
+    let root = canonical_directory("pi-agent-core checkout", Path::new(PI_AGENT_CORE_SOURCE))?;
     let git = find_git_executable()?;
     let head_output = Command::new(&git)
         .arg("-C")

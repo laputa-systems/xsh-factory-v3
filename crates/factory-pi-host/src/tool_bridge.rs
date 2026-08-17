@@ -15,6 +15,13 @@ use pi_agent_luau::tool_handler::{
     CapabilityError, CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
 };
 use pi_agent_protocol::{JsonNumber, JsonValue};
+pub use factory_settings::FACTORY_CAPABILITY;
+pub(crate) use factory_settings::{
+    MAX_ENGINEERING_IDENTICAL_TOOL_CALLS, MAX_ENGINEERING_OWNER_DISCOVERY_CALLS,
+    MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS, MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS,
+    MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS, MAX_ENGINEERING_SHELL_CALLS, MAX_ENGINEERING_TURNS,
+    MAX_PRODUCT_IDENTICAL_TOOL_CALLS, MAX_PRODUCT_NO_TOOL_TURNS, MAX_PRODUCT_TURNS,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
@@ -23,24 +30,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The sole capability name used by daemon-bound policy handlers.
-pub const FACTORY_CAPABILITY: &str = "factory";
-
 /// Product research is intentionally open-ended, but a run must still settle if the model
 /// keeps asking for the same work or never reaches a terminal operation. These are host-side
 /// safety bounds, not response-size limits: ordinary prose and distinct investigation steps are
 /// allowed until the run makes no bounded progress.
-pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
-const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
-const MAX_PRODUCT_NO_TOOL_TURNS: u32 = 3;
-pub(crate) const MAX_ENGINEERING_TURNS: u32 = 64;
-const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
-const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
-const MAX_ENGINEERING_OWNER_DISCOVERY_CALLS: u32 = 8;
-const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 32;
-const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
-const MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS: u32 = 4;
-
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

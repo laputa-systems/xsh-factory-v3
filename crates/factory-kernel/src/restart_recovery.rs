@@ -26,6 +26,10 @@ use std::{
 use factory_protocol::{
     ContentDigest, ExpectedRevision, ProcessCustodyV2, StopReasonV2, TerminalReportV2,
 };
+use factory_settings::{
+    RECOVERY_POLL_INTERVAL, RECOVERY_PRINCIPAL, RECOVERY_STAGING_DIRECTORY,
+    RECOVERY_TERMINATION_GRACE,
+};
 use rustix::{
     io::Errno,
     process::{Pid, Signal, getpgid, kill_process_group, test_kill_process_group},
@@ -43,9 +47,6 @@ use crate::{
     storage::StoreError,
     workspace_read::{WorkspaceReadAuthority, WorkspaceReadError},
 };
-
-const RECOVERY_PRINCIPAL: &str = "kernel";
-const RECOVERY_STAGING_DIRECTORY: &str = "restart-recovery";
 
 /// Bounded physical observation policy for a process group inherited from a
 /// dead daemon.  It is deliberately a fixed local mechanism, not application
@@ -80,8 +81,8 @@ impl RestartRecoveryPolicy {
     #[must_use]
     pub fn bounded_default() -> Self {
         Self {
-            termination_grace: Duration::from_millis(250),
-            poll_interval: Duration::from_millis(10),
+            termination_grace: RECOVERY_TERMINATION_GRACE,
+            poll_interval: RECOVERY_POLL_INTERVAL,
         }
     }
 }

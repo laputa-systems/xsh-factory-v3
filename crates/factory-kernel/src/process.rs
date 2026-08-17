@@ -16,6 +16,7 @@ use factory_protocol::{
     TerminalReportV2, ThinkingLevelV2, TicketAttemptId, UsageTotalsV2,
 };
 use sqlx::{PgPool, Postgres};
+use factory_settings::CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM;
 
 use crate::cas::{CasArtifact, CasStore};
 use crate::harness_store::{RecordHarnessCompilation, persist_harness_compilation};
@@ -38,7 +39,6 @@ const SESSION_RUNNING: i16 = 1;
 const COST_KNOWN: i16 = 0;
 const COST_UNKNOWN: i16 = 1;
 const COST_EXCEEDED: i16 = 2;
-const CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM: usize = 18;
 const UNKNOWN_TERMINAL_COST_FAILURE_REASON: &str = "terminal session cost is unknown";
 const EXCEEDED_TERMINAL_COST_FAILURE_REASON: &str =
     "terminal session exceeded the campaign cost limit";

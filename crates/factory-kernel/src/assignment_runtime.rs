@@ -27,6 +27,7 @@ use factory_protocol::{
     canonical_command_profile_json_from_domain_v2, parse_application_bundle_v2, render_template_v2,
     unsigned_assignment_packet_digest_v2,
 };
+use factory_settings::{ASSIGNMENT_TERMINATION_GRACE, KERNEL_PRINCIPAL};
 use miniserde::{Serialize, json};
 use thiserror::Error;
 
@@ -51,9 +52,6 @@ use crate::{
     storage::{KernelStore, StoreError},
     workspace_read::{WorkspaceReadAuthority, WorkspaceReadError},
 };
-
-const KERNEL_PRINCIPAL: &str = "factoryd-assignment";
-const TERMINATION_GRACE: Duration = Duration::from_secs(1);
 
 /// Scheduler-owned, durable target information for one launch. The target is
 /// not an actor request and the credential value deliberately is not
@@ -431,7 +429,7 @@ pub async fn materialize_and_launch_assignment(
             u64::from(application.profile.limits.output_byte_limit),
             u64::from(application.profile.limits.output_byte_limit),
             Duration::from_millis(application.profile.limits.wall_limit.get()),
-            TERMINATION_GRACE,
+            ASSIGNMENT_TERMINATION_GRACE,
         )?;
         let candidate_quality_runtime = match request.target {
             DurableAssignmentTarget::Product => None,

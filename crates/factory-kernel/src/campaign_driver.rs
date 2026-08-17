@@ -10,6 +10,7 @@
 use std::{ffi::OsString, sync::Arc};
 
 use factory_protocol::{AggregateRevision, CampaignId, ExpectedRevision};
+use factory_settings::{DRIVER_PRINCIPAL, MAX_PRODUCT_ASSIGNMENTS_PER_CAMPAIGN};
 use thiserror::Error;
 
 use crate::{
@@ -33,9 +34,6 @@ use crate::{
         FailTicketAttempt, RetryEngineeringAttempt, RetryQualityAttempt,
     },
 };
-
-const DRIVER_PRINCIPAL: &str = "factoryd-campaign-driver";
-const MAX_PRODUCT_ASSIGNMENTS_PER_CAMPAIGN: u32 = 3;
 
 fn product_retry_available(assignments: u32) -> bool {
     assignments < MAX_PRODUCT_ASSIGNMENTS_PER_CAMPAIGN

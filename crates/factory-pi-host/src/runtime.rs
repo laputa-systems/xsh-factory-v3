@@ -5,6 +5,7 @@ use factory_pi_host::{
     MAX_REQUEST_FRAME_BYTES, ToolName,
 };
 use factory_protocol::{PROTOCOL_VERSION_V2, RepositoryRelativePath, encode_frame};
+use factory_settings::{HOST_FALLBACK_PATH, HOST_KILL_EXECUTABLE, HOST_SHELL_EXECUTABLE};
 use pi_agent_core::scheduler::CancellationToken;
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{
@@ -617,8 +618,8 @@ fn shell(
     timeout: Duration,
     cancellation: CancellationToken,
 ) -> Result<ShellOutput, DaemonError> {
-    let kernel_path = std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());
-    let mut child = Command::new("/bin/sh")
+    let kernel_path = std::env::var_os("PATH").unwrap_or_else(|| HOST_FALLBACK_PATH.into());
+    let mut child = Command::new(HOST_SHELL_EXECUTABLE)
         .arg("-lc")
         .arg(command)
         .current_dir(root)
@@ -678,12 +679,12 @@ fn shell(
 
 fn terminate_shell_process_group(process_group: u32) {
     let group = format!("-{process_group}");
-    let _ = Command::new("/bin/kill")
+    let _ = Command::new(HOST_KILL_EXECUTABLE)
         .args(["-TERM", "--", group.as_str()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = Command::new("/bin/kill")
+    let _ = Command::new(HOST_KILL_EXECUTABLE)
         .args(["-KILL", "--", group.as_str()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())

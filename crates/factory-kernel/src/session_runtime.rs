@@ -24,6 +24,11 @@ use factory_protocol::{
     ReadExactFileV2, RepositoryRelativePath, RuntimeRelativePath, SessionId, StopReasonV2,
     TerminalOperationV2, TerminalReportV2, UsageTotalsV2,
 };
+use factory_settings::ARTIFACT_READ_MAX_BYTES;
+pub use factory_settings::{
+    SESSION_BOUNDED_PARTIAL_TRANSCRIPT_RELATIVE_PATH, SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH,
+    SESSION_STDERR_RELATIVE_PATH, SESSION_STDOUT_RELATIVE_PATH,
+};
 use miniserde::{Serialize, json};
 use thiserror::Error;
 
@@ -58,15 +63,6 @@ use crate::{
 
 const ADMISSION_PROTOCOL_VERSION: u16 = 2;
 const ADMISSION_MAX_BYTES: usize = factory_protocol::RESPONSE_FRAME_MAX_BYTES - 1;
-/// The framed response includes base64, so keep raw evidence decisively below
-/// the transport cap. Large evidence remains sealed/navigable but is not a
-/// bulk CAS download capability for an actor.
-const ARTIFACT_READ_MAX_BYTES: u64 = 2 * 1024 * 1024;
-pub const SESSION_STDOUT_RELATIVE_PATH: &str = "stdout.log";
-pub const SESSION_STDERR_RELATIVE_PATH: &str = "stderr.log";
-pub const SESSION_PARTIAL_TRANSCRIPT_RELATIVE_PATH: &str = "session.ndjson";
-const SESSION_BOUNDED_PARTIAL_TRANSCRIPT_RELATIVE_PATH: &str = "session.partial.ndjson";
-
 /// Daemon-local registry for the one admitted paid process. A cancellation
 /// selects by durable session ID, while the stored handle itself names no PID
 /// and can only stop the `SpawnedPiHost` that minted it.

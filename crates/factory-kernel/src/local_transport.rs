@@ -43,6 +43,10 @@ use factory_protocol::{
     RESPONSE_FRAME_MAX_BYTES, RoutingEnvelope, SessionId, TicketListResponse, TicketShowResponse,
     decode_frame, decode_json_frame, decode_routing_envelope, encode_frame, encode_json_frame,
 };
+use factory_settings::{
+    DEFAULT_OPERATION_DEADLINE, DEFAULT_READ_DEADLINE, DEFAULT_WRITE_DEADLINE,
+    MAX_OPERATOR_REQUEST_ID_BYTES,
+};
 use miniserde::{Serialize, json};
 use rustix::{
     fs::{CWD, FlockOperation, Mode, OFlags, flock, openat},
@@ -82,19 +86,11 @@ use crate::{
     ticket_store::TicketStore,
 };
 
-/// Runtime-root filename for the advisory filesystem singleton.
-pub const RUNTIME_LOCK_FILENAME: &str = "factoryd.lock";
-/// Runtime-root filename for the mode-`0600` operator socket.
-pub const OPERATOR_SOCKET_FILENAME: &str = "factoryd.operator.sock";
+pub use factory_settings::{OPERATOR_SOCKET_FILENAME, RUNTIME_LOCK_FILENAME};
 /// A read-only transport status operation independent from Architect commands.
 pub const OPERATOR_STATUS_OPERATION: &str = factory_protocol::OP_FACTORYD_STATUS;
 /// An orderly local-operator shutdown request.
 pub const OPERATOR_SHUTDOWN_OPERATION: &str = factory_protocol::OP_FACTORYD_SHUTDOWN;
-
-const DEFAULT_READ_DEADLINE: Duration = Duration::from_secs(5);
-const DEFAULT_OPERATION_DEADLINE: Duration = Duration::from_secs(30);
-const DEFAULT_WRITE_DEADLINE: Duration = Duration::from_secs(5);
-const MAX_OPERATOR_REQUEST_ID_BYTES: usize = 160;
 
 /// A validated local transport configuration. The database URL deliberately
 /// does not belong here: only [`KernelStore::connect`] sees that secret.

@@ -22,6 +22,14 @@ the typed application-bundle boundary. The generic command-line layer may
 accept an application source root supplied by the operator, but it must not
 select or name a product in crate code.
 
+Shared runtime policy knobs live in the dependency-free `factory-settings`
+crate (`crates/factory-settings/src/settings.rs`). Kernel, daemon, CLI, and
+host code import those bounded limits, deadlines, retry counts, paths, and
+runtime identities from that one source. Wire protocol versions, operation
+names, persisted state/audit codes, and evidence-format identities remain in
+their owning crates because changing them changes a durable contract rather
+than tuning runtime behavior.
+
 ## Authority split
 
 Rust owns facts whose failure would make accepted work false, unsafe,

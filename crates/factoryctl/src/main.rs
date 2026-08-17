@@ -23,6 +23,10 @@ use factory_kernel::installed_runtime::{
 };
 use factory_kernel::local_transport::OperatorClient;
 use factory_kernel::storage::SCHEMA_IDENTITY;
+use factory_settings::{
+    DEFAULT_FORUM_PAGE_LIMIT, DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT,
+    FACTORYCTL_OPERATION_DEADLINE_MILLIS,
+};
 use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
@@ -1671,7 +1675,7 @@ fn parse_build_identity(arguments: Vec<String>) -> Result<BuildIdentityArgs, Str
     let mut values = arguments.into_iter();
     let mut installation_root = None;
     let mut factoryd = None;
-    let mut openrouter_credential_environment = "OPENROUTER_API_KEY".to_owned();
+    let mut openrouter_credential_environment = DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT.to_owned();
     let mut json = false;
     while let Some(flag) = values.next() {
         match flag.as_str() {
@@ -1769,7 +1773,7 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         host_source_root,
         host_source_files,
         openrouter_credential_environment: openrouter_credential_environment
-            .unwrap_or_else(|| "OPENROUTER_API_KEY".to_owned()),
+            .unwrap_or_else(|| DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT.to_owned()),
     })
 }
 
@@ -1888,6 +1892,7 @@ fn closed_kernel_source_files(root: &Path) -> Result<Vec<String>, String> {
         "Cargo.toml",
         "Cargo.lock",
         "rust-toolchain.toml",
+        "crates/factory-settings/Cargo.toml",
         "crates/factory-protocol/Cargo.toml",
         "crates/factory-kernel/Cargo.toml",
         "crates/factoryd/Cargo.toml",
@@ -1903,6 +1908,7 @@ fn closed_kernel_source_files(root: &Path) -> Result<Vec<String>, String> {
     for relative_root in [
         ".sqlx",
         "schema/migrations",
+        "crates/factory-settings/src",
         "crates/factory-protocol/src",
         "crates/factory-kernel/src",
         "crates/factoryd/src",
@@ -2009,7 +2015,7 @@ fn spawn_factoryd(command: &DaemonStartArgs) -> Result<(), io::Error> {
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_stderr))
-        .env_remove("OPENROUTER_API_KEY");
+        .env_remove(DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -2210,7 +2216,7 @@ fn parse_daemon_start(arguments: Vec<String>) -> Result<CliCommand, String> {
     let mut runtime_root = None;
     let mut pid_file = None;
     let mut log_file = None;
-    let mut operation_deadline_ms = 900_000_u64;
+    let mut operation_deadline_ms = FACTORYCTL_OPERATION_DEADLINE_MILLIS;
     while let Some(flag) = values.next() {
         match flag.as_str() {
             "--factoryd" => set_absolute_path(
@@ -2321,7 +2327,7 @@ fn parse_forum_connection(arguments: Vec<String>) -> Result<ForumConnectionArgs,
     let mut socket_path = None;
     let mut json = false;
     let mut cursor = String::new();
-    let mut limit = 20_u8;
+    let mut limit = DEFAULT_FORUM_PAGE_LIMIT;
     while let Some(flag) = values.next() {
         match flag.as_str() {
             "--socket" => set_once(
@@ -2339,8 +2345,10 @@ fn parse_forum_connection(arguments: Vec<String>) -> Result<ForumConnectionArgs,
                 limit = next_value(&mut values, "--limit")?
                     .parse::<u8>()
                     .ok()
-                    .filter(|value| (1..=20).contains(value))
-                    .ok_or_else(|| "--limit must be 1 through 20".to_owned())?;
+                    .filter(|value| (1..=DEFAULT_FORUM_PAGE_LIMIT).contains(value))
+                    .ok_or_else(|| {
+                        format!("--limit must be 1 through {DEFAULT_FORUM_PAGE_LIMIT}")
+                    })?;
             }
             "--format" => {
                 let format = next_value(&mut values, "--format")?;

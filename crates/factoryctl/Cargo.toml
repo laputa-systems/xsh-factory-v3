@@ -11,6 +11,7 @@ name = "factoryctl"
 path = "src/main.rs"
 
 [dependencies]
+factory-settings = { path = "../factory-settings" }
 factory-kernel = { path = "../factory-kernel" }
 factory-protocol = { path = "../factory-protocol" }
 smol.workspace = true
