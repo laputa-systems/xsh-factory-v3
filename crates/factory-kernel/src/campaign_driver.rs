@@ -469,9 +469,7 @@ impl CampaignDriver {
                         .await?;
                     if !Self::product_assignment_made_progress(&buffer) {
                         let reason = "product assignment completed without a ticket proposal";
-                        return self
-                            .retry_or_fail_product(campaign_id, reason)
-                            .await;
+                        return self.retry_or_fail_product(campaign_id, reason).await;
                     }
                 }
                 Ok(CampaignDriverOutcome::Assignment(assignment))
@@ -481,7 +479,8 @@ impl CampaignDriver {
                     && engineering_terminal_retryable(
                         assignment.session.terminal.session_state,
                         assignment.session.terminal.cost,
-                    ) => {
+                    ) =>
+            {
                 let ticket_attempt_id = match target {
                     DurableAssignmentTarget::Engineering { ticket_attempt_id } => ticket_attempt_id,
                     DurableAssignmentTarget::Product | DurableAssignmentTarget::Quality { .. } => {
@@ -736,8 +735,7 @@ fn engineering_terminal_retryable(
     matches!(
         session_state,
         factory_protocol::SessionState::Failed | factory_protocol::SessionState::Interrupted
-    )
-        && matches!(cost, factory_protocol::TerminalCostV2::Known(_))
+    ) && matches!(cost, factory_protocol::TerminalCostV2::Known(_))
 }
 
 fn command_id(

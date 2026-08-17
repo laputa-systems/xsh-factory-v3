@@ -13,10 +13,9 @@ use std::path::Path;
 use factory_protocol::{
     ApplicationRevisionId, ApprovedToolV2, ArtifactId, CommandObservationV2, CommandProfileV2,
     ContentDigest, DurationMillis, ExecutableV2, ExpectedRevision, KernelBuildId,
-    ProductSubmitTicketRequest,
-    ProductTicketProposalV2, RepositoryRelativePath, SealedArtifactReferenceV2,
-    canonical_product_ticket_proposal_json_v2, parse_application_bundle_v2,
-    parse_command_profile_v2,
+    ProductSubmitTicketRequest, ProductTicketProposalV2, RepositoryRelativePath,
+    SealedArtifactReferenceV2, canonical_product_ticket_proposal_json_v2,
+    parse_application_bundle_v2, parse_command_profile_v2,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -127,10 +126,8 @@ pub async fn execute_product_proposal(
         &proposal.reproducer.expected_observation.stderr,
     )
     .await?;
-    let (expected_stdout, expected_stderr) = product_expected_streams(
-        expected_stdout_bytes.clone(),
-        expected_stderr_bytes.clone(),
-    )?;
+    let (expected_stdout, expected_stderr) =
+        product_expected_streams(expected_stdout_bytes.clone(), expected_stderr_bytes.clone())?;
     let command = DeterministicCommand::new(
         profile,
         command_stdin,
@@ -490,20 +487,14 @@ pub(crate) fn product_observation_manifest_bytes_with_streams(
     stdout: &[u8],
     stderr: &[u8],
 ) -> Vec<u8> {
-    product_observation_manifest_bytes_with_optional_streams(
-        terminal,
-        Some(stdout),
-        Some(stderr),
-    )
+    product_observation_manifest_bytes_with_optional_streams(terminal, Some(stdout), Some(stderr))
 }
 
 /// Build the status-only replay identity from a command receipt while removing
 /// the approved executable's process-local absolute path from the stream
 /// digests. Raw stdout/stderr remain sealed separately for diagnosis; the
 /// canonical manifest must survive replay in a different worktree root.
-pub(crate) fn product_observation_manifest_bytes_for_receipt(
-    receipt: &CommandReceipt,
-) -> Vec<u8> {
+pub(crate) fn product_observation_manifest_bytes_for_receipt(receipt: &CommandReceipt) -> Vec<u8> {
     let executable = receipt.executable().to_string_lossy();
     let stdout = canonicalize_executable_path(receipt.stdout(), executable.as_bytes());
     let stderr = canonicalize_executable_path(receipt.stderr(), executable.as_bytes());
@@ -511,7 +502,11 @@ pub(crate) fn product_observation_manifest_bytes_for_receipt(
 }
 
 fn canonicalize_executable_path(bytes: &[u8], executable: &[u8]) -> Vec<u8> {
-    if executable.is_empty() || !bytes.windows(executable.len()).any(|window| window == executable) {
+    if executable.is_empty()
+        || !bytes
+            .windows(executable.len())
+            .any(|window| window == executable)
+    {
         return bytes.to_vec();
     }
     let replacement = b"<approved-executable>";

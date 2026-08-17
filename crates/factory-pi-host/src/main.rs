@@ -19,7 +19,7 @@ use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
 use pi_agent_protocol::{JsonNumber, JsonValue};
 use std::{env, fs, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
-const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1_200);
+const MAX_PROVIDER_REQUEST_TIMEOUT: Duration = Duration::from_mins(20);
 // OpenRouter is used in finite-response mode: a partial JSON body can pause
 // while the model continues generating. Keep this below the request timeout,
 // but give long Product generations several minutes before declaring a stall.
@@ -331,7 +331,7 @@ fn project_event(event: &AgentEvent) -> Result<String, String> {
     let mut fields = vec![("sequence", number(event.sequence.0)?)];
     match &event.kind {
         AgentEventKind::AgentStart => {
-            fields.push(("type", JsonValue::String("agent_start".to_owned())))
+            fields.push(("type", JsonValue::String("agent_start".to_owned())));
         }
         AgentEventKind::TurnStart { turn_id } => {
             fields.push(("type", JsonValue::String("turn_start".to_owned())));
@@ -372,7 +372,7 @@ fn project_event(event: &AgentEvent) -> Result<String, String> {
             fields.push(("is_error", JsonValue::Bool(result.is_error)));
         }
         AgentEventKind::AgentEnd { .. } => {
-            fields.push(("type", JsonValue::String("agent_end".to_owned())))
+            fields.push(("type", JsonValue::String("agent_end".to_owned())));
         }
         _ => return Ok(String::new()),
     }
@@ -458,7 +458,7 @@ fn stop_reason(reason: Option<StopReason>) -> &'static str {
 }
 
 fn optional_string(value: Option<String>) -> JsonValue {
-    value.map(JsonValue::String).unwrap_or(JsonValue::Null)
+    value.map_or(JsonValue::Null, JsonValue::String)
 }
 
 fn optional_number(value: Option<u64>) -> Result<JsonValue, String> {
@@ -520,11 +520,7 @@ fn gzip_stored(input: &[u8]) -> Vec<u8> {
         output.extend_from_slice(&[1, 0, 0, 255, 255]);
     }
     for (index, chunk) in input.chunks(65_535).enumerate() {
-        output.push(if (index + 1) * 65_535 >= input.len() {
-            1
-        } else {
-            0
-        });
+        output.push(u8::from((index + 1) * 65_535 >= input.len()));
         let length = chunk.len() as u16;
         output.extend_from_slice(&length.to_le_bytes());
         output.extend_from_slice(&(!length).to_le_bytes());
@@ -590,7 +586,7 @@ mod tests {
         assert_eq!(provider_request_timeout(120_000), Duration::from_secs(40));
         assert_eq!(
             provider_request_timeout(3_600_000),
-            Duration::from_secs(1_200)
+            Duration::from_mins(20)
         );
     }
 

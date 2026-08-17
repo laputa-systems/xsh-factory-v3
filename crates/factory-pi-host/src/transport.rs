@@ -72,7 +72,7 @@ pub fn read_frame<R: Read>(reader: &mut R, maximum: usize) -> Result<Vec<u8>, Fr
         .read_exact(&mut frame[FRAME_PREFIX_BYTES..])
         .map_err(FrameTransportError::Io)?;
     decode_frame(&frame, maximum)
-        .map(|payload| payload.to_vec())
+        .map(<[u8]>::to_vec)
         .map_err(FrameTransportError::Frame)
 }
 

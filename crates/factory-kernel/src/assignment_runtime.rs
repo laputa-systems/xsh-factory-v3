@@ -1846,9 +1846,7 @@ mod tests {
         )
         .unwrap();
         assert!(rendered.contains("profile_name: `reproduce`"));
-        assert!(rendered.contains(
-            &canonical_command_profile_json_from_domain_v2(&profile)
-        ));
+        assert!(rendered.contains(&canonical_command_profile_json_from_domain_v2(&profile)));
         assert!(rendered.contains("behavioral program in `reproducer.stdin`"));
         assert!(rendered.contains("correct only the named field and resubmit the same proposal"));
     }

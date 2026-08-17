@@ -197,7 +197,7 @@ impl ExecutionInput {
         };
         let model = snapshot
             .model
-            .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
+            .ok_or(ExecutionError::Agent(AgentHostError::MissingModel))?;
         if self.admission.packet.assignment_role == "engineering" {
             self.command_context.configure_engineering();
         } else if self.admission.packet.assignment_role == "product_research" {
@@ -310,19 +310,19 @@ impl HookSet for PhaseHookSet {
             .after_tool_call_async(call, result, context, cancellation)
     }
 
-    fn transform_context_async<'a>(
-        &'a self,
+    fn transform_context_async(
+        &self,
         context: ContextEnvelope,
         cancellation: pi_agent_core::scheduler::CancellationToken,
-    ) -> HookFuture<'a, ContextEnvelope> {
+    ) -> HookFuture<'_, ContextEnvelope> {
         self.inner.transform_context_async(context, cancellation)
     }
 
-    fn convert_to_llm_async<'a>(
-        &'a self,
+    fn convert_to_llm_async(
+        &self,
         context: ContextEnvelope,
         cancellation: pi_agent_core::scheduler::CancellationToken,
-    ) -> HookFuture<'a, String> {
+    ) -> HookFuture<'_, String> {
         self.inner.convert_to_llm_async(context, cancellation)
     }
 
@@ -335,20 +335,18 @@ impl HookSet for PhaseHookSet {
             .inner
             .should_stop_after_turn_async(context, cancellation);
         let command_context = self.command_context.clone();
-        Box::pin(
-            async move {
-                Ok(command_context.engineering_should_stop_after_turn()
-                    || command_context.product_should_stop_after_turn()
-                    || inner.await?)
-            },
-        )
+        Box::pin(async move {
+            Ok(command_context.engineering_should_stop_after_turn()
+                || command_context.product_should_stop_after_turn()
+                || inner.await?)
+        })
     }
 
-    fn prepare_next_turn_async<'a>(
-        &'a self,
+    fn prepare_next_turn_async(
+        &self,
         context: ContextEnvelope,
         cancellation: pi_agent_core::scheduler::CancellationToken,
-    ) -> HookFuture<'a, NextTurn> {
+    ) -> HookFuture<'_, NextTurn> {
         self.inner.prepare_next_turn_async(context, cancellation)
     }
 }
@@ -400,16 +398,19 @@ where
 
 impl PreparedExecution {
     /// Borrow the verified packet used to construct this run.
+    #[must_use]
     pub fn admission(&self) -> &Admission {
         &self.admission
     }
 
     /// Borrow the provider-bound agent for qualification inspection.
+    #[must_use]
     pub fn agent(&self) -> &Agent {
         &self.agent
     }
 
     /// Borrow the one-shot terminal deferral gate.
+    #[must_use]
     pub fn terminal(&self) -> &Arc<TerminalDeferral> {
         &self.terminal
     }
@@ -501,11 +502,13 @@ impl ExecutionResult {
     }
 
     /// Whether the core reached a normal terminal run state.
+    #[must_use]
     pub fn settled(&self) -> bool {
         self.run.phase.is_terminal()
     }
 
     /// Return the final stop reason, if the core supplied one.
+    #[must_use]
     pub fn stop_reason(&self) -> Option<StopReason> {
         self.run.stop_reason
     }
@@ -750,8 +753,7 @@ mod tests {
                         schema_json = "{{}}"{handler}
                     }} }}
                 }}
-            "#,
-            handler = handler
+            "#
         );
         LuaPolicy::load(&source).expect("policy fixture is valid")
     }

@@ -27,17 +27,16 @@ use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
     ArchitectSponsorTicketRevisionRequest, AuditShowResponse, CampaignReceiptResponse,
-    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV2,
-    FactoryStatusResponse,
+    CampaignStatusResponse, CandidateShowResponse, CredentialDescriptorV2, FactoryStatusResponse,
     ForumListThreadsRequestV2, ForumListTopicsRequestV2, ForumPostsResponseV2,
     ForumReadThreadRequestV2, ForumSearchRequestV2, ForumSearchResponseV2, ForumThreadsResponseV2,
     ForumTopicsResponseV2, OperatorApplicationActivateRequest, OperatorApplicationRegisterRequest,
     OperatorApplicationShowRequest, OperatorArtifactSealReceiptResponse,
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest, OperatorFactoryStatusRequest,
-    OperatorStartCampaignRequest,
-    OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2, RuntimeRelativePath,
-    SealedArtifactReferenceWireV2, TicketListResponse, TicketShowResponse,
+    OperatorStartCampaignRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
+    PROTOCOL_VERSION_V2, RuntimeRelativePath, SealedArtifactReferenceWireV2, TicketListResponse,
+    TicketShowResponse,
 };
 
 fn main() -> ExitCode {
@@ -530,9 +529,7 @@ fn print_factory_status(
     );
     println!(
         "  sessions: {} total ({} running, {} unknown-cost)",
-        factory.session_total,
-        factory.running_session_count,
-        factory.unknown_cost_session_count
+        factory.session_total, factory.running_session_count, factory.unknown_cost_session_count
     );
 }
 
@@ -2077,7 +2074,7 @@ fn qualified_build_identity(
         &installation_root,
         &source_files
             .iter()
-            .map(|path| RuntimeRelativePath::parse(path))
+            .map(RuntimeRelativePath::parse)
             .collect::<Result<Vec<_>, _>>()?,
     )?;
     let binary = qualify_kernel_binary_v2(&factoryd)?;

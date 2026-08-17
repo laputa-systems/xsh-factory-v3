@@ -399,7 +399,7 @@ fn parse_database_url(value: &str, argument_name: &str) -> Result<ParsedDatabase
             "--{argument_name} must name one database"
         )));
     }
-    let decoded_path = percent_decode(&path[1..]).map_err(|_| {
+    let decoded_path = percent_decode(&path[1..]).map_err(|()| {
         BackupRestoreError::new(format!("--{argument_name} must name one database"))
     })?;
     if decoded_path.is_empty() || decoded_path.contains('/') || decoded_path.contains('\0') {
@@ -449,7 +449,7 @@ fn parse_host_port(authority: &str, argument_name: &str) -> Result<(String, Stri
             (authority.to_owned(), "5432".to_owned())
         }
     };
-    let host = percent_decode(&host).map_err(|_| {
+    let host = percent_decode(&host).map_err(|()| {
         BackupRestoreError::new(format!("--{argument_name} must be a PostgreSQL URL"))
     })?;
     if host.is_empty() || host.contains('\0') {
@@ -644,8 +644,8 @@ fn database_fingerprint(psql_path: &Path, database_url: &str) -> Result<String> 
                 psql_path,
                 database_url,
                 &format!(
-                    r#"SELECT json_build_array(last_value, is_called)::TEXT
-           FROM {}.{}"#,
+                    r"SELECT json_build_array(last_value, is_called)::TEXT
+           FROM {}.{}",
                     quote_identifier(&schema)?,
                     quote_identifier(&sequence)?
                 ),
@@ -924,7 +924,7 @@ impl<'a> JsonStringParser<'a> {
         while self
             .input
             .get(self.offset)
-            .is_some_and(|byte| byte.is_ascii_whitespace())
+            .is_some_and(u8::is_ascii_whitespace)
         {
             self.offset += 1;
         }
@@ -989,7 +989,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<()> {
         .map_err(|error| io_error("read source CAS directory", source, error))?
         .collect::<io::Result<Vec<_>>>()
         .map_err(|error| io_error("read source CAS directory", source, error))?;
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let child_source = entry.path();
         let child_target = target.join(entry.file_name());
@@ -1041,7 +1041,7 @@ fn append_tree_fingerprint_entries(
         .map_err(|error| io_error("read CAS fingerprint directory", directory, error))?
         .collect::<io::Result<Vec<_>>>()
         .map_err(|error| io_error("read CAS fingerprint directory", directory, error))?;
-    children.sort_by_key(|entry| entry.file_name());
+    children.sort_by_key(std::fs::DirEntry::file_name);
     for child in children {
         let path = child.path();
         let relative = path

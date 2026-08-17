@@ -2857,7 +2857,11 @@ mod tests {
     fn engineering_retry_is_bounded_to_one_candidate_less_failure() {
         assert!(can_retry_engineering_attempt(ATTEMPT_FAILED, false, false));
         assert!(!can_retry_engineering_attempt(ATTEMPT_FAILED, false, true));
-        assert!(!can_retry_engineering_attempt(ATTEMPT_ENGINEERING, false, false));
+        assert!(!can_retry_engineering_attempt(
+            ATTEMPT_ENGINEERING,
+            false,
+            false
+        ));
         assert!(!can_retry_engineering_attempt(ATTEMPT_FAILED, true, false));
     }
 }

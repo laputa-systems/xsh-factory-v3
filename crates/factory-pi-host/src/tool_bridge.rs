@@ -87,6 +87,7 @@ pub enum ToolName {
 
 impl ToolName {
     /// Parse one packet/policy spelling.
+    #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "workspace_read" => Self::WorkspaceRead,
@@ -113,6 +114,7 @@ impl ToolName {
     }
 
     /// Return the stable model-facing spelling.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::WorkspaceRead => "workspace_read",
@@ -138,6 +140,7 @@ impl ToolName {
     }
 
     /// Return the exact daemon operation, when this tool is daemon-bound.
+    #[must_use]
     pub const fn daemon_operation(self) -> Option<&'static str> {
         Some(match self {
             Self::WorkspaceRead => "workspace.read",
@@ -163,6 +166,7 @@ impl ToolName {
     }
 
     /// Return the capability method expected from a Luau handler.
+    #[must_use]
     pub fn capability_method(self) -> &'static str {
         match self {
             Self::WorkspaceWrite => "workspace.write",
@@ -175,6 +179,7 @@ impl ToolName {
     }
 
     /// Whether this tool is the one-shot terminal surface.
+    #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -187,6 +192,7 @@ impl ToolName {
     }
 
     /// Whether the operation receives host-owned retry identity fields.
+    #[must_use]
     pub const fn is_mutating(self) -> bool {
         matches!(
             self,
@@ -363,6 +369,7 @@ pub struct CommandContext {
 
 impl CommandContext {
     /// Construct a context at the daemon-admitted revision.
+    #[must_use]
     pub fn new(session_revision: u64) -> Self {
         Self {
             session_revision: Arc::new(AtomicU64::new(session_revision)),
@@ -471,11 +478,10 @@ impl CommandContext {
     }
 
     pub(crate) fn set_engineering_regression_identity(&self, identity: &str) {
-        if let Ok(mut state) = self.engineering.lock() {
-            if !identity.is_empty() {
+        if let Ok(mut state) = self.engineering.lock()
+            && !identity.is_empty() {
                 state.regression_identity = Some(identity.to_owned());
             }
-        }
     }
 
     pub(crate) fn validate_engineering_submission_identity(
@@ -523,11 +529,13 @@ impl CommandContext {
             .engineering
             .lock()
             .map_err(|_| "Engineering phase state is unavailable")?;
-        if matches!(state.phase, EngineeringPhase::Disabled | EngineeringPhase::Submitted) {
+        if matches!(
+            state.phase,
+            EngineeringPhase::Disabled | EngineeringPhase::Submitted
+        ) {
             return Ok(());
         }
-        if tool == ToolName::WorkspaceRead
-            && signature.contains("src/runtime/eval/lowered_ops.rs")
+        if tool == ToolName::WorkspaceRead && signature.contains("src/runtime/eval/lowered_ops.rs")
         {
             state.runtime_owner_read = true;
         }
@@ -565,9 +573,7 @@ impl CommandContext {
         Ok(())
     }
 
-    fn mark_engineering_protocol_violation(
-        state: &mut EngineeringProgressState,
-    ) {
+    fn mark_engineering_protocol_violation(state: &mut EngineeringProgressState) {
         if state.protocol_violation_recorded_this_turn {
             return;
         }
@@ -606,16 +612,10 @@ impl CommandContext {
     pub(crate) fn engineering_diagnostics(&self) -> EngineeringPhase {
         self.engineering
             .lock()
-            .map(|state| state.phase)
-            .unwrap_or(EngineeringPhase::Disabled)
+            .map_or(EngineeringPhase::Disabled, |state| state.phase)
     }
 
-    pub(crate) fn record_tool_execution(
-        &self,
-        tool: ToolName,
-        elapsed: Duration,
-        succeeded: bool,
-    ) {
+    pub(crate) fn record_tool_execution(&self, tool: ToolName, elapsed: Duration, succeeded: bool) {
         let Ok(mut diagnostics) = self.tool_execution.lock() else {
             return;
         };
@@ -760,6 +760,7 @@ impl CommandContext {
     }
 
     /// Return the latest daemon aggregate revision observed by this actor.
+    #[must_use]
     pub fn current_revision(&self) -> u64 {
         self.session_revision.load(Ordering::Acquire)
     }
@@ -873,12 +874,12 @@ impl fmt::Display for TerminalError {
 /// worktree; this trait contains no path or process discovery fallback.
 pub trait LocalToolExecutor: Send + Sync {
     /// Execute one local tool with a host-owned cancellation scope.
-    fn invoke<'a>(
-        &'a self,
+    fn invoke(
+        &self,
         tool: ToolName,
         arguments: JsonValue,
         cancellation: CancellationToken,
-    ) -> DaemonFuture<'a>;
+    ) -> DaemonFuture<'_>;
 }
 
 /// An admitted Luau tool after host binding.
@@ -1014,11 +1015,13 @@ where
     }
 
     /// Return the terminal gate shared with host settlement.
+    #[must_use]
     pub fn terminal(&self) -> &Arc<TerminalDeferral> {
         &self.terminal
     }
 
     /// Return the bound prompt tools in deterministic name order.
+    #[must_use]
     pub fn tools(&self) -> Vec<BoundTool> {
         self.tools.values().cloned().collect()
     }
@@ -1078,9 +1081,7 @@ where
                 })?;
         }
         let product_tool_signature = payload
-            .to_json_string()
-            .map(|arguments| format!("{name}:{arguments}"))
-            .unwrap_or_else(|_| format!("{name}:<unserializable>"));
+            .to_json_string().map_or_else(|_| format!("{name}:<unserializable>"), |arguments| format!("{name}:{arguments}"));
         self.command_context
             .record_engineering_tool_call(name, &product_tool_signature)
             .map_err(|message| CapabilityError::Execution {
@@ -1207,7 +1208,7 @@ where
                 value,
                 name.is_terminal() || name == ToolName::ProductSubmitTicket,
             )
-                .map_err(|message| CapabilityError::Execution { message })?,
+            .map_err(|message| CapabilityError::Execution { message })?,
         })
     }
 }
@@ -2158,16 +2159,8 @@ mod tests {
     #[test]
     fn tool_execution_diagnostics_aggregate_without_arguments() {
         let context = CommandContext::new(1);
-        context.record_tool_execution(
-            ToolName::WorkspaceSearch,
-            Duration::from_millis(7),
-            true,
-        );
-        context.record_tool_execution(
-            ToolName::WorkspaceSearch,
-            Duration::from_millis(11),
-            false,
-        );
+        context.record_tool_execution(ToolName::WorkspaceSearch, Duration::from_millis(7), true);
+        context.record_tool_execution(ToolName::WorkspaceSearch, Duration::from_millis(11), false);
 
         assert_eq!(
             context.tool_execution_diagnostics(),
@@ -2243,9 +2236,11 @@ mod tests {
         );
 
         context.set_engineering_regression_identity("cargo test --workspace --lib");
-        assert!(context
-            .validate_engineering_submission_identity(&payload)
-            .is_ok());
+        assert!(
+            context
+                .validate_engineering_submission_identity(&payload)
+                .is_ok()
+        );
         let wrong = JsonValue::object([(
             "regression_test_identity",
             JsonValue::String("cargo test -p other".to_owned()),
@@ -2297,12 +2292,16 @@ mod tests {
                 "workspace_read:{\"repository_relative_path\":\"src/module/docs.rs\"}",
             )
             .expect("adjacent owner read is admitted");
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-            .is_ok());
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-            .is_ok());
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                .is_ok()
+        );
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                .is_ok()
+        );
         assert!(!context.engineering_should_stop_after_turn());
         context
             .record_engineering_submission()
@@ -2346,29 +2345,31 @@ mod tests {
             .expect("mutation enables focused shell validation");
 
         for _ in 0..(MAX_ENGINEERING_IDENTICAL_TOOL_CALLS - 1) {
-            assert!(context
-                .record_engineering_tool_call(
-                    ToolName::Shell,
-                    "shell:{\"command\":\"rg owner\"}"
-                )
-                .is_ok());
+            assert!(
+                context
+                    .record_engineering_tool_call(
+                        ToolName::Shell,
+                        "shell:{\"command\":\"rg owner\"}"
+                    )
+                    .is_ok()
+            );
         }
         assert_eq!(
-            context.record_engineering_tool_call(
-                ToolName::Shell,
-                "shell:{\"command\":\"rg owner\"}"
-            ),
+            context
+                .record_engineering_tool_call(ToolName::Shell, "shell:{\"command\":\"rg owner\"}"),
             Err(
                 "Engineering repeated an identical tool call; stop searching, make the smallest workspace_edit/workspace_write or shell change, then call candidate_submit"
             )
         );
         assert!(context.engineering_should_stop_after_turn());
-        assert!(context
-            .record_engineering_tool_call(
-                ToolName::WorkspaceEdit,
-                "workspace_edit:{\"path\":\"src/lib.rs\"}"
-            )
-            .is_ok());
+        assert!(
+            context
+                .record_engineering_tool_call(
+                    ToolName::WorkspaceEdit,
+                    "workspace_edit:{\"path\":\"src/lib.rs\"}"
+                )
+                .is_ok()
+        );
     }
 
     #[test]
@@ -2392,9 +2393,11 @@ mod tests {
             .expect("mutation enables focused shell validation");
 
         for index in 0..MAX_ENGINEERING_SHELL_CALLS {
-            assert!(context
-                .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
-                .is_ok());
+            assert!(
+                context
+                    .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
+                    .is_ok()
+            );
         }
         assert_eq!(
             context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
@@ -2432,13 +2435,17 @@ mod tests {
                 "workspace_edit:{\"path\":\"src/module/owner.rs\"}",
             )
             .expect("mutation unlocks focused validation");
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::Shell)
-            .is_ok());
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::Shell)
+                .is_ok()
+        );
         for _ in 0..MAX_ENGINEERING_POST_MUTATION_DISCOVERY_CALLS {
-            assert!(context
-                .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
-                .is_ok());
+            assert!(
+                context
+                    .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+                    .is_ok()
+            );
         }
         assert_eq!(
             context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
@@ -2459,9 +2466,11 @@ mod tests {
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
         for index in 0..MAX_ENGINEERING_SHELL_CALLS {
-            assert!(context
-                .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
-                .is_ok());
+            assert!(
+                context
+                    .record_engineering_tool_call(ToolName::Shell, &format!("shell:{index}"))
+                    .is_ok()
+            );
         }
         assert_eq!(
             context.record_engineering_tool_call(ToolName::Shell, "shell:overflow"),
@@ -2487,13 +2496,17 @@ mod tests {
                     .is_ok()
             );
         }
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-            .is_err());
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                .is_err()
+        );
         assert!(!context.engineering_should_stop_after_turn());
-        assert!(context
-            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
-            .is_err());
+        assert!(
+            context
+                .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+                .is_err()
+        );
         assert!(context.engineering_should_stop_after_turn());
     }
 
@@ -2503,10 +2516,14 @@ mod tests {
         context.configure_product();
 
         for _ in 0..3 {
-            context.record_product_tool_call("workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}");
+            context.record_product_tool_call(
+                "workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}",
+            );
             assert!(!context.product_should_stop_after_turn());
         }
-        context.record_product_tool_call("workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}");
+        context.record_product_tool_call(
+            "workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}",
+        );
         assert!(context.product_should_stop_after_turn());
     }
 

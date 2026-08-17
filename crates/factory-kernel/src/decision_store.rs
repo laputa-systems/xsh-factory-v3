@@ -771,11 +771,11 @@ impl DecisionStore {
             command.candidate_id.get()
         );
         let scoped_suffix = format!("/{}/{}", attempt.ticket_id, command.candidate_id.get());
-        let scoped_ref = command.candidate_ref.starts_with("refs/heads/factory-scoped/")
+        let scoped_ref = command
+            .candidate_ref
+            .starts_with("refs/heads/factory-scoped/")
             && command.candidate_ref.ends_with(&scoped_suffix);
-        if command.candidate_ref != legacy_ref
-            && !scoped_ref
-        {
+        if command.candidate_ref != legacy_ref && !scoped_ref {
             return Err(DecisionStoreError::InvalidCandidateRef);
         }
         let next = candidate.revision.next()?;
@@ -2960,13 +2960,15 @@ mod tests {
         assert!(
             validate_candidate_ref(&format!("refs/heads/factory/12/34/{}", "a".repeat(64))).is_ok()
         );
-        assert!(validate_candidate_ref(&format!(
-            "refs/heads/factory-scoped/{}/{}/{}",
-            "a".repeat(64),
-            12,
-            34
-        ))
-        .is_ok());
+        assert!(
+            validate_candidate_ref(&format!(
+                "refs/heads/factory-scoped/{}/{}/{}",
+                "a".repeat(64),
+                12,
+                34
+            ))
+            .is_ok()
+        );
         for invalid in [
             "refs/remotes/origin/main",
             "refs/heads/factory/12/../34",

@@ -1041,7 +1041,7 @@ fn validate_application_source_path(
             maximum: MAX_APPLICATION_SOURCE_PATH_BYTES,
         });
     }
-    if value.starts_with("/") || value.contains('\\') || value.contains('\0') {
+    if value.starts_with('/') || value.contains('\\') || value.contains('\0') {
         return Err(ContractError::UnsafeRelativePath {
             field,
             reason: "source path is not canonical",

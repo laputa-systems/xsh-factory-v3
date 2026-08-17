@@ -524,12 +524,12 @@ impl RootedWorkspace {
 }
 
 impl LocalToolExecutor for RootedWorkspace {
-    fn invoke<'a>(
-        &'a self,
+    fn invoke(
+        &self,
         tool: ToolName,
         arguments: JsonValue,
         cancellation: CancellationToken,
-    ) -> DaemonFuture<'a> {
+    ) -> DaemonFuture<'_> {
         Box::pin(async move { self.invoke_sync(tool, arguments, cancellation) })
     }
 }
@@ -571,7 +571,7 @@ fn search_tree(
             .map_err(io_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(io_error)?;
-        entries.sort_by_key(|entry| entry.file_name());
+        entries.sort_by_key(std::fs::DirEntry::file_name);
         for child in entries {
             search_tree(root, &child.path(), query, limit, matches)?;
             if matches.len() == limit {

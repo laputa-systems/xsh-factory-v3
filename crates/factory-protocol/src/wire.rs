@@ -2396,6 +2396,7 @@ pub fn canonical_command_profile_json_v2(command: &CommandWireV2) -> Result<Stri
 /// submits a reproducer. This is the actor-facing spelling of the admitted
 /// domain value; it intentionally uses the same closed field order as bundle
 /// admission.
+#[must_use]
 pub fn canonical_command_profile_json_from_domain_v2(command: &CommandProfileV2) -> String {
     let executable = match &command.executable {
         ExecutableV2::ApprovedTool(tool) => match tool {
@@ -2440,10 +2441,11 @@ pub fn canonical_command_profile_json_from_domain_v2(command: &CommandProfileV2)
 pub fn parse_command_profile_v2(payload: &[u8]) -> Result<CommandProfileV2, FrameError> {
     let payload = std::str::from_utf8(payload).map_err(|_| FrameError::InvalidUtf8)?;
     let canonical_payload = payload.strip_suffix('\n').unwrap_or(payload);
-    let wire: CommandWireV2 = json::from_str(canonical_payload).map_err(|_| FrameError::InvalidJson {
-        operation: "command profile",
-        detail: "command bytes are not canonical V2 JSON".into(),
-    })?;
+    let wire: CommandWireV2 =
+        json::from_str(canonical_payload).map_err(|_| FrameError::InvalidJson {
+            operation: "command profile",
+            detail: "command bytes are not canonical V2 JSON".into(),
+        })?;
     if canonical_command_profile_json_v2(&wire)? != canonical_payload {
         return Err(FrameError::InvalidJson {
             operation: "command profile",
@@ -2726,7 +2728,9 @@ fn canonical_ticket_policy(value: &TicketPolicyWireV2) -> String {
     format!(
         "{{\"low_water\":{},\"maximum\":{},\"proposal_maximum\":{},\"target\":{},\"ticket_bounds\":{{\"acceptance_criteria_limit\":{},\"contract_read_limit\":{},\"narrative_byte_limit\":{}}}}}",
         value.low_water,
-        value.maximum.map_or_else(|| "null".to_owned(), |maximum| maximum.to_string()),
+        value
+            .maximum
+            .map_or_else(|| "null".to_owned(), |maximum| maximum.to_string()),
         value.proposal_maximum,
         value.target,
         value.ticket_bounds.acceptance_criteria_limit,

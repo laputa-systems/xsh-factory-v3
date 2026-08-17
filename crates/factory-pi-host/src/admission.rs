@@ -331,7 +331,7 @@ mod tests {
     fn admission_reader_rejects_unknown_fields_before_packet_work() {
         let mut input = Cursor::new(
             (admission_json("e30=", "1") + "\n")
-                .replace("}", ",\"unexpected\":true}")
+                .replace('}', ",\"unexpected\":true}")
                 .into_bytes(),
         );
         let error = read_admission(&mut input, AdmissionConfig::default())

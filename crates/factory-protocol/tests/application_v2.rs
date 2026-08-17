@@ -8,8 +8,8 @@ use factory_protocol::{
     ExecutableV2, GitPolicyV2, MAX_SESSION_OUTPUT_BYTES, MicroUsd, ModelProfileV2,
     PolicyEntrypointV2, RepositoryBindingV2, RepositoryRelativePath, RequiredReadV2,
     SessionLimitsV2, TemplateArtifactV2, TemplatePlaceholderV2, ThinkingLevelV2, TicketBoundsV2,
-    TicketPolicyV2, ValidationProfilesV2, parse_command_profile_v2,
-    canonical_command_profile_json_from_domain_v2, seal_policy_artifact_v2,
+    TicketPolicyV2, ValidationProfilesV2, canonical_command_profile_json_from_domain_v2,
+    parse_command_profile_v2, seal_policy_artifact_v2,
 };
 
 fn app_path(value: &str) -> ApplicationRelativePath {
@@ -192,7 +192,10 @@ fn compiler_seals_all_declared_files_with_stable_identity() {
 fn domain_command_profile_spelling_is_exactly_parseable() {
     let profile = command("reproduce");
     let canonical = canonical_command_profile_json_from_domain_v2(&profile);
-    assert_eq!(parse_command_profile_v2(canonical.as_bytes()).unwrap(), profile);
+    assert_eq!(
+        parse_command_profile_v2(canonical.as_bytes()).unwrap(),
+        profile
+    );
     assert_eq!(
         parse_command_profile_v2(format!("{canonical}\n").as_bytes()).unwrap(),
         profile
@@ -202,7 +205,11 @@ fn domain_command_profile_spelling_is_exactly_parseable() {
 #[test]
 fn malformed_command_profile_reports_actionable_canonicality() {
     let error = parse_command_profile_v2(b"./target/debug/product fixture.script").unwrap_err();
-    assert!(error.to_string().contains("command bytes are not canonical V2 JSON"));
+    assert!(
+        error
+            .to_string()
+            .contains("command bytes are not canonical V2 JSON")
+    );
 }
 
 #[test]

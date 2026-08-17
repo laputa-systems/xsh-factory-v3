@@ -12,12 +12,12 @@
 use std::path::Path;
 
 use factory_protocol::{
-    AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole, CommandProfileV2,
+    AggregateRevision, ApplicationBundleV2, AssignmentPacketV2, AssignmentRole,
     CandidateCheckpointRegressionRequest, CandidateId, CandidatePacketV2, CandidateSubmissionV2,
-    CandidateSubmitRequest, ContentDigest, ExpectedRevision, QualityRunFullSuiteRequest,
-    QualitySubmitReviewRequest, QualityValidationReceiptV2, RepositoryObjectIdV2,
-    SealedArtifactReferenceV2, SessionId, TerminalOperationV2, TicketAttemptId, TicketId,
-    TicketRevisionId, ValidationId,
+    CandidateSubmitRequest, CommandProfileV2, ContentDigest, ExpectedRevision,
+    QualityRunFullSuiteRequest, QualitySubmitReviewRequest, QualityValidationReceiptV2,
+    RepositoryObjectIdV2, SealedArtifactReferenceV2, SessionId, TerminalOperationV2,
+    TicketAttemptId, TicketId, TicketRevisionId, ValidationId,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;
@@ -35,9 +35,9 @@ use crate::{
         ValidationResult, ValidationScope,
     },
     git::{
-        CandidateWhitespaceCheck, CommitMessage, CommitProvenance,
-        ConstructCandidateCommit, GitCustody, GitCustodyError, GitIdentity, GitTreeId,
-        OwnedWorktree, QualifiedRepository, TreeCapture, WorktreeKind, WorktreeName,
+        CandidateWhitespaceCheck, CommitMessage, CommitProvenance, ConstructCandidateCommit,
+        GitCustody, GitCustodyError, GitIdentity, GitTreeId, OwnedWorktree, QualifiedRepository,
+        TreeCapture, WorktreeKind, WorktreeName,
     },
     process::ProcessStore,
     storage::StoreError,
@@ -1209,10 +1209,7 @@ fn assert_declared_reproducer(
     }
 }
 
-fn reproducer_profile_matches(
-    declared: &CommandProfileV2,
-    command: &DeterministicCommand,
-) -> bool {
+fn reproducer_profile_matches(declared: &CommandProfileV2, command: &DeterministicCommand) -> bool {
     let mut actual = command.profile().clone();
     actual.expected_exit_status = declared.expected_exit_status;
     actual == *declared

@@ -58,11 +58,13 @@ impl BareAgentHost {
     }
 
     /// Borrow the immutable startup admission.
+    #[must_use]
     pub fn admission(&self) -> &Admission {
         &self.admission
     }
 
     /// Borrow the provider-free agent for qualification inspection.
+    #[must_use]
     pub fn agent(&self) -> &Agent {
         &self.agent
     }
@@ -114,11 +116,13 @@ impl AgentHost {
     }
 
     /// Borrow the immutable startup admission.
+    #[must_use]
     pub fn admission(&self) -> &Admission {
         &self.admission
     }
 
     /// Borrow the underlying agent for the caller-owned run loop.
+    #[must_use]
     pub fn agent(&self) -> &Agent {
         &self.agent
     }
