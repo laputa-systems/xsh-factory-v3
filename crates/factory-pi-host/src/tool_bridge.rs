@@ -37,7 +37,7 @@ pub(crate) const MAX_ENGINEERING_TURNS: u32 = 64;
 const MAX_ENGINEERING_IDENTICAL_TOOL_CALLS: u32 = 4;
 const MAX_ENGINEERING_SHELL_CALLS: u32 = 12;
 const MAX_ENGINEERING_OWNER_DISCOVERY_CALLS: u32 = 8;
-const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 8;
+const MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS: u32 = 32;
 const MAX_ENGINEERING_PROTOCOL_RECOVERY_TURNS: u8 = 1;
 
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
@@ -643,12 +643,6 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
-            if state.implementation_discovery_closed {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit",
-                );
-            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -662,12 +656,6 @@ impl CommandContext {
             let discovery_calls = state
                 .post_checkpoint_owner_lists
                 .saturating_add(state.post_checkpoint_owner_searches);
-            if state.implementation_discovery_closed {
-                Self::mark_engineering_protocol_violation(&mut state);
-                return Err(
-                    "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit",
-                );
-            }
             if discovery_calls >= MAX_ENGINEERING_POST_CHECKPOINT_DISCOVERY_CALLS {
                 Self::mark_engineering_protocol_violation(&mut state);
                 return Err(
@@ -2163,7 +2151,7 @@ mod tests {
     }
 
     #[test]
-    fn engineering_phase_allows_implementation_then_requires_submission() {
+    fn engineering_phase_allows_bounded_discovery_then_requires_submission() {
         let context = CommandContext::new(1);
         context.configure_engineering();
         context
@@ -2201,20 +2189,13 @@ mod tests {
                 "workspace_read:{\"repository_relative_path\":\"crates/xsh-registry/src/signature/docs.rs\"}",
             )
             .expect("adjacent owner read is admitted");
-        assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceList),
-            Err(
-                "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit"
-            )
-        );
+        assert!(context
+            .require_engineering_checkpoint_before(ToolName::WorkspaceList)
+            .is_ok());
+        assert!(context
+            .require_engineering_checkpoint_before(ToolName::WorkspaceSearch)
+            .is_ok());
         assert!(!context.engineering_should_stop_after_turn());
-        assert_eq!(
-            context.require_engineering_checkpoint_before(ToolName::WorkspaceSearch),
-            Err(
-                "Engineering has read an owner file; stop searching; read exact adjacent owners such as crates/xsh-registry/src/runtime_op.rs or src/runtime/eval/lowered_ops.rs, then edit and submit"
-            )
-        );
-        assert!(context.engineering_should_stop_after_turn());
         context
             .record_engineering_submission()
             .expect("submission advances the phase");
