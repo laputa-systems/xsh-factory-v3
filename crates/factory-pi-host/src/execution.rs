@@ -200,6 +200,8 @@ impl ExecutionInput {
             .ok_or_else(|| ExecutionError::Agent(AgentHostError::MissingModel))?;
         if self.admission.packet.assignment_role == "engineering" {
             self.command_context.configure_engineering();
+        } else if self.admission.packet.assignment_role == "product_research" {
+            self.command_context.configure_product();
         }
         let mut builder = Agent::builder()
             .system_prompt(system_prompt)
@@ -276,6 +278,7 @@ impl HookSet for PhaseHookSet {
         context: &ContextEnvelope,
     ) -> Result<bool, pi_agent_core::error::HookError> {
         Ok(self.command_context.engineering_should_stop_after_turn()
+            || self.command_context.product_should_stop_after_turn()
             || self.inner.should_stop_after_turn(context)?)
     }
 
@@ -333,7 +336,11 @@ impl HookSet for PhaseHookSet {
             .should_stop_after_turn_async(context, cancellation);
         let command_context = self.command_context.clone();
         Box::pin(
-            async move { Ok(command_context.engineering_should_stop_after_turn() || inner.await?) },
+            async move {
+                Ok(command_context.engineering_should_stop_after_turn()
+                    || command_context.product_should_stop_after_turn()
+                    || inner.await?)
+            },
         )
     }
 

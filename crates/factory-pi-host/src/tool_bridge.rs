@@ -26,6 +26,13 @@ use std::time::Duration;
 /// The sole capability name used by daemon-bound policy handlers.
 pub const FACTORY_CAPABILITY: &str = "factory";
 
+/// Product research is intentionally open-ended, but a run must still settle if the model
+/// keeps asking for the same work or never reaches a terminal operation. These are host-side
+/// safety bounds, not response-size limits: ordinary prose and distinct investigation steps are
+/// allowed until the run makes no bounded progress.
+pub(crate) const MAX_PRODUCT_TURNS: u32 = 64;
+const MAX_PRODUCT_IDENTICAL_TOOL_CALLS: u32 = 4;
+
 /// A closed set of actor tools.  Keep this list in lockstep with the packet
 /// contract; parsing unknown names is an admission error, never a no-op.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -266,6 +273,15 @@ impl Default for EngineeringProgressState {
     }
 }
 
+#[derive(Debug, Default)]
+struct ProductProgressState {
+    enabled: bool,
+    turns_started: u32,
+    last_tool_call: Option<String>,
+    identical_tool_calls: u32,
+    stalled: bool,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ToolExecutionStats {
     calls: u32,
@@ -297,6 +313,7 @@ pub struct CommandContext {
     next_command_id: Arc<AtomicU64>,
     product_submission_rejected: Arc<AtomicBool>,
     engineering: Arc<Mutex<EngineeringProgressState>>,
+    product: Arc<Mutex<ProductProgressState>>,
     tool_execution: Arc<Mutex<BTreeMap<ToolName, ToolExecutionStats>>>,
 }
 
@@ -308,6 +325,7 @@ impl CommandContext {
             next_command_id: Arc::new(AtomicU64::new(0)),
             product_submission_rejected: Arc::new(AtomicBool::new(false)),
             engineering: Arc::new(Mutex::new(EngineeringProgressState::default())),
+            product: Arc::new(Mutex::new(ProductProgressState::default())),
             tool_execution: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -319,6 +337,52 @@ impl CommandContext {
         *state = EngineeringProgressState {
             phase: EngineeringPhase::AwaitingCheckpoint,
         };
+    }
+
+    pub(crate) fn configure_product(&self) {
+        let Ok(mut state) = self.product.lock() else {
+            return;
+        };
+        *state = ProductProgressState {
+            enabled: true,
+            ..ProductProgressState::default()
+        };
+    }
+
+    /// Record one Product tool invocation before dispatching it to the host capability.
+    /// Identical calls are allowed for normal retries, but a fourth consecutive identical call
+    /// trips the progress guard so the run can settle with known provider cost.
+    pub(crate) fn record_product_tool_call(&self, signature: &str) {
+        let Ok(mut state) = self.product.lock() else {
+            return;
+        };
+        if !state.enabled || state.stalled {
+            return;
+        }
+        if state.last_tool_call.as_deref() == Some(signature) {
+            state.identical_tool_calls = state.identical_tool_calls.saturating_add(1);
+        } else {
+            state.last_tool_call = Some(signature.to_owned());
+            state.identical_tool_calls = 1;
+        }
+        if state.identical_tool_calls >= MAX_PRODUCT_IDENTICAL_TOOL_CALLS {
+            state.stalled = true;
+        }
+    }
+
+    /// Count one completed model turn and report whether Product research has stalled.
+    pub(crate) fn product_should_stop_after_turn(&self) -> bool {
+        let Ok(mut state) = self.product.lock() else {
+            return true;
+        };
+        if !state.enabled {
+            return false;
+        }
+        state.turns_started = state.turns_started.saturating_add(1);
+        if state.turns_started >= MAX_PRODUCT_TURNS {
+            state.stalled = true;
+        }
+        state.stalled
     }
 
     pub(crate) fn record_engineering_checkpoint(&self) -> Result<(), &'static str> {
@@ -729,6 +793,12 @@ where
             .map_err(|message| CapabilityError::Execution {
                 message: message.to_owned(),
             })?;
+        let product_tool_signature = payload
+            .to_json_string()
+            .map(|arguments| format!("{name}:{arguments}"))
+            .unwrap_or_else(|_| format!("{name}:<unserializable>"));
+        self.command_context
+            .record_product_tool_call(&product_tool_signature);
         if name.defers_without_daemon() {
             self.terminal
                 .defer(name, payload)
@@ -1871,5 +1941,29 @@ mod tests {
             context.engineering_diagnostics(),
             EngineeringPhase::Submitted
         );
+    }
+
+    #[test]
+    fn product_phase_stops_after_repeated_identical_tool_arguments() {
+        let context = CommandContext::new(1);
+        context.configure_product();
+
+        for _ in 0..3 {
+            context.record_product_tool_call("workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}");
+            assert!(!context.product_should_stop_after_turn());
+        }
+        context.record_product_tool_call("workspace_read:{\"repository_relative_path\":\"AGENTS.md\"}");
+        assert!(context.product_should_stop_after_turn());
+    }
+
+    #[test]
+    fn product_phase_stops_after_bounded_turns() {
+        let context = CommandContext::new(1);
+        context.configure_product();
+
+        for _ in 0..(MAX_PRODUCT_TURNS - 1) {
+            assert!(!context.product_should_stop_after_turn());
+        }
+        assert!(context.product_should_stop_after_turn());
     }
 }
