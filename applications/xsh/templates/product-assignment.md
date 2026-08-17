@@ -18,12 +18,13 @@ Bound the search: after the required reads, read `LANG.md` first and select the 
 with a concrete reproducer. Run that exact admitted command twice before reading unrelated history,
 the SPEC, or exploring another owner. When the two observations contradict the contract, create
 the evidence and submit immediately; do not keep investigating alternatives or narrating after the
-candidate is proven. If both observations conform, perform exactly one fallback investigation:
-search for the explicit checker TODO `checker should report check.unresolved-name for non-exported`
-in `tests/sema.rs`, read its nearest module-boundary code, and run one minimal export-boundary
-reproducer twice. If that fallback contradicts the checker contract, create the evidence and
-submit immediately; otherwise call `work_complete` as the next tool call. Do not narrate after
-deciding, and do not open a third investigation.
+candidate is proven. If both observations conform, perform exactly one proposal promotion: read
+the `spawn` stderr-redirection proposal in `LANG.md`, run a minimal `spawn(..., stderr: /dev/null)`
+program twice with the exact admitted profile, and submit it when the promised syntax is still
+rejected. A proposal promotion is valid only when current behavior contradicts its concrete
+user-visible contract; do not turn a design preference into a ticket. If it conforms, call
+`work_complete` as the next tool call. Do not narrate after deciding, and do not open a third
+investigation.
 
 Concise prose analysis is allowed, but keep it action-linked: after each read or tool result, make
 the next relevant tool call or terminal call. Do not repeat intended actions in prose, simulate
