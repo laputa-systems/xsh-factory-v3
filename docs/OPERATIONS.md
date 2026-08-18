@@ -197,8 +197,9 @@ delivered attempt, a nonempty delivered commit, and a clean `../xsh` `HEAD`
 matching that commit. A successful campaign admission alone is not a shipped
 commit. `factoryctl campaign status --format json` and
 `factoryctl candidate show --format json` expose the exact
-`*_factory_cost_micro_usd` value paired with the delivered commit; human
-readable output also prints the equivalent six-decimal USD amount.
+`*_factory_cost_micro_usd` value paired with the delivered commit; this is the
+aggregate of complete provider-reported terminal costs, and human-readable
+output also prints the equivalent six-decimal USD amount.
 The kernel also writes the same amount into the delivered commit's
 `Factory-Cost: $0.000000` trailer, and `make paid-cycle-verify` checks that
 commit-visible proof.

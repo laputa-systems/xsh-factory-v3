@@ -114,6 +114,8 @@ pub struct AssignmentModelWireV2 {
     pub thinking_level: String,
     pub context_token_limit: u32,
     pub output_token_limit: u32,
+    /// Legacy pricing metadata retained for packet identity compatibility;
+    /// Factory accounting never derives cost from these fields.
     pub price_input_micro_usd_per_million_tokens: u64,
     pub price_output_micro_usd_per_million_tokens: u64,
     pub price_cache_read_micro_usd_per_million_tokens: u64,
@@ -414,7 +416,7 @@ pub enum StopReasonV2 {
 }
 
 /// Normalized provider usage. Provider-specific event streams are not stored
-/// in PostgreSQL; this bounded summary is the only cost input at terminal.
+/// in PostgreSQL; this bounded summary is the only cost evidence at terminal.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UsageTotalsV2 {
     pub input_tokens: u64,
@@ -423,73 +425,19 @@ pub struct UsageTotalsV2 {
     pub cache_write_tokens: u64,
     pub reasoning_tokens: Option<u64>,
     /// Optional provider-reported terminal total, already normalized to
-    /// integral micro-USD by the host. This is retained as evidence only;
-    /// Factory cost is computed from the admitted model prices below.
+    /// integral micro-USD by the host. A complete reported total is the sole
+    /// authoritative Factory-cost input; token counters remain diagnostics.
     pub reported_cost_micro_usd: Option<MicroUsd>,
 }
 
 impl UsageTotalsV2 {
-    /// Computes integer micro-USD from the admitted model prices with each
-    /// token class rounded upward at the million-token boundary. A report with
-    /// no tokens and no provider cost is unknown, never free usage.
-    pub fn cost_at(
-        self,
-        input_price_per_million: MicroUsd,
-        output_price_per_million: MicroUsd,
-    ) -> Result<MicroUsd, ContractError> {
-        self.cost_at_with_cache(
-            input_price_per_million,
-            output_price_per_million,
-            MicroUsd::new(0),
-            MicroUsd::new(0),
-        )
-    }
-
-    pub fn cost_at_with_cache(
-        self,
-        input_price_per_million: MicroUsd,
-        output_price_per_million: MicroUsd,
-        cache_read_price_per_million: MicroUsd,
-        cache_write_price_per_million: MicroUsd,
-    ) -> Result<MicroUsd, ContractError> {
-        if self.input_tokens == 0
-            && self.output_tokens == 0
-            && self.cache_read_tokens == 0
-            && self.cache_write_tokens == 0
-            && self.reported_cost_micro_usd.is_none()
-        {
-            return Err(ContractError::InvalidValue {
-                field: "session cost",
-                reason: "token usage and provider terminal cost are absent",
-            });
-        }
-
-        let class_cost = |tokens: u64, price: MicroUsd| {
-            let product = tokens
-                .checked_mul(price.get())
-                .ok_or(ContractError::InvalidValue {
-                    field: "session cost",
-                    reason: "token cost overflows micro-USD",
-                })?;
-            let rounded = product / 1_000_000 + u64::from(!product.is_multiple_of(1_000_000));
-            Ok(MicroUsd::new(rounded))
-        };
-        [
-            class_cost(self.input_tokens, input_price_per_million)?,
-            class_cost(self.output_tokens, output_price_per_million)?,
-            class_cost(self.cache_read_tokens, cache_read_price_per_million)?,
-            class_cost(self.cache_write_tokens, cache_write_price_per_million)?,
-        ]
-        .into_iter()
-        .try_fold(MicroUsd::new(0), |total, value| {
-            total
-                .get()
-                .checked_add(value.get())
-                .map(MicroUsd::new)
-                .ok_or(ContractError::InvalidValue {
-                    field: "session cost",
-                    reason: "token cost overflows micro-USD",
-                })
+    /// Returns the complete provider-reported terminal total. Token usage is
+    /// retained for diagnostics and evidence, but is never substituted for a
+    /// missing provider total.
+    pub fn provider_cost(self) -> Result<MicroUsd, ContractError> {
+        self.reported_cost_micro_usd.ok_or(ContractError::InvalidValue {
+            field: "session cost",
+            reason: "complete provider-reported terminal cost is absent",
         })
     }
 }
@@ -664,7 +612,8 @@ impl AssignmentPacketV2 {
 }
 
 /// Kernel-admitted terminal report. The host supplies sealed artifact IDs and
-/// normalized usage, while the kernel recomputes packet identity and cost.
+/// normalized usage; the kernel verifies packet identity and accepts only a
+/// complete provider-reported terminal cost for accounting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalReportV2 {
     pub packet_digest: ContentDigest,
@@ -691,7 +640,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cost_rounds_each_class_upward() {
+    fn provider_cost_wins_over_token_usage() {
         let usage = UsageTotalsV2 {
             input_tokens: 1,
             output_tokens: 1_000_001,
@@ -701,29 +650,21 @@ mod tests {
             reported_cost_micro_usd: Some(MicroUsd::new(1)),
             ..UsageTotalsV2::default()
         };
-        assert_eq!(
-            usage.cost_at_with_cache(
-                MicroUsd::new(7),
-                MicroUsd::new(11),
-                MicroUsd::new(13),
-                MicroUsd::new(17),
-            ),
-            Ok(MicroUsd::new(15))
-        );
+        assert_eq!(usage.provider_cost(), Ok(MicroUsd::new(1)));
     }
 
     #[test]
-    fn absent_usage_is_unknown_not_zero() {
+    fn absent_provider_cost_is_unknown_not_zero() {
         let usage = UsageTotalsV2::default();
-        assert!(
-            usage
-                .cost_at_with_cache(
-                    MicroUsd::new(10),
-                    MicroUsd::new(10),
-                    MicroUsd::new(10),
-                    MicroUsd::new(10)
-                )
-                .is_err()
-        );
+        assert!(usage.provider_cost().is_err());
+    }
+
+    #[test]
+    fn complete_provider_zero_cost_is_known_free_usage() {
+        let usage = UsageTotalsV2 {
+            reported_cost_micro_usd: Some(MicroUsd::new(0)),
+            ..UsageTotalsV2::default()
+        };
+        assert_eq!(usage.provider_cost(), Ok(MicroUsd::new(0)));
     }
 }

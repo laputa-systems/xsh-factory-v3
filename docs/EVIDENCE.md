@@ -38,7 +38,7 @@ useful for diagnosis:
 - bounded assistant text;
 - tool names, boundaries, inputs, results, retries, and terminal reason;
 - usage, provider cost when reported, the `cost_limit` stop reason when live
-  cancellation fires, and the admitted-rate Factory cost.
+  cancellation fires, and the provider-reported Factory cost.
 
 It deliberately removes cumulative interactive message snapshots, session-tree
 and fork state, and provider thinking blocks. Tool arguments/results are size
@@ -71,10 +71,10 @@ remains the durable-evidence projection.
 
 Every immutable local delivery stores
 `factory.deliveries.factory_cost_micro_usd` with the resulting XSH commit. This
-is the campaign's final known aggregate cost from admitted model rates and
-sealed token usage at the delivery transaction, expressed in micro-USD so the
-authority never relies on floating-point currency values. Provider-reported
-cost remains diagnostic evidence and cannot replace the admitted-rate total.
+is the campaign's final known aggregate of complete provider-reported terminal
+costs at the delivery transaction, expressed in micro-USD so the authority
+never relies on floating-point currency values. Token usage and model-rate
+metadata remain diagnostic evidence and cannot replace a missing provider total.
 The same value is included in the sealed local delivery receipt, exposed by
 campaign status and candidate navigation, and written by the kernel into the
 delivered Git commit as a

@@ -541,6 +541,8 @@ pub struct ModelProfileV2 {
     pub thinking_level: ThinkingLevelV2,
     pub context_token_limit: u32,
     pub output_token_limit: u32,
+    /// Legacy pricing metadata retained for application-revision identity;
+    /// Factory accounting trusts the provider-reported terminal total instead.
     pub price_input_micro_usd_per_million_tokens: MicroUsd,
     pub price_output_micro_usd_per_million_tokens: MicroUsd,
     pub price_cache_read_micro_usd_per_million_tokens: MicroUsd,

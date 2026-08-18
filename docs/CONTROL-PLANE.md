@@ -69,9 +69,9 @@ The daemon owns the process group, deadline, output capture, cancellation,
 direct wait, and terminal reconciliation. Provider accounting is refreshed at
 each completed model turn; the host checks that snapshot at the core lifecycle
 boundary and cancels at the remaining campaign allowance, emitting the typed
-`cost_limit` stop reason. A session with neither usable token usage
-nor a provider cost is fail-closed; otherwise the kernel computes Factory cost
-from the admitted model rates rather than trusting a provider-reported zero. A
+`cost_limit` stop reason. A session without a complete provider-reported
+terminal cost is fail-closed; token usage and admitted model rates are retained
+as diagnostics only. A complete provider-reported zero is known free usage. A
 released ticket requalifies again under
 an idempotency key bound to its campaign, immutable ticket-revision row, and
 current revision, so a retry cannot collide with sealed evidence from its

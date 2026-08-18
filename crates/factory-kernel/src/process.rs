@@ -1715,32 +1715,10 @@ impl ProcessStore {
         {
             return Err(StoreError::RequiredReadManifestMismatch);
         }
-        let input_price = MicroUsd::new(
-            u64::try_from(session.input_price_micro_usd_per_million)
-                .map_err(|_| StoreError::CorruptCostColumn)?,
-        );
-        let output_price = MicroUsd::new(
-            u64::try_from(session.output_price_micro_usd_per_million)
-                .map_err(|_| StoreError::CorruptCostColumn)?,
-        );
-        let cache_read_price = MicroUsd::new(
-            u64::try_from(session.cache_read_price_micro_usd_per_million)
-                .map_err(|_| StoreError::CorruptCostColumn)?,
-        );
-        let cache_write_price = MicroUsd::new(
-            u64::try_from(session.cache_write_price_micro_usd_per_million)
-                .map_err(|_| StoreError::CorruptCostColumn)?,
-        );
         let cost = match evidence.usage {
-            Some(usage) => match usage.cost_at_with_cache(
-                input_price,
-                output_price,
-                cache_read_price,
-                cache_write_price,
-            ) {
-                Ok(value) => TerminalCostV2::Known(value),
-                Err(_) => TerminalCostV2::Unknown,
-            },
+            Some(usage) => usage
+                .provider_cost()
+                .map_or(TerminalCostV2::Unknown, TerminalCostV2::Known),
             None => TerminalCostV2::Unknown,
         };
         let budget = u64::try_from(session.aggregate_budget_micro_usd)
@@ -3217,21 +3195,13 @@ mod tests {
     }
 
     #[test]
-    fn admitted_prices_are_used_when_provider_cost_is_absent() {
+    fn provider_cost_is_unknown_when_absent_even_with_token_usage() {
         let usage = UsageTotalsV2 {
             input_tokens: 100,
             output_tokens: 100,
             reported_cost_micro_usd: None,
             ..UsageTotalsV2::default()
         };
-        assert_eq!(
-            usage.cost_at_with_cache(
-                MicroUsd::new(10),
-                MicroUsd::new(10),
-                MicroUsd::new(10),
-                MicroUsd::new(10),
-            ),
-            Ok(MicroUsd::new(2))
-        );
+        assert!(usage.provider_cost().is_err());
     }
 }

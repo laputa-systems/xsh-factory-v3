@@ -2377,6 +2377,8 @@ pub struct ModelWireV2 {
     pub thinking_level: String,
     pub context_token_limit: u32,
     pub output_token_limit: u32,
+    /// Legacy pricing metadata retained for packet identity compatibility;
+    /// Factory accounting never derives cost from these fields.
     pub price_input_micro_usd_per_million_tokens: u64,
     pub price_output_micro_usd_per_million_tokens: u64,
     pub price_cache_read_micro_usd_per_million_tokens: u64,
