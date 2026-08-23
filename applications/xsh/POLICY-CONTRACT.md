@@ -9,10 +9,10 @@ directory, verifies each BLAKE3 digest and byte limit, and seals those exact
 source bytes. A running actor never reads this directory.
 
 The model price fields in the bundle are admitted accounting inputs. Keep the
-selected model identifier and context limit aligned with Tea's checked-in
-catalog at `/Users/josh/d/tea-copy/crates/tea-providers/src/registry/catalog.rs`.
-Update the bundle's prices only after reviewing the selected provider's current
-published rate card.
+selected model identifier, context, completion limit, and prices aligned with
+the selected provider's current model page. The active Poolside Laguna S 2.1
+free endpoint is `poolside/laguna-s-2.1:free`; it is a 262,144-context,
+32,768-completion, zero-price tool-calling model.
 
 Product and Quality evidence files use the full 16 MiB CAS object ceiling as
 their `artifact_seal` request limit. The receipt records the actual file length,

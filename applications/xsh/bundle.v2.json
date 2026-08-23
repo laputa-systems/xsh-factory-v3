@@ -20,13 +20,13 @@
         "capability_flags": [
           "reasoning"
         ],
-        "context_token_limit": 1048576,
-        "model_id": "deepseek/deepseek-v4-flash-0731",
+        "context_token_limit": 262144,
+        "model_id": "poolside/laguna-s-2.1:free",
         "output_token_limit": 32768,
-        "price_cache_read_micro_usd_per_million_tokens": 18000,
+        "price_cache_read_micro_usd_per_million_tokens": 0,
         "price_cache_write_micro_usd_per_million_tokens": 0,
-        "price_input_micro_usd_per_million_tokens": 90000,
-        "price_output_micro_usd_per_million_tokens": 180000,
+        "price_input_micro_usd_per_million_tokens": 0,
+        "price_output_micro_usd_per_million_tokens": 0,
         "provider": "openrouter",
         "thinking_level": "high"
       },
@@ -76,13 +76,13 @@
         "capability_flags": [
           "reasoning"
         ],
-        "context_token_limit": 1048576,
-        "model_id": "deepseek/deepseek-v4-flash-0731",
-        "output_token_limit": 65536,
-        "price_cache_read_micro_usd_per_million_tokens": 18000,
+        "context_token_limit": 262144,
+        "model_id": "poolside/laguna-s-2.1:free",
+        "output_token_limit": 32768,
+        "price_cache_read_micro_usd_per_million_tokens": 0,
         "price_cache_write_micro_usd_per_million_tokens": 0,
-        "price_input_micro_usd_per_million_tokens": 90000,
-        "price_output_micro_usd_per_million_tokens": 180000,
+        "price_input_micro_usd_per_million_tokens": 0,
+        "price_output_micro_usd_per_million_tokens": 0,
         "provider": "openrouter",
         "thinking_level": "high"
       },
@@ -137,13 +137,13 @@
         "capability_flags": [
           "reasoning"
         ],
-        "context_token_limit": 1048576,
-        "model_id": "deepseek/deepseek-v4-flash-0731",
-        "output_token_limit": 65536,
-        "price_cache_read_micro_usd_per_million_tokens": 18000,
+        "context_token_limit": 262144,
+        "model_id": "poolside/laguna-s-2.1:free",
+        "output_token_limit": 32768,
+        "price_cache_read_micro_usd_per_million_tokens": 0,
         "price_cache_write_micro_usd_per_million_tokens": 0,
-        "price_input_micro_usd_per_million_tokens": 90000,
-        "price_output_micro_usd_per_million_tokens": 180000,
+        "price_input_micro_usd_per_million_tokens": 0,
+        "price_output_micro_usd_per_million_tokens": 0,
         "provider": "openrouter",
         "thinking_level": "high"
       },
