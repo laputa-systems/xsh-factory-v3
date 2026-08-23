@@ -2,10 +2,9 @@
 
 ## Build and qualification
 
-Use the local `pi-agent-core-rs` checkout at
-`/Users/josh/d/pi-agent-core-rs`. It supplies the reviewed Rust agent crates;
-factory never calls a system Pi binary or resolves runtime code through a
-package registry.
+Use the frozen local Tea checkout at `/Users/josh/d/tea-copy`. It supplies the
+reviewed Rust agent crates; Factory never calls a system agent binary or
+resolves runtime code through a package registry.
 
 ```sh
 make cache
@@ -14,17 +13,17 @@ make release-build
 ```
 
 `make release-build` first fetches both locked workspaces, then builds
-`factoryd`, `factoryctl`, and `factory-pi-host` from the same release workspace.
+`factoryd`, `factoryctl`, and `factory-tea-host` from the same release workspace.
 `factoryctl init` selects the actor host from the same Cargo profile as the
 selected `factoryd`, preventing mixed debug and release protocol binaries from
 entering an installed runtime.
 
 `make cache` fetches the two locked Cargo workspaces. `make lint` is the Grand
-Architect's pre-commit gate: it runs the local `pi-agent-core-rs` tests,
+Architect's pre-commit gate: it runs the local Tea tests,
 formats and checks Rust source, and runs the Factory workspace tests. Neither
 starts a provider-backed actor or uses remote Git. The shared toolchain is the
 pinned `nightly-2026-07-24`; qualification also refuses a missing or dirty
-`/Users/josh/d/pi-agent-core-rs` checkout and records its exact source
+`/Users/josh/d/tea-copy` checkout and records its exact source
 identity.
 
 ## Initialize and serve
@@ -117,7 +116,7 @@ that directory as `--source-root` and `bundle.v2.json` as
 Register with those exact guards, seal a short operator rationale, and activate
 only while no campaign is running. Start campaigns through
 `factoryctl campaign start` with an explicit active application revision,
-aggregate micro-USD budget, deadline, and delivery target. Do not launch Pi or
+aggregate micro-USD budget, deadline, and delivery target. Do not launch Tea or
 an actor host directly.
 
 Every mutation uses a client command ID and observed aggregate revision.
@@ -155,7 +154,7 @@ sessions for which no transcript artifact exists.
 The exact request for a bounded paid run is encoded by `make paid-cycle`. Before
 admission it runs `make release-build`, recomputes the closed build identity
 from the release binaries, Cargo locks, Factory source graph, and local
-`pi-agent-core-rs` checkout, and compares that identity with the live daemon.
+Tea checkout, and compares that identity with the live daemon.
 It fails closed on a stale runtime. Only then does it admit one provider-backed
 campaign with `--delivery-target 1`, after checking that the installed
 `factoryctl` exists, the operator socket is live, the product checkout is clean,

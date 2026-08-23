@@ -49,7 +49,7 @@ retrieval ranking.
 ## Runtime identity
 
 The installed runtime identity binds the Rust host executable, pinned
-toolchain, exact `pi-agent-core-rs` `HEAD`, complete core source inventory,
+toolchain, exact Tea `HEAD`, complete source inventory,
 core lockfile, and their digests. The kernel checks that identity before every
 launch. The actor receives only the credential-variable name; the credential
 value is introduced at the daemon/provider boundary and is not evidence.
@@ -130,7 +130,7 @@ inventory and Forum history outlive campaigns.
 
 ## Compact audit transcript
 
-The Rust `pi-agent-core-rs` host projects its event stream before it hits disk.
+The Rust Tea host projects its event stream before it hits disk.
 The projection retains bounded assistant text and tool diagnostics while
 discarding interactive session snapshots, forks, and thinking blocks. Its gzip
 archive is one session artifact, not a PostgreSQL event log.

@@ -1,4 +1,4 @@
-//! One real `pi-agent-core` run assembled from sealed V2 policy and capabilities.
+//! One real `tea-core` run assembled from sealed V2 policy and capabilities.
 //!
 //! The execution layer has no filesystem or provider-discovery path.  Callers supply the
 //! admitted packet, policy source bytes (normally obtained through a kernel-owned sealed-artifact
@@ -12,19 +12,20 @@ use crate::tool_bridge::{
     ToolName, bind_policy,
 };
 use factory_protocol::ContentDigest;
-use pi_agent_core::agent::Agent;
-use pi_agent_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
-use pi_agent_core::hooks::{
-    AfterToolCall, BeforeToolCall, ContextEnvelope, HookFuture, HookSet, NextTurn,
+use tea_core::agent::Agent;
+use tea_core::error::CoreError;
+use tea_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
+use tea_core::hooks::{
+    AfterToolCall, AgentLoopTurnUpdate, BeforeToolCall, ContextEnvelope, HookFuture, HookSet,
 };
-use pi_agent_core::provider::openai::OpenAiContextHook;
-use pi_agent_core::scheduler::{CancellationToken, ModelProvider};
-use pi_agent_core::state::{RunSnapshot, StopReason};
-use pi_agent_core::tool::{AgentToolResult, ToolCall, ToolRegistry};
-use pi_agent_luau::tool_handler::{
+use tea_providers::openai::OpenAiContextHook;
+use tea_core::scheduler::{CancellationToken, ModelProvider};
+use tea_core::state::{RunSnapshot, StopReason};
+use tea_core::tool::{AgentToolResult, ToolCall, ToolRegistry};
+use tea_luau::tool_handler::{
     CapabilityBindings, HandlerLimits, LuaToolHandler, ToolHandlerInitError, ToolHandlerSpec,
 };
-use pi_agent_luau::{LuaPolicy, LuaPolicyHookSet, PolicyError, PolicyLimits};
+use tea_luau::{LuaPolicy, LuaPolicyHookSet, PolicyError, PolicyLimits};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -232,15 +233,7 @@ impl ExecutionInput {
 
         let bare = BareAgentHost::new(self.admission.clone()).map_err(ExecutionError::Agent)?;
         let snapshot = bare.agent().snapshot();
-        let system_prompt = if policy.system_prompt_append().is_empty() {
-            snapshot.system_prompt
-        } else {
-            format!(
-                "{}\n\n{}",
-                snapshot.system_prompt,
-                policy.system_prompt_append()
-            )
-        };
+        let system_prompt = append_policy_prompt_sections(snapshot.system_prompt, &policy);
         let model = snapshot
             .model
             .ok_or(ExecutionError::Agent(AgentHostError::MissingModel))?;
@@ -291,7 +284,7 @@ impl HookSet for PhaseHookSet {
     fn before_tool_call(
         &self,
         call: &ToolCall,
-    ) -> Result<BeforeToolCall, pi_agent_core::error::HookError> {
+    ) -> Result<BeforeToolCall, tea_core::error::HookError> {
         self.inner.before_tool_call(call)
     }
 
@@ -299,28 +292,28 @@ impl HookSet for PhaseHookSet {
         &self,
         call: &ToolCall,
         result: &AgentToolResult,
-    ) -> Result<AfterToolCall, pi_agent_core::error::HookError> {
+    ) -> Result<AfterToolCall, tea_core::error::HookError> {
         self.inner.after_tool_call(call, result)
     }
 
     fn transform_context(
         &self,
         context: ContextEnvelope,
-    ) -> Result<ContextEnvelope, pi_agent_core::error::HookError> {
+    ) -> Result<ContextEnvelope, tea_core::error::HookError> {
         self.inner.transform_context(context)
     }
 
     fn convert_to_llm(
         &self,
         context: ContextEnvelope,
-    ) -> Result<String, pi_agent_core::error::HookError> {
+    ) -> Result<String, tea_core::error::HookError> {
         self.inner.convert_to_llm(context)
     }
 
     fn should_stop_after_turn(
         &self,
         context: &ContextEnvelope,
-    ) -> Result<bool, pi_agent_core::error::HookError> {
+    ) -> Result<bool, tea_core::error::HookError> {
         Ok(self.command_context.engineering_should_stop_after_turn()
             || self.inner.should_stop_after_turn(context)?)
     }
@@ -328,7 +321,7 @@ impl HookSet for PhaseHookSet {
     fn prepare_next_turn(
         &self,
         context: ContextEnvelope,
-    ) -> Result<NextTurn, pi_agent_core::error::HookError> {
+    ) -> Result<AgentLoopTurnUpdate, tea_core::error::HookError> {
         self.inner.prepare_next_turn(context)
     }
 
@@ -336,7 +329,7 @@ impl HookSet for PhaseHookSet {
         &'a self,
         call: &'a ToolCall,
         context: ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
+        cancellation: tea_core::scheduler::CancellationToken,
     ) -> HookFuture<'a, BeforeToolCall> {
         self.inner
             .before_tool_call_async(call, context, cancellation)
@@ -347,7 +340,7 @@ impl HookSet for PhaseHookSet {
         call: &'a ToolCall,
         result: &'a AgentToolResult,
         context: ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
+        cancellation: tea_core::scheduler::CancellationToken,
     ) -> HookFuture<'a, AfterToolCall> {
         self.inner
             .after_tool_call_async(call, result, context, cancellation)
@@ -356,7 +349,7 @@ impl HookSet for PhaseHookSet {
     fn transform_context_async(
         &self,
         context: ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
+        cancellation: tea_core::scheduler::CancellationToken,
     ) -> HookFuture<'_, ContextEnvelope> {
         self.inner.transform_context_async(context, cancellation)
     }
@@ -364,7 +357,7 @@ impl HookSet for PhaseHookSet {
     fn convert_to_llm_async(
         &self,
         context: ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
+        cancellation: tea_core::scheduler::CancellationToken,
     ) -> HookFuture<'_, String> {
         self.inner.convert_to_llm_async(context, cancellation)
     }
@@ -372,7 +365,7 @@ impl HookSet for PhaseHookSet {
     fn should_stop_after_turn_async<'a>(
         &'a self,
         context: &'a ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
+        cancellation: tea_core::scheduler::CancellationToken,
     ) -> HookFuture<'a, bool> {
         let inner = self
             .inner
@@ -386,8 +379,8 @@ impl HookSet for PhaseHookSet {
     fn prepare_next_turn_async(
         &self,
         context: ContextEnvelope,
-        cancellation: pi_agent_core::scheduler::CancellationToken,
-    ) -> HookFuture<'_, NextTurn> {
+        cancellation: tea_core::scheduler::CancellationToken,
+    ) -> HookFuture<'_, AgentLoopTurnUpdate> {
         self.inner.prepare_next_turn_async(context, cancellation)
     }
 }
@@ -482,12 +475,12 @@ impl PreparedExecution {
         let events = handle.events();
         if let Err(error) = drive_result {
             eprintln!(
-                "factory-pi-host execution failure: engineering_phase={:?} core_phase={:?} event_count={} error={error}",
+                "factory-tea-host execution failure: engineering_phase={:?} core_phase={:?} event_count={} error={error}",
                 self.command_context.engineering_diagnostics(),
                 snapshot.phase,
                 events.len(),
             );
-            if !matches!(error, pi_agent_core::CoreError::Cancelled) {
+            if !matches!(error, CoreError::Cancelled) {
                 return Err(ExecutionError::Core(error));
             }
         }
@@ -648,6 +641,21 @@ fn packet_tool_names(admission: &Admission) -> Result<Vec<ToolName>, ExecutionEr
         .collect()
 }
 
+fn append_policy_prompt_sections(system_prompt: String, policy: &LuaPolicy) -> String {
+    let sections = policy
+        .prompt_sections()
+        .iter()
+        .map(|section| section.content.as_str())
+        .collect::<Vec<_>>();
+    if sections.is_empty() {
+        system_prompt
+    } else if system_prompt.is_empty() {
+        sections.join("\n\n")
+    } else {
+        format!("{system_prompt}\n\n{}", sections.join("\n\n"))
+    }
+}
+
 fn decode_base64(value: &str) -> Option<Vec<u8>> {
     if value.is_empty() || !value.len().is_multiple_of(4) {
         return None;
@@ -722,7 +730,7 @@ pub enum ExecutionError {
     /// Agent construction/admission failed.
     Agent(AgentHostError),
     /// Core refused to start or settle the run.
-    Core(pi_agent_core::CoreError),
+    Core(CoreError),
 }
 
 impl fmt::Display for ExecutionError {
@@ -762,7 +770,7 @@ impl std::error::Error for ExecutionError {}
 /// Build a single factory capability binding for a policy handler set.
 pub fn factory_capability_bindings<C>(
     capability: Arc<FactoryCapability<C>>,
-) -> Result<CapabilityBindings, pi_agent_luau::tool_handler::BindingError>
+) -> Result<CapabilityBindings, tea_luau::tool_handler::BindingError>
 where
     C: FramedDaemon + 'static,
 {
@@ -774,13 +782,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pi_agent_core::hooks::ContextEnvelope;
-    use pi_agent_core::scheduler::CancellationToken;
-    use pi_agent_core::state::{Message, MessageId, RunId, StopReason, TurnId};
-    use pi_agent_luau::tool_handler::{
+    use tea_core::hooks::ContextEnvelope;
+    use tea_core::scheduler::CancellationToken;
+    use tea_core::state::{AgentMessage, MessageId, RunId, StopReason, TurnId};
+    use tea_luau::tool_handler::{
         CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
     };
-    use pi_agent_protocol::JsonValue;
+    use tea_protocol::JsonValue;
 
     struct NoopCapability;
 
@@ -813,7 +821,7 @@ mod tests {
         let source = format!(
             r#"
                 return {{
-                    system_prompt_append = "",
+                    prompt_sections = {{}},
                     tools = {{ {{
                         name = "work_complete",
                         description = "Finish the assignment.",
@@ -840,11 +848,31 @@ mod tests {
     }
 
     #[test]
+    fn policy_prompt_sections_extend_the_sealed_system_prompt_in_declaration_order() {
+        let policy = LuaPolicy::load(
+            r#"
+                return {
+                    prompt_sections = {
+                        { id = "first", content = "First sealed policy section." },
+                        { id = "second", content = "Second sealed policy section." },
+                    },
+                }
+            "#,
+        )
+        .expect("policy prompt sections are valid");
+
+        assert_eq!(
+            append_policy_prompt_sections("Sealed system prompt.".to_owned(), &policy),
+            "Sealed system prompt.\n\nFirst sealed policy section.\n\nSecond sealed policy section."
+        );
+    }
+
+    #[test]
     fn factory_hooks_convert_context_to_provider_json() {
         let converted = factory_hook_set(Arc::new(policy(true)))
             .convert_to_llm(ContextEnvelope {
                 version: 1,
-                messages: vec![Message::User {
+                messages: vec![AgentMessage::User {
                     id: MessageId(1),
                     content: "hello".to_owned(),
                 }],
@@ -852,7 +880,7 @@ mod tests {
             })
             .expect("factory provider hook converts retained messages");
 
-        let messages = pi_agent_protocol::JsonValue::parse(&converted)
+        let messages = tea_protocol::JsonValue::parse(&converted)
             .expect("factory provider context is valid JSON");
         let message = messages
             .as_array()
@@ -917,7 +945,7 @@ mod tests {
         };
         let event = AgentEvent {
             run_id: RunId(1),
-            sequence: pi_agent_core::event::EventSequence(1),
+            sequence: tea_core::event::EventSequence(1),
             kind: AgentEventKind::TurnEnd {
                 turn_id: TurnId(1),
                 reason: StopReason::Stop,
@@ -937,7 +965,7 @@ mod tests {
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
         let hooks = phase_hook_set(
-            Arc::new(pi_agent_core::hooks::NoHooks),
+            Arc::new(tea_core::hooks::NoHooks),
             command_context.clone(),
         );
         let context = ContextEnvelope {

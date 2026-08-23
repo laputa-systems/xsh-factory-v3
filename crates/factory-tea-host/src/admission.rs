@@ -6,7 +6,7 @@ use factory_protocol::{
 };
 pub use factory_settings::DEFAULT_MAX_PACKET_BYTES;
 use miniserde::json;
-use pi_agent_protocol::JsonValue;
+use tea_protocol::JsonValue;
 use std::fmt;
 use std::io::{self, Read};
 

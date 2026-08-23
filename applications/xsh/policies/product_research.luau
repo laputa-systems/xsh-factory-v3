@@ -70,7 +70,7 @@ local allowed = {
 }
 
 return {
-    system_prompt_append = "",
+    prompt_sections = {},
     tools = {
         tool("workspace_read", "Read exact bytes from one path in the assigned workspace.", read_schema, "workspace.read"),
         tool("workspace_search", "Search the assigned workspace with bounded filters.", search_schema, "workspace.search"),
@@ -80,7 +80,7 @@ return {
         tool("product_submit_ticket", "Submit one complete reproducible XSH defect proposal.", product_submit_schema, "product.submit_ticket"),
         tool("work_complete", "Complete this assignment without another proposal.", terminal_schema, "work.complete"),
     },
-    before_tool_call = function(call)
+    before_tool = function(call)
         if allowed[call.name] then
             return "allow"
         end

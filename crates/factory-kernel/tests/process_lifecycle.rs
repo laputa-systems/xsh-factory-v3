@@ -995,7 +995,7 @@ impl Fixture {
                 output_byte_limit: 10_000,
             },
             runtime: RuntimeIdentityV2 {
-                host_executable: AbsoluteHostPath::parse("/opt/factory/factory-pi-host").unwrap(),
+                host_executable: AbsoluteHostPath::parse("/opt/factory/factory-tea-host").unwrap(),
                 core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
                 core_source_digest: digest(700),
                 rust_toolchain: "nightly-2026-07-24".to_owned(),
@@ -1309,7 +1309,7 @@ async fn install_build(store: &KernelStore) -> InstalledBuild {
                 source_digest,
                 binary_digest,
                 schema_identity: SCHEMA_IDENTITY.to_owned(),
-                host_executable_path: "/opt/factory/factory-pi-host".to_owned(),
+                host_executable_path: "/opt/factory/factory-tea-host".to_owned(),
                 core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
                 rust_toolchain: "nightly-2026-07-24".to_owned(),
                 core_source_digest,

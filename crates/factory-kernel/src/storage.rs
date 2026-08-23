@@ -1173,7 +1173,7 @@ impl InstallKernelBuild {
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
             return Err(StoreError::InvalidCommandComponent {
-                field: "pi-agent-core HEAD",
+                field: "Tea HEAD",
             });
         }
         validate_text("Rust toolchain", &self.rust_toolchain, 240)?;

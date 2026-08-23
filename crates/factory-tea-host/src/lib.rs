@@ -3,7 +3,7 @@
 //! This crate is intentionally only an actor adapter.  The daemon remains the authority for
 //! session identity, packet verification, workspace reads, evidence, terminal submission, and
 //! process custody.  The host accepts one admission line on its inherited descriptor, verifies
-//! the sealed packet, and exposes a caller-owned [`pi_agent_core::Agent`] only after an explicit
+//! the sealed packet, and exposes a caller-owned [`tea_core::Agent`] only after an explicit
 //! model provider has been supplied.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -18,7 +18,7 @@ pub use admission::{
     Admission, AdmissionConfig, AdmissionError, DEFAULT_MAX_PACKET_BYTES,
     MAX_ADMISSION_FRAME_BYTES, read_admission, read_admission_from_fd0,
 };
-pub use factory_settings::{PI_AGENT_CORE_SOURCE, RUNTIME_NAME};
+pub use factory_settings::{RUNTIME_NAME, TEA_SOURCE};
 pub use agent_host::{AgentHost, AgentHostError, BareAgentHost, load_luau_policy};
 pub use execution::{
     CostReader, CostSnapshot, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,

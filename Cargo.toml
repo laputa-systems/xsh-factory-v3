@@ -2,14 +2,14 @@
 members = [
   "crates/factory-settings",
   "crates/factory-protocol",
-  "crates/factory-pi-host",
+  "crates/factory-tea-host",
   "crates/factory-kernel",
   "crates/factoryd",
   "crates/factoryctl",
 ]
 default-members = [
   "crates/factory-protocol",
-  "crates/factory-pi-host",
+  "crates/factory-tea-host",
   "crates/factory-kernel",
   "crates/factoryd",
   "crates/factoryctl",

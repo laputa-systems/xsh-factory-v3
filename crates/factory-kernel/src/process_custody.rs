@@ -38,14 +38,14 @@ use thiserror::Error;
 /// application command or credential descriptor.
 /// Immutable process inputs for one Rust agent host.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PiHostSpawnSpec {
+pub struct TeaHostSpawnSpec {
     host_executable: PathBuf,
     working_directory: PathBuf,
     actor_source_fd: RawFd,
     environment: Vec<(OsString, OsString)>,
 }
 
-impl PiHostSpawnSpec {
+impl TeaHostSpawnSpec {
     /// Builds the exact provider-capable Rust host launch contract.
     ///
     /// `admitted_environment` is already selected by typed application and
@@ -135,7 +135,7 @@ impl PiHostSpawnSpec {
             .environment
             .iter_mut()
             .find(|(name, _)| name == OsStr::new("PATH"))
-            .expect("Pi host construction always installs kernel PATH");
+            .expect("Tea host construction always installs kernel PATH");
         *value = path;
         Ok(self)
     }
@@ -229,7 +229,7 @@ impl ProcessSupervisionSpec {
 }
 
 /// Cloneable daemon-side cancellation input. It names no process and cannot
-/// signal arbitrary PIDs; only the owning [`SpawnedPiHost`] consumes it.
+/// signal arbitrary PIDs; only the owning [`SpawnedTeaHost`] consumes it.
 #[derive(Clone, Debug)]
 pub struct ProcessCancellation {
     requested: Arc<AtomicBool>,
@@ -243,7 +243,7 @@ impl ProcessCancellation {
 
 /// One child which the daemon spawned directly and must wait directly.
 #[derive(Debug)]
-pub struct SpawnedPiHost {
+pub struct SpawnedTeaHost {
     child: Child,
     custody: ProcessCustodyV2,
     started: Instant,
@@ -255,7 +255,7 @@ pub struct SpawnedPiHost {
     stderr_capture: JoinHandle<Result<u64, ProcessCustodyError>>,
 }
 
-impl SpawnedPiHost {
+impl SpawnedTeaHost {
     #[must_use]
     pub const fn custody(&self) -> ProcessCustodyV2 {
         self.custody
@@ -365,11 +365,11 @@ pub struct SupervisedProcessOutcome {
 /// socket becomes child descriptor zero; the host reads the admission frame
 /// before constructing an agent and then uses the same full-duplex descriptor
 /// for narrow tools. The caller retains the socket's server end.
-pub fn spawn_pi_host(
-    spec: &PiHostSpawnSpec,
+pub fn spawn_tea_host(
+    spec: &TeaHostSpawnSpec,
     actor_client: StdUnixStream,
     supervision: ProcessSupervisionSpec,
-) -> Result<SpawnedPiHost, ProcessCustodyError> {
+) -> Result<SpawnedTeaHost, ProcessCustodyError> {
     let mut command = Command::new(spec.executable());
     command.args(spec.arguments());
     command.current_dir(spec.working_directory());
@@ -383,7 +383,7 @@ pub fn spawn_pi_host(
 fn spawn_owned_command(
     mut command: Command,
     supervision: ProcessSupervisionSpec,
-) -> Result<SpawnedPiHost, ProcessCustodyError> {
+) -> Result<SpawnedTeaHost, ProcessCustodyError> {
     let stdout_file = create_capture_file(&supervision.stdout_path)?;
     let stderr_file = create_capture_file(&supervision.stderr_path)?;
     command.stdout(Stdio::piped());
@@ -417,7 +417,7 @@ fn spawn_owned_command(
         supervision.stderr_byte_limit,
         Arc::clone(&stderr_limit_exceeded),
     );
-    Ok(SpawnedPiHost {
+    Ok(SpawnedTeaHost {
         child,
         custody: ProcessCustodyV2 {
             pid,
@@ -650,9 +650,9 @@ mod tests {
         command
     }
 
-    fn spec(environment: Vec<(OsString, OsString)>) -> PiHostSpawnSpec {
-        PiHostSpawnSpec::new(
-            PathBuf::from("/factory/factory-pi-host"),
+    fn spec(environment: Vec<(OsString, OsString)>) -> TeaHostSpawnSpec {
+        TeaHostSpawnSpec::new(
+            PathBuf::from("/factory/factory-tea-host"),
             PathBuf::from("/work/repository"),
             0,
             environment,
@@ -666,7 +666,7 @@ mod tests {
             OsString::from("ANTHROPIC_API_KEY"),
             OsString::from("secret"),
         )]);
-        assert_eq!(spec.executable(), Path::new("/factory/factory-pi-host"));
+        assert_eq!(spec.executable(), Path::new("/factory/factory-tea-host"));
         assert!(spec.arguments().is_empty());
         assert_eq!(spec.working_directory(), Path::new("/work/repository"));
         assert_eq!(spec.actor_source_fd(), 0);
@@ -685,8 +685,8 @@ mod tests {
 
     #[test]
     fn rejects_relative_paths_non_stdin_descriptors_and_environment_ambiguity() {
-        let relative = PiHostSpawnSpec::new(
-            PathBuf::from("factory-pi-host"),
+        let relative = TeaHostSpawnSpec::new(
+            PathBuf::from("factory-tea-host"),
             PathBuf::from("/work"),
             0,
             Vec::new(),
@@ -698,8 +698,8 @@ mod tests {
             })
         ));
 
-        let invalid_fd = PiHostSpawnSpec::new(
-            PathBuf::from("/factory-pi-host"),
+        let invalid_fd = TeaHostSpawnSpec::new(
+            PathBuf::from("/factory-tea-host"),
             PathBuf::from("/work"),
             -1,
             Vec::new(),
@@ -711,8 +711,8 @@ mod tests {
             })
         ));
 
-        let non_stdin_fd = PiHostSpawnSpec::new(
-            PathBuf::from("/factory-pi-host"),
+        let non_stdin_fd = TeaHostSpawnSpec::new(
+            PathBuf::from("/factory-tea-host"),
             PathBuf::from("/work"),
             3,
             Vec::new(),
@@ -722,8 +722,8 @@ mod tests {
             Err(ProcessCustodyError::ActorDescriptorMustBeStdin { actor_source_fd: 3 })
         ));
 
-        let replaced = PiHostSpawnSpec::new(
-            PathBuf::from("/factory-pi-host"),
+        let replaced = TeaHostSpawnSpec::new(
+            PathBuf::from("/factory-tea-host"),
             PathBuf::from("/work"),
             0,
             vec![(OsString::from("NO_COLOR"), OsString::from("0"))],
@@ -737,15 +737,15 @@ mod tests {
 
     #[test]
     fn assignment_spawn_spec_has_no_ambient_runtime_state() {
-        let spec = PiHostSpawnSpec::new_for_assignment(
-            PathBuf::from("/factory/factory-pi-host"),
+        let spec = TeaHostSpawnSpec::new_for_assignment(
+            PathBuf::from("/factory/factory-tea-host"),
             PathBuf::from("/work/repository"),
             0,
             Vec::new(),
         )
         .expect("assignment spawn spec");
 
-        assert_eq!(spec.executable(), Path::new("/factory/factory-pi-host"));
+        assert_eq!(spec.executable(), Path::new("/factory/factory-tea-host"));
         assert!(spec.arguments().is_empty());
         assert!(
             !spec.environment().iter().any(|(name, _)| {

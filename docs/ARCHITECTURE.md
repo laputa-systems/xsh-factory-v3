@@ -7,7 +7,7 @@ policy belong only in `applications/xsh` and its templates.
 ```text
 application source -> sealed application revision -> assignment packet
                                                        |
-Rust pi-agent-core host -> local framed descriptor -> Rust kernel -> PostgreSQL + CAS
+Rust Tea host -> local framed descriptor -> Rust kernel -> PostgreSQL + CAS
                                                        |
                                                 isolated ../xsh worktrees
                                                        |
@@ -46,12 +46,12 @@ replacement boundary, not a campaign boundary; independent authorities are
 not implicitly mergeable because their IDs and CAS provenance are local to the
 qualified runtime/evidence set.
 
-`factory-pi-host` validates closed host shapes, adapts the sealed assignment
-packet to `pi-agent-core-rs`, and speaks the framed kernel descriptor. It has
+`factory-tea-host` validates closed host shapes, adapts the sealed assignment
+packet to Tea, and speaks the framed kernel descriptor. It has
 no independent lifecycle authority.
 
 The active actor runtime is one qualified Rust executable built against the
-direct local `/Users/josh/d/pi-agent-core-rs` checkout and the pinned
+direct local `/Users/josh/d/tea-copy` checkout and the pinned
 `nightly-2026-07-24` toolchain. The installed-runtime receipt binds the host
 binary, complete host source graph, core `Cargo.lock`, exact core `HEAD`,
 complete core source inventory, and their digests. Qualification refuses a
@@ -80,7 +80,7 @@ mutable application source at actor runtime.
 Runtime replacement is explicit. Deployment changes are made with the daemon
 stopped, then begin from a fresh database and runtime root; prior runtime state
 is not parsed, migrated, recovered, or dual-dispatched. The provider-free
-`pi-agent-core-rs-acceptance` gate proves this Rust runtime, the V2 bundle,
+`tea-acceptance` gate proves this Rust runtime, the V2 bundle,
 packet and policy boundaries, terminal evidence, and the full candidate-to-
 delivery path before paid work is separately authorized.
 

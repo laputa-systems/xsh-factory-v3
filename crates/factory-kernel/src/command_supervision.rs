@@ -1,6 +1,6 @@
 //! Bounded, deterministic custody for application-declared local commands.
 //!
-//! This module is deliberately separate from `process_custody`: Pi hosts have
+//! This module is deliberately separate from `process_custody`: Tea hosts have
 //! an inherited authority descriptor and a durable session lifecycle, while a
 //! reproducer or validation command is an application-declared deterministic
 //! child. Both paths nevertheless use the same important Unix custody shape:

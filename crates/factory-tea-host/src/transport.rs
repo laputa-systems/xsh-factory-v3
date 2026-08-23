@@ -135,7 +135,7 @@ where
     /// Allocate a process-local request ID for callers building typed RPC payloads.
     pub fn next_request_id(&mut self) -> String {
         self.next_request_id = self.next_request_id.saturating_add(1);
-        format!("factory-pi-host-request-{}", self.next_request_id)
+        format!("factory-tea-host-request-{}", self.next_request_id)
     }
 
     /// Validate a response envelope after a typed operation has been decoded by the caller.

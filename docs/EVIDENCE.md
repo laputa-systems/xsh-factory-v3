@@ -27,7 +27,7 @@ documented missing capability, not permission to delete runtime data broadly.
 
 ## Session transcript projection
 
-The Rust Pi agent implementation emits a compact audit projection before the
+The Rust Tea agent implementation emits a compact audit projection before the
 host writes `session.ndjson`. The host streams it and seals one gzip archive at
 terminal state. The member uses the `flate2` Rust backend (`miniz_oxide`) for
 repetitive audit JSON and falls back to a stored block only when compression

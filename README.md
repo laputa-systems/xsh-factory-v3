@@ -16,9 +16,9 @@ sandbox. See [trust assumptions](docs/trust-assumptions.md).
 
 ## Local setup
 
-Factory links directly to the local `pi-agent-core-rs` checkout at
-`/Users/josh/d/pi-agent-core-rs` until that project is published. Factory never
-uses any legacy actor runtime or package-registry runtime.
+Factory links directly to the frozen local Tea checkout at
+`/Users/josh/d/tea-copy`. Factory never uses a package-registry runtime or
+discovers agent code from the environment.
 Populate both Cargo workspaces once:
 
 ```sh
@@ -35,7 +35,7 @@ make lint
 The first full provider-free gate is:
 
 ```sh
-make pi-agent-core-rs-acceptance
+make tea-acceptance
 ```
 
 `make factoryd-serve` keeps the OpenRouter credential out of the daemon

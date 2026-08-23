@@ -21,14 +21,14 @@ fn sealed_fixture_round_trips_and_rejects_noncanonical_bytes() {
     let packet = parse_assignment_packet_v2(raw.as_bytes()).expect("sealed fixture");
     assert_eq!(
         packet.packet_digest,
-        "9deb7ece6fd742834233baf9e0800e041b44423994e7c3cddc5d33fa43a4fc0d"
+        "b23f71d5acd39a09da0fe58373c5c6918f1e04d3c1bbcf84901b8c16cdaf1778"
     );
     assert!(parse_assignment_packet_v2(format!(" {raw}").as_bytes()).is_err());
     assert!(
         parse_assignment_packet_v2(
             raw.replace(
-                "\"packet_digest\":\"9deb7ece",
-                "\"unknown\":1,\"packet_digest\":\"9deb7ece"
+                "\"packet_digest\":\"b23f71d5",
+                "\"unknown\":1,\"packet_digest\":\"b23f71d5"
             )
             .as_bytes()
         )

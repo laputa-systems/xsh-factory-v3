@@ -1822,7 +1822,7 @@ pub fn parse_assignment_packet_v2(payload: &[u8]) -> Result<AssignmentPacketWire
 }
 
 /// Verifies both the packet's internal seal and the daemon's out-of-band
-/// attestation digest before a host may construct Pi.
+/// attestation digest before a host may construct a Tea agent.
 pub fn verify_assignment_packet_v2(
     payload: &[u8],
     expected_digest: &str,

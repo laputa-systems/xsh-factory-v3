@@ -475,7 +475,7 @@ pub enum ActorDisconnect {
 /// Operator client. It receives only an explicit socket path and cannot open a
 /// database connection. Architect mutation methods are typed separately from
 /// actor protocol calls and can therefore be constructed only by the local
-/// Grand Architect client, never by a Pi host SDK facade.
+/// Grand Architect client, never by a Tea host SDK facade.
 #[derive(Clone, Debug)]
 pub struct OperatorClient {
     socket_path: PathBuf,

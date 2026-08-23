@@ -72,12 +72,12 @@ pub const MAX_SOURCE_GRAPH_FILES: usize = 1_024;
 pub const MAX_HOST_SOURCE_GRAPH_FILES: usize = 256;
 pub const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
 pub const MAX_RECEIPT_BYTES: usize = 256 * 1024;
-pub const PI_AGENT_CORE_SOURCE: &str = "/Users/josh/d/pi-agent-core-rs";
+pub const TEA_SOURCE: &str = "/Users/josh/d/tea-copy";
 pub const OPENROUTER_PROVIDER: &str = "openrouter";
-pub const RUST_HOST_IDENTITY: &str = "factory-pi-host-rust-v1";
-pub const RUNTIME_NAME: &str = "factory-pi-host";
+pub const RUST_HOST_IDENTITY: &str = "factory-tea-host-rust-v1";
+pub const RUNTIME_NAME: &str = "factory-tea-host";
 pub const RUST_TOOLCHAIN: &str = "nightly-2026-07-24";
-pub const PI_AGENT_CORE_HEAD_MAX_BYTES: usize = 128;
+pub const TEA_HEAD_MAX_BYTES: usize = 128;
 
 // Fixed PostgreSQL pool bounds.
 pub const STORAGE_MAX_CONNECTIONS: u32 = 4;

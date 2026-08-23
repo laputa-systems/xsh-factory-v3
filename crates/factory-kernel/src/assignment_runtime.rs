@@ -414,7 +414,7 @@ pub async fn materialize_and_launch_assignment(
             ));
         }
 
-        let spawn = installed.pi_host_spawn_spec_for_provider(
+        let spawn = installed.tea_host_spawn_spec_for_provider(
             &application.profile.model.provider,
             resources.workspace.path().to_owned(),
             0,

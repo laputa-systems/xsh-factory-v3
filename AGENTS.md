@@ -41,7 +41,7 @@ For a paid-cycle request, the Grand Architect must:
   with `make paid-cycle-verify`.
 
 After qualification and daemon start, treat the Factory source graph, selected
-build, installed Pi host, application revision, and runtime root as one frozen
+build, installed Tea host, application revision, and runtime root as one frozen
 campaign input. A Factory commit, dependency change, rebuild, or runtime
 replacement invalidates that qualification; stop before spending, rebuild and
 reinitialize the runtime, then re-read live identities before admission.
@@ -50,7 +50,7 @@ An explicit request to “run a fresh paid cycle” authorizes one new campaign
 after a prior campaign has failed, stopped without a ticket, or produced no
 delivery. It must use a fresh client command ID and current live inputs; it is
 not an idempotent retry. The office does not authorize direct edits to
-`../xsh`, direct Pi or actor launches, database/CAS/worktree manipulation,
+`../xsh`, direct Tea or actor launches, database/CAS/worktree manipulation,
 remote Git pushes, bypasses of cost/evidence/validation/clean-checkout/
 non-fast-forward guards, or another campaign without another explicit fresh
 cycle request. A campaign admission is not a shipped result: the durable proof

@@ -3,7 +3,7 @@
 ## Grand Architect qualification
 
 `make lint` is the single aggressive source qualification before the Grand
-Architect commits factory changes. It tests the local `pi-agent-core-rs`
+Architect commits factory changes. It tests the frozen local Tea
 workspace, formats Rust source, applies Rust clippy fixes, checks the Factory
 workspace, and runs its unit/integration tests without provider calls or
 remote Git. Use focused `cargo test` while changing one boundary; do not use
@@ -11,7 +11,7 @@ remote Git. Use focused `cargo test` while changing one boundary; do not use
 
 The Rust agent core has focused event-observer and trace coverage in its own
 workspace. The Factory host has projection, framed-protocol, and policy bridge
-coverage in `crates/factory-pi-host`.
+coverage in `crates/factory-tea-host`.
 
 ## PostgreSQL and SQLx checks
 
@@ -31,7 +31,7 @@ migration.
 
 ## Complete provider-free acceptance
 
-`make pi-agent-core-rs-acceptance` composes ordinary checks, PostgreSQL
+`make tea-acceptance` composes ordinary checks, PostgreSQL
 authority, candidate/delivery transitions, the generic application-bundle
 contract, generic vertical flow, and backup/restore qualification. It requires
 distinct externally created disposable databases and explicit backup variables;

@@ -1,11 +1,12 @@
-//! Explicit `pi-agent-core` construction for one admitted assignment.
+//! Explicit `tea-core` construction for one admitted assignment.
 
 use crate::Admission;
-use pi_agent_core::RunHandle;
-use pi_agent_core::agent::Agent;
-use pi_agent_core::scheduler::ModelProvider;
-use pi_agent_core::state::{ModelDescriptor, SerializedJson, ThinkingLevel};
-use pi_agent_luau::{LuaPolicy, PolicyError, PolicyLimits};
+use tea_core::agent::Agent;
+use tea_core::error::CoreError;
+use tea_core::run::RunHandle;
+use tea_core::scheduler::ModelProvider;
+use tea_core::state::{ModelDescriptor, SerializedJson, ThinkingLevel};
+use tea_luau::{LuaPolicy, PolicyError, PolicyLimits};
 use std::fmt;
 use std::sync::Arc;
 
@@ -156,7 +157,7 @@ pub enum AgentHostError {
     /// The packet's thinking level was not one of the closed core values.
     ThinkingLevel(String),
     /// The agent core rejected a run transition.
-    Core(pi_agent_core::CoreError),
+    Core(CoreError),
     /// The verified host attempted to bind a provider without a selected model.
     MissingModel,
 }
@@ -190,7 +191,7 @@ fn parse_thinking_level(value: &str) -> Result<ThinkingLevel, AgentHostError> {
         "high" => Ok(ThinkingLevel::High),
         "xhigh" => Ok(ThinkingLevel::XHigh),
         "max" => Ok(ThinkingLevel::Max),
-        "default" => Ok(ThinkingLevel::Default),
+        "default" => Ok(ThinkingLevel::Off),
         other => Err(AgentHostError::ThinkingLevel(other.to_owned())),
     }
 }

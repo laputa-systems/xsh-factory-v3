@@ -1,11 +1,11 @@
-//! Installed Rust host and `pi-agent-core-rs` identity at the
+//! Installed Rust host and Tea source identity at the
 //! session-launch boundary.
 //!
 //! The assignment packet names qualified runtime facts, but a packet is not
 //! proof that those bytes still exist on this host. This module retains a
 //! finite installed manifest and rechecks it immediately before a host is
 //! spawned. The host is one exact Rust executable; its dependencies are Cargo
-//! source material from the hard-coded local `pi-agent-core-rs` checkout.
+//! source material from the hard-coded local Tea source checkout.
 //! Qualification refuses a dirty checkout and records its exact `HEAD` plus a
 //! deterministic source inventory. No interpreter, ambient home, or provider
 //! request is involved.
@@ -29,8 +29,8 @@ use factory_protocol::{
 };
 use factory_settings::{
     MAX_HOST_SOURCE_GRAPH_FILES, MAX_RECEIPT_BYTES, MAX_SOURCE_GRAPH_FILES,
-    MAX_VERSION_OUTPUT_BYTES, OPENROUTER_PROVIDER, PI_AGENT_CORE_HEAD_MAX_BYTES,
-    PI_AGENT_CORE_SOURCE, RUST_HOST_IDENTITY, RUST_TOOLCHAIN,
+    MAX_VERSION_OUTPUT_BYTES, OPENROUTER_PROVIDER, RUST_HOST_IDENTITY, RUST_TOOLCHAIN,
+    TEA_HEAD_MAX_BYTES, TEA_SOURCE,
 };
 use thiserror::Error;
 
@@ -40,15 +40,15 @@ use crate::{
         ExactExecutable,
     },
     git::{GitCustody, GitCustodyError},
-    process_custody::{PiHostSpawnSpec, ProcessCustodyError},
+    process_custody::{ProcessCustodyError, TeaHostSpawnSpec},
     session_runtime::{RuntimeVerificationError, SessionRuntimeVerifier},
 };
 
-/// The Pi host root is intentionally small and closed. Qualification inventories
+/// The Tea host root is intentionally small and closed. Qualification inventories
 /// every local file below it, so a future local import cannot be omitted from
 /// the packet-visible source graph.
 const SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-installed-source-graph-v1\0";
-const PI_AGENT_CORE_SOURCE_DOMAIN: &[u8] = b"factory-v3-pi-agent-core-source-v1\0";
+const TEA_SOURCE_DOMAIN: &[u8] = b"factory-v3-tea-source-v1\0";
 const KERNEL_SOURCE_GRAPH_DOMAIN: &[u8] = b"factory-v3-kernel-source-graph-v1\0";
 const KERNEL_BUILD_DOMAIN: &[u8] = b"factory-v3-kernel-build-v1\0";
 const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-receipt-rust-host-v1\0";
@@ -62,25 +62,25 @@ const INSTALLED_BUILD_RECEIPT_DOMAIN: &[u8] = b"factory-v3-installed-build-recei
 /// metadata is consulted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledRuntimeQualification {
-    /// Exact `factory-pi-host` executable selected by stopped-daemon
+    /// Exact `factory-tea-host` executable selected by stopped-daemon
     /// installation. The path must resolve to a regular executable file.
     pub host_executable: PathBuf,
     pub host_source_root: PathBuf,
     pub host_source_files: Vec<RuntimeRelativePath>,
 }
 
-/// Exact local source identity of `pi-agent-core-rs`. The checkout is a
+/// Exact local source identity of Tea. The checkout is a
 /// temporary bootstrap provenance mechanism and is intentionally fixed to one
 /// absolute path until the project is published and can be pinned normally.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PiAgentCoreQualification {
+pub struct TeaQualification {
     root: PathBuf,
     head: String,
     files: Vec<InstalledSourceFile>,
     source_digest: ContentDigest,
 }
 
-impl PiAgentCoreQualification {
+impl TeaQualification {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
@@ -696,13 +696,13 @@ impl InstalledKernelBuildReceiptV2 {
     /// runtime. `credential_environment` comes from a Vault-backed resolver
     /// only at spawn time; this receipt compares its name with configuration
     /// but never reads, stores, logs, or returns its value.
-    pub fn pi_host_spawn_spec_for_provider(
+    pub fn tea_host_spawn_spec_for_provider(
         &self,
         provider: &str,
         working_directory: PathBuf,
         actor_source_fd: RawFd,
         credential_environment: (OsString, OsString),
-    ) -> Result<PiHostSpawnSpec, InstalledRuntimeError> {
+    ) -> Result<TeaHostSpawnSpec, InstalledRuntimeError> {
         let _ = self.runtime_identity_for_provider(provider)?;
         if credential_environment.0 != OsStr::new(&self.openrouter_credential_environment) {
             return Err(InstalledRuntimeError::CredentialEnvironmentMismatch);
@@ -710,7 +710,7 @@ impl InstalledKernelBuildReceiptV2 {
         if credential_environment.1.is_empty() {
             return Err(InstalledRuntimeError::CredentialEnvironmentMissing);
         }
-        let spawn = PiHostSpawnSpec::new_for_assignment(
+        let spawn = TeaHostSpawnSpec::new_for_assignment(
             self.runtime.host_executable.clone(),
             working_directory,
             actor_source_fd,
@@ -898,7 +898,7 @@ impl SessionRuntimeVerifier for InstalledKernelBuildReceiptV2 {
     fn verify_runtime(
         &self,
         packet: &AssignmentPacketV2,
-        spawn: &PiHostSpawnSpec,
+        spawn: &TeaHostSpawnSpec,
     ) -> Result<(), RuntimeVerificationError> {
         self.runtime
             .verify_installed_material()
@@ -929,9 +929,9 @@ pub struct InstalledRuntimeManifest {
     source_graph_digest: ContentDigest,
     host_binary_digest: ContentDigest,
     core_lock_digest: ContentDigest,
-    /// Exact local `pi-agent-core-rs` checkout qualification. This is part of
+    /// Exact local Tea checkout qualification. This is part of
     /// the installed runtime identity and is rechecked before every launch.
-    pi_agent_core: PiAgentCoreQualification,
+    tea: TeaQualification,
 }
 
 impl InstalledRuntimeManifest {
@@ -958,21 +958,21 @@ impl InstalledRuntimeManifest {
             &qualification.host_executable,
         )?;
         let host_source_root =
-            canonical_directory("Pi host source root", &qualification.host_source_root)?;
+            canonical_directory("Tea host source root", &qualification.host_source_root)?;
         // The host executable is the sole launch artifact. Source bytes are
         // provenance only and are sealed independently from the executable.
         let (source_files, source_graph_digest) =
             seal_source_graph(&host_source_root, qualification.host_source_files)?;
-        let pi_agent_core = qualify_pi_agent_core()?;
+        let tea = qualify_tea()?;
         // The host identity is a closed Rust-host marker, not a process probe.
         let host_identity = RUST_HOST_IDENTITY.to_owned();
         let host_identity_output = HostIdentityOutput {
             stdout: host_identity.as_bytes().to_vec(),
             stderr: Vec::new(),
         };
-        let core_lock = pi_agent_core.root.join("Cargo.lock");
+        let core_lock = tea.root.join("Cargo.lock");
         let host_binary_digest = digest_regular_file("Rust host executable", &host_executable)?;
-        let core_lock_digest = digest_regular_file("pi-agent-core Cargo.lock", &core_lock)?;
+        let core_lock_digest = digest_regular_file("Tea Cargo.lock", &core_lock)?;
         let manifest = Self {
             host_executable,
             host_identity,
@@ -982,7 +982,7 @@ impl InstalledRuntimeManifest {
             source_graph_digest,
             host_binary_digest,
             core_lock_digest,
-            pi_agent_core,
+            tea,
         };
         manifest.verify_installed_material()?;
         Ok(manifest)
@@ -1012,7 +1012,7 @@ impl InstalledRuntimeManifest {
 
     #[must_use]
     pub fn core_root(&self) -> &Path {
-        &self.pi_agent_core.root
+        &self.tea.root
     }
 
     #[must_use]
@@ -1054,8 +1054,8 @@ impl InstalledRuntimeManifest {
                 })?;
         let identity = RuntimeIdentityV2 {
             host_executable,
-            core_head: self.pi_agent_core.head.clone(),
-            core_source_digest: self.pi_agent_core.source_digest,
+            core_head: self.tea.head.clone(),
+            core_source_digest: self.tea.source_digest,
             rust_toolchain: RUST_TOOLCHAIN.to_owned(),
             credential_env: match credential {
                 CredentialDescriptorV2::Environment { name } => name,
@@ -1085,7 +1085,7 @@ impl InstalledRuntimeManifest {
             bytes,
             u32::try_from(self.source_files.len()).map_err(|_| {
                 InstalledRuntimeError::ReceiptInvalid {
-                    reason: "Pi host source graph exceeds receipt bound",
+                    reason: "Tea host source graph exceeds receipt bound",
                 }
             })?,
         );
@@ -1096,21 +1096,21 @@ impl InstalledRuntimeManifest {
         append_receipt_bytes(bytes, &self.source_graph_digest.as_bytes())?;
         append_receipt_bytes(bytes, &self.host_binary_digest.as_bytes())?;
         append_receipt_bytes(bytes, &self.core_lock_digest.as_bytes())?;
-        append_receipt_path(bytes, &self.pi_agent_core.root)?;
-        append_receipt_text(bytes, &self.pi_agent_core.head)?;
+        append_receipt_path(bytes, &self.tea.root)?;
+        append_receipt_text(bytes, &self.tea.head)?;
         append_receipt_u32(
             bytes,
-            u32::try_from(self.pi_agent_core.files.len()).map_err(|_| {
+            u32::try_from(self.tea.files.len()).map_err(|_| {
                 InstalledRuntimeError::ReceiptInvalid {
-                    reason: "pi-agent-core source graph exceeds receipt bound",
+                    reason: "Tea source graph exceeds receipt bound",
                 }
             })?,
         );
-        for file in &self.pi_agent_core.files {
+        for file in &self.tea.files {
             append_receipt_text(bytes, file.relative_path.as_str())?;
             append_receipt_bytes(bytes, &file.digest.as_bytes())?;
         }
-        append_receipt_bytes(bytes, &self.pi_agent_core.source_digest.as_bytes())
+        append_receipt_bytes(bytes, &self.tea.source_digest.as_bytes())
     }
 
     fn decode_receipt_fields(
@@ -1129,22 +1129,22 @@ impl InstalledRuntimeManifest {
                 reason: "Rust host identity output exceeds receipt bound",
             });
         }
-        let host_source_root = cursor.absolute_path("Pi host source root")?;
+        let host_source_root = cursor.absolute_path("Tea host source root")?;
         let source_count =
             usize::try_from(cursor.u32()?).map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host source count cannot be represented",
+                reason: "Tea host source count cannot be represented",
             })?;
         if source_count == 0 || source_count > MAX_SOURCE_GRAPH_FILES {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host source graph count is invalid",
+                reason: "Tea host source graph count is invalid",
             });
         }
         let mut source_files = Vec::with_capacity(source_count);
         for _ in 0..source_count {
             let relative_path =
-                RuntimeRelativePath::parse(cursor.bounded_text("Pi host source file", 4_096)?)
+                RuntimeRelativePath::parse(cursor.bounded_text("Tea host source file", 4_096)?)
                     .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                        reason: "Pi host source file path is invalid",
+                        reason: "Tea host source file path is invalid",
                     })?;
             source_files.push(InstalledSourceFile {
                 relative_path,
@@ -1155,31 +1155,31 @@ impl InstalledRuntimeManifest {
         let source_graph_digest = cursor.digest()?;
         if source_graph_digest_for(&source_files)? != source_graph_digest {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "Pi host source graph digest does not match receipt files",
+                reason: "Tea host source graph digest does not match receipt files",
             });
         }
         let host_binary_digest = cursor.digest()?;
         let core_lock_digest = cursor.digest()?;
         validate_text("Rust host identity", &host_identity)?;
-        let core_root = cursor.absolute_path("pi-agent-core checkout root")?;
-        let core_head = cursor.bounded_text("pi-agent-core HEAD", PI_AGENT_CORE_HEAD_MAX_BYTES)?;
-        validate_text("pi-agent-core HEAD", &core_head)?;
+        let core_root = cursor.absolute_path("Tea checkout root")?;
+        let core_head = cursor.bounded_text("Tea HEAD", TEA_HEAD_MAX_BYTES)?;
+        validate_text("Tea HEAD", &core_head)?;
         let core_count =
             usize::try_from(cursor.u32()?).map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                reason: "pi-agent-core source count cannot be represented",
+                reason: "Tea source count cannot be represented",
             })?;
         if core_count == 0 || core_count > MAX_SOURCE_GRAPH_FILES {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "pi-agent-core source graph count is invalid",
+                reason: "Tea source graph count is invalid",
             });
         }
         let mut core_files = Vec::with_capacity(core_count);
         for _ in 0..core_count {
             let relative_path = RuntimeRelativePath::parse(
-                cursor.bounded_text("pi-agent-core source file", 4_096)?,
+                cursor.bounded_text("Tea source file", 4_096)?,
             )
             .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                reason: "pi-agent-core source file path is invalid",
+                reason: "Tea source file path is invalid",
             })?;
             core_files.push(InstalledSourceFile {
                 relative_path,
@@ -1188,9 +1188,9 @@ impl InstalledRuntimeManifest {
         }
         let core_files = normalize_host_source_files(core_files)?;
         let core_source_digest = cursor.digest()?;
-        if pi_agent_core_source_digest(&core_files)? != core_source_digest {
+        if tea_source_digest(&core_files)? != core_source_digest {
             return Err(InstalledRuntimeError::ReceiptInvalid {
-                reason: "pi-agent-core source graph digest does not match receipt files",
+                reason: "Tea source graph digest does not match receipt files",
             });
         }
         Ok(Self {
@@ -1202,7 +1202,7 @@ impl InstalledRuntimeManifest {
             source_graph_digest,
             host_binary_digest,
             core_lock_digest,
-            pi_agent_core: PiAgentCoreQualification {
+            tea: TeaQualification {
                 root: core_root,
                 head: core_head,
                 files: core_files,
@@ -1214,11 +1214,11 @@ impl InstalledRuntimeManifest {
     /// Rechecks every mutable installed file and the exact local core
     /// checkout. This function is provider-free and never starts the host.
     pub fn verify_installed_material(&self) -> Result<(), InstalledRuntimeError> {
-        if canonical_directory("Pi host source root", &self.host_source_root)?
+        if canonical_directory("Tea host source root", &self.host_source_root)?
             != self.host_source_root
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "canonical Pi host source-root path changed",
+                evidence: "canonical Tea host source-root path changed",
             });
         }
         if canonical_executable_file("Rust agent host executable", &self.host_executable)?
@@ -1235,15 +1235,15 @@ impl InstalledRuntimeManifest {
                 evidence: "Rust agent host executable digest changed",
             });
         }
-        if canonical_directory("pi-agent-core checkout", &self.pi_agent_core.root)?
-            != self.pi_agent_core.root
+        if canonical_directory("Tea checkout", &self.tea.root)?
+            != self.tea.root
             || digest_regular_file(
-                "pi-agent-core Cargo.lock",
-                &self.pi_agent_core.root.join("Cargo.lock"),
+                "Tea Cargo.lock",
+                &self.tea.root.join("Cargo.lock"),
             )? != self.core_lock_digest
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "pi-agent-core lockfile identity changed",
+                evidence: "Tea lockfile identity changed",
             });
         }
         let source_paths = self
@@ -1255,7 +1255,7 @@ impl InstalledRuntimeManifest {
             seal_source_graph(&self.host_source_root, source_paths)?;
         if source_files != self.source_files || source_graph_digest != self.source_graph_digest {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Pi host source graph digest changed",
+                evidence: "Tea host source graph digest changed",
             });
         }
         if self.host_identity != RUST_HOST_IDENTITY
@@ -1266,12 +1266,12 @@ impl InstalledRuntimeManifest {
                 evidence: "Rust host identity changed",
             });
         }
-        let observed_core = qualify_pi_agent_core()?;
-        if observed_core != self.pi_agent_core
-            || observed_core.source_digest != self.pi_agent_core.source_digest
+        let observed_core = qualify_tea()?;
+        if observed_core != self.tea
+            || observed_core.source_digest != self.tea.source_digest
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "pi-agent-core checkout HEAD or source identity changed",
+                evidence: "Tea checkout HEAD or source identity changed",
             });
         }
         Ok(())
@@ -1312,11 +1312,11 @@ impl InstalledRuntimeManifest {
     fn verify_runtime_identity(
         &self,
         packet: &AssignmentPacketV2,
-        spawn: &PiHostSpawnSpec,
+        spawn: &TeaHostSpawnSpec,
     ) -> Result<(), InstalledRuntimeError> {
         if packet.runtime.host_executable.as_str() != self.host_executable.to_string_lossy()
-            || packet.runtime.core_head != self.pi_agent_core.head
-            || packet.runtime.core_source_digest != self.pi_agent_core.source_digest
+            || packet.runtime.core_head != self.tea.head
+            || packet.runtime.core_source_digest != self.tea.source_digest
             || packet.runtime.rust_toolchain != RUST_TOOLCHAIN
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
@@ -1330,7 +1330,7 @@ impl InstalledRuntimeManifest {
             || spawn.actor_source_fd() != 0
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
-                evidence: "Pi host spawn specification differs from the installed assignment runtime",
+                evidence: "Tea host spawn specification differs from the installed assignment runtime",
             });
         }
 
@@ -1358,14 +1358,14 @@ fn seal_source_graph(
             });
         }
         let path = source_root.join(relative_path.as_str());
-        let canonical = canonical_regular_file("Pi host source file", &path)?;
+        let canonical = canonical_regular_file("Tea host source file", &path)?;
         if !canonical.starts_with(source_root) {
             return Err(InstalledRuntimeError::SourceFileOutsideRoot {
                 path: relative_path.as_str().to_owned(),
             });
         }
         files.push(InstalledSourceFile {
-            digest: digest_regular_file("Pi host source file", &canonical)?,
+            digest: digest_regular_file("Tea host source file", &canonical)?,
             relative_path,
         });
     }
@@ -1398,7 +1398,7 @@ fn source_graph_digest_for(
 ) -> Result<ContentDigest, InstalledRuntimeError> {
     if files.is_empty() || files.len() > MAX_HOST_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::ReceiptInvalid {
-            reason: "Pi host source graph count is invalid",
+            reason: "Tea host source graph count is invalid",
         });
     }
     let mut hasher = blake3::Hasher::new();
@@ -1416,14 +1416,14 @@ fn source_graph_digest_for(
     Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
 }
 
-fn pi_agent_core_source_digest(
+fn tea_source_digest(
     files: &[InstalledSourceFile],
 ) -> Result<ContentDigest, InstalledRuntimeError> {
     if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::CoreSourceGraphInvalid { count: files.len() });
     }
     let mut hasher = blake3::Hasher::new();
-    hasher.update(PI_AGENT_CORE_SOURCE_DOMAIN);
+    hasher.update(TEA_SOURCE_DOMAIN);
     for file in files {
         let path = file.relative_path.as_str().as_bytes();
         let length =
@@ -1437,14 +1437,14 @@ fn pi_agent_core_source_digest(
     Ok(ContentDigest::from_bytes(*hasher.finalize().as_bytes()))
 }
 
-/// Qualifies the temporary local `pi-agent-core-rs` source checkout. A clean
+/// Qualifies the temporary local Tea source checkout. A clean
 /// Git status is mandatory: a dirty checkout is not a reproducible runtime
 /// input even when its current `HEAD` happens to match the receipt. The
 /// source inventory excludes only Git's private metadata and Cargo build
 /// output; all tracked or untracked project material that can affect Cargo
 /// resolution is otherwise bound by digest.
-fn qualify_pi_agent_core() -> Result<PiAgentCoreQualification, InstalledRuntimeError> {
-    let root = canonical_directory("pi-agent-core checkout", Path::new(PI_AGENT_CORE_SOURCE))?;
+fn qualify_tea() -> Result<TeaQualification, InstalledRuntimeError> {
+    let root = canonical_directory("Tea checkout", Path::new(TEA_SOURCE))?;
     let git = find_git_executable()?;
     let head_output = Command::new(&git)
         .arg("-C")
@@ -1501,8 +1501,8 @@ fn qualify_pi_agent_core() -> Result<PiAgentCoreQualification, InstalledRuntimeE
     if files.is_empty() || files.len() > MAX_SOURCE_GRAPH_FILES {
         return Err(InstalledRuntimeError::CoreSourceGraphInvalid { count: files.len() });
     }
-    let source_digest = pi_agent_core_source_digest(&files)?;
-    Ok(PiAgentCoreQualification {
+    let source_digest = tea_source_digest(&files)?;
+    Ok(TeaQualification {
         root,
         head,
         files,
@@ -1545,7 +1545,7 @@ fn inventory_core_files(
         let path = root.join(relative_path.as_str());
         let metadata =
             fs::symlink_metadata(&path).map_err(|source| InstalledRuntimeError::Metadata {
-                field: "pi-agent-core source file",
+                field: "Tea source file",
                 path: path.clone(),
                 source,
             })?;
@@ -1554,13 +1554,13 @@ fn inventory_core_files(
         }
         if !metadata.is_file() {
             return Err(InstalledRuntimeError::NotRegularFile {
-                field: "pi-agent-core source file",
+                field: "Tea source file",
                 path,
             });
         }
         files.push(InstalledSourceFile {
             relative_path,
-            digest: digest_regular_file("pi-agent-core source file", &path)?,
+                digest: digest_regular_file("Tea source file", &path)?,
         });
     }
     Ok(files)
@@ -1633,20 +1633,20 @@ fn inventory_host_source_directory(
     paths: &mut Vec<RuntimeRelativePath>,
 ) -> Result<(), InstalledRuntimeError> {
     let entries = fs::read_dir(directory).map_err(|source| InstalledRuntimeError::Read {
-        field: "Pi host source directory",
+        field: "Tea host source directory",
         path: directory.to_owned(),
         source,
     })?;
     for entry in entries {
         let entry = entry.map_err(|source| InstalledRuntimeError::Read {
-            field: "Pi host source directory",
+            field: "Tea host source directory",
             path: directory.to_owned(),
             source,
         })?;
         let path = entry.path();
         let metadata =
             fs::symlink_metadata(&path).map_err(|source| InstalledRuntimeError::Metadata {
-                field: "Pi host source-root entry",
+                field: "Tea host source-root entry",
                 path: path.clone(),
                 source,
             })?;
@@ -1654,7 +1654,7 @@ fn inventory_host_source_directory(
             return Err(InstalledRuntimeError::SourceGraphSymlink { path });
         }
         if metadata.is_dir() {
-            let canonical = canonical_directory("Pi host source directory", &path)?;
+            let canonical = canonical_directory("Tea host source directory", &path)?;
             if !canonical.starts_with(source_root) {
                 return Err(InstalledRuntimeError::SourceFileOutsideRoot {
                     path: canonical.to_string_lossy().to_string(),
@@ -1665,11 +1665,11 @@ fn inventory_host_source_directory(
         }
         if !metadata.is_file() {
             return Err(InstalledRuntimeError::NotRegularFile {
-                field: "Pi host source-root entry",
+                field: "Tea host source-root entry",
                 path,
             });
         }
-        let canonical = canonical_regular_file("Pi host source file", &path)?;
+        let canonical = canonical_regular_file("Tea host source file", &path)?;
         let relative = canonical.strip_prefix(source_root).map_err(|_| {
             InstalledRuntimeError::SourceFileOutsideRoot {
                 path: canonical.to_string_lossy().to_string(),
@@ -2012,7 +2012,7 @@ fn digest_regular_file(
 /// secret values; those remain process-local and are never persisted here.
 fn verify_credential_environment(
     packet: &AssignmentPacketV2,
-    spawn: &PiHostSpawnSpec,
+    spawn: &TeaHostSpawnSpec,
 ) -> Result<(), InstalledRuntimeError> {
     let environment = spawn.environment();
     let fixed = [(OsStr::new("NO_COLOR"), OsStr::new("1"))];
@@ -2078,10 +2078,10 @@ pub enum InstalledRuntimeError {
     #[error("provider {provider:?} has no credential source in this installed build")]
     UnsupportedCredentialProvider { provider: String },
 
-    #[error("pi-agent-core checkout is not clean")]
+    #[error("Tea checkout is not clean")]
     CoreCheckoutDirty,
 
-    #[error("pi-agent-core checkout has no usable Git executable")]
+    #[error("Tea checkout has no usable Git executable")]
     CoreGitUnavailable,
 
     #[error("could not execute Git {operation}: {source}")]
@@ -2097,10 +2097,10 @@ pub enum InstalledRuntimeError {
         status: Option<i32>,
     },
 
-    #[error("pi-agent-core HEAD is not a full hexadecimal commit identity")]
+    #[error("Tea HEAD is not a full hexadecimal commit identity")]
     CoreHeadInvalid,
 
-    #[error("pi-agent-core source inventory is invalid ({count} files)")]
+    #[error("Tea source inventory is invalid ({count} files)")]
     CoreSourceGraphInvalid { count: usize },
 
     #[error("spawn credential environment name differs from the installed provider configuration")]
@@ -2146,31 +2146,31 @@ pub enum InstalledRuntimeError {
     #[error("{field} must be 1 through 240 bytes without NUL")]
     InvalidText { field: &'static str },
 
-    #[error("the Pi host source graph is empty")]
+    #[error("the Tea host source graph is empty")]
     EmptySourceGraph,
 
-    #[error("the Pi host source graph has {actual} files, exceeding {maximum}")]
+    #[error("the Tea host source graph has {actual} files, exceeding {maximum}")]
     SourceGraphTooLarge { actual: usize, maximum: usize },
 
-    #[error("Pi host source graph repeats {path:?}")]
+    #[error("Tea host source graph repeats {path:?}")]
     DuplicateSourceGraphPath { path: String },
 
-    #[error("Pi host source root contains undeclared regular file {path:?}")]
+    #[error("Tea host source root contains undeclared regular file {path:?}")]
     UndeclaredSourceFile { path: String },
 
-    #[error("Pi host source graph declares absent regular file {path:?}")]
+    #[error("Tea host source graph declares absent regular file {path:?}")]
     DeclaredSourceFileMissing { path: String },
 
-    #[error("Pi host source root contains a symlink at {path:?}")]
+    #[error("Tea host source root contains a symlink at {path:?}")]
     SourceGraphSymlink { path: PathBuf },
 
-    #[error("Pi host source path {path:?} is not a valid safe relative path")]
+    #[error("Tea host source path {path:?} is not a valid safe relative path")]
     SourceGraphPathInvalid { path: String },
 
-    #[error("Pi host source file {path:?} resolves outside the qualified source root")]
+    #[error("Tea host source file {path:?} resolves outside the qualified source root")]
     SourceFileOutsideRoot { path: String },
 
-    #[error("Pi host source path {path:?} cannot be represented")]
+    #[error("Tea host source path {path:?} cannot be represented")]
     SourcePathTooLong { path: String },
 
     #[error("cannot read {field} at {path:?}: {source}")]

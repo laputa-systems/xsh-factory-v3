@@ -51,7 +51,7 @@ use crate::{
         TerminalArtifactSeals, TerminalReceipt,
     },
     process_custody::{
-        PiHostSpawnSpec, ProcessCancellation, ProcessCustodyError, ProcessStopReason,
+        TeaHostSpawnSpec, ProcessCancellation, ProcessCustodyError, ProcessStopReason,
         ProcessSupervisionSpec, SupervisedProcessOutcome,
     },
     product_runtime::{ExecuteProductProposal, execute_product_proposal},
@@ -65,7 +65,7 @@ const ADMISSION_PROTOCOL_VERSION: u16 = 2;
 const ADMISSION_MAX_BYTES: usize = factory_protocol::RESPONSE_FRAME_MAX_BYTES - 1;
 /// Daemon-local registry for the one admitted paid process. A cancellation
 /// selects by durable session ID, while the stored handle itself names no PID
-/// and can only stop the `SpawnedPiHost` that minted it.
+/// and can only stop the `SpawnedTeaHost` that minted it.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ActiveSessionCancellationRegistry {
     entries: Arc<Mutex<BTreeMap<SessionId, ActiveSessionCancellationEntry>>>,
@@ -170,7 +170,7 @@ impl Drop for ActiveSessionCancellationCompletion {
 /// The runtime does not infer trust from a host path or from a packet's JSON
 /// shape.  The implementation must compare the supplied canonical packet
 /// bytes and every installed runtime identity (canonical host executable,
-/// exact pi-agent-core checkout, source inventory, and Rust toolchain) against
+/// exact Tea checkout, source inventory, and Rust toolchain) against
 /// the qualified build and assignment before this method returns success.
 pub trait SessionRuntimeVerifier: Send + Sync {
     fn verify_packet(
@@ -182,7 +182,7 @@ pub trait SessionRuntimeVerifier: Send + Sync {
     fn verify_runtime(
         &self,
         packet: &AssignmentPacketV2,
-        spawn: &PiHostSpawnSpec,
+        spawn: &TeaHostSpawnSpec,
     ) -> Result<(), RuntimeVerificationError>;
 }
 
@@ -218,7 +218,7 @@ pub struct SessionLaunchRequest {
     /// assignment admission. Its BLAKE3 differs intentionally from the
     /// packet's unsigned self-seal.
     pub packet_artifact: CasArtifact,
-    pub spawn: PiHostSpawnSpec,
+    pub spawn: TeaHostSpawnSpec,
     pub supervision: ProcessSupervisionSpec,
     pub workspace_root: std::path::PathBuf,
     pub expected_read_manifest_artifact_id: factory_protocol::ArtifactId,
@@ -1870,7 +1870,7 @@ where
 
     let (actor_client, unbound_server) = daemon.create_unbound_actor_socketpair()?;
     let supervision = request.supervision.clone();
-    let spawned = crate::process_custody::spawn_pi_host(
+    let spawned = crate::process_custody::spawn_tea_host(
         &request.spawn,
         actor_client.into_std_stream(),
         request.supervision.clone(),
@@ -2796,7 +2796,7 @@ mod tests {
                 output_byte_limit: 1,
             },
             runtime: RuntimeIdentityV2 {
-                host_executable: AbsoluteHostPath::parse("/opt/factory-pi-host").unwrap(),
+                host_executable: AbsoluteHostPath::parse("/opt/factory-tea-host").unwrap(),
                 core_head: "0123456789012345678901234567890123456789".to_owned(),
                 core_source_digest: ContentDigest::of_bytes(b"core"),
                 rust_toolchain: "nightly-2026-07-24".to_owned(),

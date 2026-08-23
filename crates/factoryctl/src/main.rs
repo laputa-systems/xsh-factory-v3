@@ -3,7 +3,7 @@
 //! `factoryctl` opens no PostgreSQL connection. Its sole database argument is
 //! the bootstrap URL it forwards unchanged to one explicit `factoryd init`
 //! child. Status, campaign control, and the explicit Architect decision
-//! families travel over the daemon-created mode-`0600` operator socket. Pi
+//! families travel over the daemon-created mode-`0600` operator socket. Tea
 //! actors receive neither this CLI surface nor a reconnectable operator
 //! listener.
 
@@ -1781,7 +1781,7 @@ fn parse_init(arguments: Vec<String>) -> Result<InitCommand, String> {
         ));
     }
     let kernel_source_files = closed_kernel_source_files(&installation_root)?;
-    let host_source_root = installation_root.join("crates/factory-pi-host");
+    let host_source_root = installation_root.join("crates/factory-tea-host");
     let host_source_files = closed_regular_file_inventory(&host_source_root)?;
     let factoryd = match factoryd {
         Some(factoryd) => factoryd,
@@ -1828,9 +1828,9 @@ fn discover_installation_root() -> Result<PathBuf, String> {
 fn is_installation_root(path: &Path) -> bool {
     path.join("Cargo.toml").is_file()
         && path.join("Cargo.lock").is_file()
-        && path.join("crates/factory-pi-host/Cargo.toml").is_file()
+        && path.join("crates/factory-tea-host/Cargo.toml").is_file()
         && path.join("schema/migrations").is_dir()
-        && path.join("crates/factory-pi-host/src/main.rs").is_file()
+        && path.join("crates/factory-tea-host/src/main.rs").is_file()
 }
 
 fn resolve_host_executable(installation_root: &Path, factoryd: &Path) -> Result<PathBuf, String> {
@@ -1845,10 +1845,10 @@ fn resolve_host_executable(installation_root: &Path, factoryd: &Path) -> Result<
             installation_root
                 .join("target")
                 .join(profile)
-                .join("factory-pi-host")
+                .join("factory-tea-host")
         })
         .find_map(|path| {
-            let canonical = exact_regular_file("factory-pi-host executable", &path).ok()?;
+            let canonical = exact_regular_file("factory-tea-host executable", &path).ok()?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt as _;
@@ -1860,7 +1860,7 @@ fn resolve_host_executable(installation_root: &Path, factoryd: &Path) -> Result<
             Some(canonical)
         })
         .ok_or_else(|| {
-            "cannot find an executable factory-pi-host binary; build it before `factoryctl init`"
+            "cannot find an executable factory-tea-host binary; build it before `factoryctl init`"
                 .to_owned()
         })
 }
@@ -2091,7 +2091,7 @@ fn qualified_build_identity(
         Some(path) => fs::canonicalize(path)?,
         None => default_factoryd_executable().map_err(io::Error::other)?,
     };
-    let host_source_root = installation_root.join("crates/factory-pi-host");
+    let host_source_root = installation_root.join("crates/factory-tea-host");
     let host_source_files = closed_regular_file_inventory(&host_source_root)?;
     let host_executable = resolve_host_executable(&installation_root, &factoryd)?;
     let runtime = InstalledRuntimeManifest::qualify(InstalledRuntimeQualification {
@@ -3261,8 +3261,8 @@ mod tests {
                 && kernel_source_files.contains(&"Cargo.lock".to_owned())
                 && kernel_source_files.contains(&"schema/migrations/0001_initial_authority.sql".to_owned())
                 && kernel_source_files.contains(&"crates/factoryd/src/main.rs".to_owned())
-                && host_executable == installation_root().join("target/debug/factory-pi-host")
-                && host_source_root == installation_root().join("crates/factory-pi-host")
+                && host_executable == installation_root().join("target/debug/factory-tea-host")
+                && host_source_root == installation_root().join("crates/factory-tea-host")
                 && host_source_files.contains(&"Cargo.toml".to_owned())
                 && host_source_files.contains(&"src/main.rs".to_owned())
                 && openrouter_credential_environment == "OPENROUTER_API_KEY"
@@ -3296,7 +3296,7 @@ mod tests {
                 host_executable,
                 ..
             }) if selected_factoryd == factoryd
-                && host_executable == installation_root().join("target/release/factory-pi-host")
+                && host_executable == installation_root().join("target/release/factory-tea-host")
         ));
     }
 

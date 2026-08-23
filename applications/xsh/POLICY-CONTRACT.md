@@ -8,19 +8,19 @@ the seven Markdown templates and the three Luau policy sources below this
 directory, verifies each BLAKE3 digest and byte limit, and seals those exact
 source bytes. A running actor never reads this directory.
 
-The model price fields in the bundle are admitted accounting inputs. Keep their
-source of truth in Pi's model catalog at
-`/Users/josh/d/pi/packages/ai/src/providers/data/openrouter.json`; update the
-bundle only after syncing the selected model's rates and limits from that
-catalog.
+The model price fields in the bundle are admitted accounting inputs. Keep the
+selected model identifier and context limit aligned with Tea's checked-in
+catalog at `/Users/josh/d/tea-copy/crates/tea-providers/src/registry/catalog.rs`.
+Update the bundle's prices only after reviewing the selected provider's current
+published rate card.
 
 Product and Quality evidence files use the full 16 MiB CAS object ceiling as
 their `artifact_seal` request limit. The receipt records the actual file length,
 so empty evidence remains a zero-byte artifact without a guessed one-byte limit.
 
-Every role policy returns the `pi-agent-luau` `factory_policy` declaration:
+Every role policy returns the `tea-luau` V1 policy declaration:
 
-- `system_prompt_append` is present and currently empty;
+- `prompt_sections` is present and currently empty;
 - each model-visible tool has a closed `schema_json`, sequential execution,
   and a coroutine `handler_source`; and
 - every handler yields the single `factory` capability with an explicit

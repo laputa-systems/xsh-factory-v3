@@ -1046,7 +1046,7 @@ async fn install_build(store: &KernelStore) -> InstalledBuild {
         source_digest: digest(unique_number()),
         binary_digest: digest(unique_number()),
         schema_identity: SCHEMA_IDENTITY.to_owned(),
-        host_executable_path: "/opt/factory/factory-pi-host".to_owned(),
+        host_executable_path: "/opt/factory/factory-tea-host".to_owned(),
         core_head: "0123456789abcdef0123456789abcdef01234567".to_owned(),
         rust_toolchain: "nightly-2026-07-24".to_owned(),
         core_source_digest: digest(unique_number()),

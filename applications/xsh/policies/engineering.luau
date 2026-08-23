@@ -91,7 +91,7 @@ local allowed = {
 }
 
 return {
-    system_prompt_append = "",
+    prompt_sections = {},
     tools = {
         tool("workspace_read", "Read exact bytes from one path in the assigned workspace.", read_schema, "workspace.read"),
         tool("workspace_write", "Write beneath the assigned workspace.", write_schema, "workspace.write"),
@@ -108,7 +108,7 @@ return {
         tool("candidate_checkpoint_regression", "Capture and run the regression-only checkpoint.", checkpoint_schema, "candidate.checkpoint_regression"),
         tool("candidate_submit", "Submit the completed XSH change for exact validation.", submit_schema, "candidate.submit"),
     },
-    before_tool_call = function(call)
+    before_tool = function(call)
         if allowed[call.name] then
             return "allow"
         end

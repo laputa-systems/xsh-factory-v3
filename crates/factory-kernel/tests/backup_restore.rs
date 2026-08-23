@@ -40,7 +40,7 @@ fn restored_database_and_cas_are_integrity_qualified() {
             .expect("restored database must retain one installed-build receipt");
         // `load_current_installed_runtime` decodes the receipt from the
         // restored CAS, binds it to the current durable build identity, and
-        // reruns the local Rust host and pi-agent-core source-identity checks.
+        // reruns the local Rust host and Tea source-identity checks.
         // This keeps a structurally sound artifact ledger from being mistaken
         // for a restorable installed runtime.
         restored_runtime

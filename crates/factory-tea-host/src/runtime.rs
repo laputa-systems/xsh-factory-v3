@@ -1,13 +1,13 @@
 //! Binary-only inherited-descriptor and rooted-workspace adapters.
 
-use factory_pi_host::{
+use factory_tea_host::{
     DaemonError, DaemonFuture, FrameClient, FramedDaemon, LocalToolExecutor,
     MAX_REQUEST_FRAME_BYTES, ToolName,
 };
 use factory_protocol::{PROTOCOL_VERSION_V2, RepositoryRelativePath, encode_frame};
 use factory_settings::{HOST_FALLBACK_PATH, HOST_KILL_EXECUTABLE, HOST_SHELL_EXECUTABLE};
-use pi_agent_core::scheduler::CancellationToken;
-use pi_agent_protocol::{JsonNumber, JsonValue};
+use tea_core::scheduler::CancellationToken;
+use tea_protocol::{JsonNumber, JsonValue};
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
@@ -732,8 +732,8 @@ mod tests {
         REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest, decode_operation_request,
         decode_product_submit_ticket_request_v2, encode_frame,
     };
-    use pi_agent_core::scheduler::CancellationToken;
-    use pi_agent_protocol::{JsonNumber, JsonValue};
+    use tea_core::scheduler::CancellationToken;
+    use tea_protocol::{JsonNumber, JsonValue};
     use std::{path::Path, time::Duration};
 
     #[test]
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn request_json_matches_session_verify_wire_order() {
-        let request_id = "factory-pi-host-request-1";
+        let request_id = "factory-tea-host-request-1";
         let actual = request_json(
             "session.verify_packet",
             request_id,
@@ -787,7 +787,7 @@ mod tests {
     fn request_json_supports_terminal_service_payloads() {
         let candidate = request_json(
             "candidate.submit",
-            "factory-pi-host-request-1",
+            "factory-tea-host-request-1",
             JsonValue::object([
                 (
                     "client_command_id",
@@ -833,7 +833,7 @@ mod tests {
         };
         let review = request_json(
             "quality.submit_review",
-            "factory-pi-host-request-2",
+            "factory-tea-host-request-2",
             JsonValue::object([
                 (
                     "client_command_id",
@@ -868,7 +868,7 @@ mod tests {
     fn request_json_orders_nested_publication_objects() {
         let actual = request_json(
             "publication.create",
-            "factory-pi-host-request-1",
+            "factory-tea-host-request-1",
             JsonValue::object([
                 (
                     "client_command_id",
@@ -901,7 +901,7 @@ mod tests {
         .expect("canonical nested request");
         let expected = miniserde::json::to_string(&PublicationCreateRequest {
             protocol_version: PROTOCOL_VERSION_V2,
-            request_id: "factory-pi-host-request-1".to_owned(),
+            request_id: "factory-tea-host-request-1".to_owned(),
             operation: "publication.create".to_owned(),
             client_command_id: "publication-command".to_owned(),
             anchor: InstitutionalReferenceWireV2 {
@@ -942,7 +942,7 @@ mod tests {
         };
         let actual = request_json(
             "product.submit_ticket",
-            "factory-pi-host-request-1",
+            "factory-tea-host-request-1",
             JsonValue::object([
                 (
                     "client_command_id",

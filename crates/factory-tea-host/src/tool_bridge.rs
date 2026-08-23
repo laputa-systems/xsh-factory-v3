@@ -6,15 +6,15 @@
 //! declaration to an explicit host object.  The host object is the only place
 //! where a model-visible tool name becomes a framed daemon operation.
 //!
-//! The bridge uses [`pi_agent_protocol::JsonValue`] instead of a dynamic JSON
+//! The bridge uses [`tea_protocol::JsonValue`] instead of a dynamic JSON
 //! map so the surrounding host can use the same value for Luau, frame, and
 //! transcript boundaries without adding a second JSON representation.
 
-use pi_agent_core::scheduler::CancellationToken;
-use pi_agent_luau::tool_handler::{
+use tea_core::scheduler::CancellationToken;
+use tea_luau::tool_handler::{
     CapabilityError, CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
 };
-use pi_agent_protocol::{JsonNumber, JsonValue};
+use tea_protocol::{JsonNumber, JsonValue};
 pub use factory_settings::FACTORY_CAPABILITY;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -667,7 +667,7 @@ impl std::error::Error for PolicyBindingError {}
 /// The slice type is intentionally generic at the host boundary: callers pass
 /// `LuaPolicy::tools()` directly. No policy source is read from disk here.
 pub fn bind_policy(
-    policy_tools: &[pi_agent_luau::PolicyTool],
+    policy_tools: &[tea_luau::PolicyTool],
     packet_tools: &[ToolName],
 ) -> Result<Vec<BoundTool>, PolicyBindingError> {
     let packet: BTreeSet<_> = packet_tools.iter().copied().collect();
@@ -1617,10 +1617,10 @@ fn json_type_matches(kind: &str, value: &JsonValue) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pi_agent_core::scheduler::CancellationToken;
-    use pi_agent_core::state::ToolCallId;
-    use pi_agent_core::tool::ToolUpdateSink;
-    use pi_agent_luau::tool_handler::{CapabilityRequest, LuauCapability};
+    use tea_core::scheduler::CancellationToken;
+    use tea_core::state::ToolCallId;
+    use tea_core::tool::ToolUpdateSink;
+    use tea_luau::tool_handler::{CapabilityRequest, LuauCapability};
 
     struct ProductSubmissionDaemon;
 

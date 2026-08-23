@@ -1,7 +1,8 @@
-# The local pi-agent-core-rs checkout is intentionally explicit until its
-# crates are published. Cargo does not expand `~` in a dependency path.
-PI_AGENT_CORE_ROOT ?= /Users/josh/d/pi-agent-core-rs
-PI_AGENT_CORE_MANIFEST := $(PI_AGENT_CORE_ROOT)/Cargo.toml
+# The local Tea checkout is intentionally explicit. Cargo does not expand `~`
+# in a dependency path. During the port this is a frozen copy, not the active
+# development checkout.
+TEA_ROOT ?= /Users/josh/d/tea-copy
+TEA_MANIFEST := $(TEA_ROOT)/Cargo.toml
 FACTORY_OPERATION_DEADLINE_MS ?= 900000
 FACTORYCTL ?= $(CURDIR)/target/release/factoryctl
 FACTORY_PAID_CYCLE_PRINCIPAL ?= grand-architect
@@ -26,24 +27,24 @@ CLIPPY_GATE_FLAGS := --deny warnings \
 	--allow clippy::type_complexity \
 	--allow clippy::too_many_arguments
 
-.PHONY: cache lint release-build status factory-database-guard paid-cycle-preflight pi-agent-core-rs-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test application-contract-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance pi-agent-core-rs-acceptance sqlx-check
+.PHONY: cache lint release-build status factory-database-guard paid-cycle-preflight tea-test factoryd-serve factory-start factory-stop factory-reset paid-cycle paid-cycle-verify postgres-test ticket-test decision-test application-contract-test provider-free-host provider-free-vertical backup-restore-test provider-free-acceptance tea-acceptance sqlx-check
 
 # Build metadata and dependencies for both Rust workspaces. The external
 # checkout is tested independently because it is a direct local dependency
 # while the local core source remains the explicit dependency.
 cache:
-	test -f "$(PI_AGENT_CORE_MANIFEST)"
-	cargo fetch --locked --manifest-path "$(PI_AGENT_CORE_MANIFEST)"
+	test -f "$(TEA_MANIFEST)"
+	cargo fetch --locked --manifest-path "$(TEA_MANIFEST)"
 	cargo fetch --locked --manifest-path "$(CURDIR)/Cargo.toml"
 
-pi-agent-core-rs-test:
-	test -f "$(PI_AGENT_CORE_MANIFEST)"
-	cargo fmt --all --manifest-path "$(PI_AGENT_CORE_MANIFEST)" -- --check
-	cargo test --manifest-path "$(PI_AGENT_CORE_MANIFEST)" -p pi-agent-core --all-targets --features trace
-	cargo test --manifest-path "$(PI_AGENT_CORE_MANIFEST)" -p pi-agent-trace
-	cargo check --manifest-path "$(PI_AGENT_CORE_MANIFEST)" -p pi-agent-core --features parity-runner --bin pi-agent-parity
+tea-test:
+	test -f "$(TEA_MANIFEST)"
+	cargo test --manifest-path "$(TEA_MANIFEST)" -p tea-core --all-targets
+	cargo test --manifest-path "$(TEA_MANIFEST)" -p tea-luau
+	cargo test --manifest-path "$(TEA_MANIFEST)" -p tea-protocol
+	cargo test --manifest-path "$(TEA_MANIFEST)" -p tea-providers --features provider-openrouter
 
-lint: pi-agent-core-rs-test
+lint: tea-test
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features -- $(CLIPPY_GATE_FLAGS)
 	cargo check --workspace --all-targets
@@ -442,7 +443,7 @@ application-contract-test:
 # frame contract, terminal gate, and transcript primitives without selecting a
 # live provider. Provider-backed campaigns remain a separately authorized act.
 provider-free-host:
-	cargo test -p factory-pi-host
+	cargo test -p factory-tea-host
 
 # The generic resident-composition judge needs a fresh disposable schema. It
 # runs the typed candidate-to-delivery vertical without a provider.
@@ -502,7 +503,7 @@ provider-free-acceptance:
 
 # Named first full gate from the Rust runtime qualification contract. The complete provider-free
 # qualification is now the permanent Rust-only acceptance path.
-pi-agent-core-rs-acceptance: provider-free-acceptance
+tea-acceptance: provider-free-acceptance
 
 # Requires a disposable PostgreSQL 18 database and an externally installed
 # sqlx-cli matching the pinned project crate. It verifies committed `.sqlx`

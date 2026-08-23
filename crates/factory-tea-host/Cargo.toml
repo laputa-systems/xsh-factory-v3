@@ -1,5 +1,5 @@
 [package]
-name = "factory-pi-host"
+name = "factory-tea-host"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -11,9 +11,10 @@ factory-settings = { path = "../factory-settings" }
 factory-protocol = { path = "../factory-protocol" }
 flate2.workspace = true
 miniserde.workspace = true
-pi-agent-core = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-core", features = ["provider-openrouter"] }
-pi-agent-luau = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-luau" }
-pi-agent-protocol = { path = "/Users/josh/d/pi-agent-core-rs/crates/pi-agent-protocol" }
+tea-core = { path = "/Users/josh/d/tea-copy/crates/tea-core" }
+tea-luau = { path = "/Users/josh/d/tea-copy/crates/tea-luau" }
+tea-protocol = { path = "/Users/josh/d/tea-copy/crates/tea-protocol" }
+tea-providers = { path = "/Users/josh/d/tea-copy/crates/tea-providers", features = ["provider-openrouter"] }
 smol.workspace = true
 thiserror.workspace = true
 
@@ -21,7 +22,7 @@ thiserror.workspace = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "factory-pi-host"
+name = "factory-tea-host"
 path = "src/main.rs"
 
 [lints]

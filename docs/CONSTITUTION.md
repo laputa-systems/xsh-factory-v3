@@ -69,7 +69,7 @@ shipped result.
 ## Factory lifecycle
 
 The Grand Architect operates the local Factory through the idempotent lifecycle
-targets, not by launching `factoryd`, Pi, or actors directly. With a dedicated
+targets, not by launching `factoryd`, Tea, or actors directly. With a dedicated
 already-created PostgreSQL database and a runtime root outside source control,
 run:
 
@@ -123,7 +123,7 @@ shipped result.
 
 ## Non-negotiable boundaries
 
-The Grand Architect does not directly edit `../xsh`, launch Pi or actors,
+The Grand Architect does not directly edit `../xsh`, launch Tea or actors,
 manipulate the database, CAS, or worktrees, push remote Git, or bypass kernel
 guards. Product discovery may fail honestly when no defensible defect is
 found; a fresh cycle permits another bounded investigation but does not turn

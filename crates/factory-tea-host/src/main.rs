@@ -2,7 +2,7 @@
 
 mod runtime;
 
-use factory_pi_host::{
+use factory_tea_host::{
     Admission, AdmissionConfig, CommandContext, CostReader, CostSnapshot, ExecutionDiagnostics,
     FramedDaemon,
     TerminalDeferral, ToolName, build_factory_execution_input, read_admission_from_fd0,
@@ -11,15 +11,14 @@ use factory_protocol::{
     ArtifactReceiptResponse, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
     OP_SESSION_VERIFY_PACKET,
 };
-use pi_agent_core::provider::RetryPolicy;
-use pi_agent_core::provider::openrouter::{OpenRouterConfig, OpenRouterProvider};
-use pi_agent_core::scheduler::ModelProvider;
-use pi_agent_core::state::StopReason;
-use pi_agent_core::{AgentEvent, AgentEventKind};
-use pi_agent_core::event::{EventObserver, ObserverFuture};
-use pi_agent_core::scheduler::CancellationToken;
-use pi_agent_luau::{PolicyLimits, tool_handler::HandlerLimits};
-use pi_agent_protocol::{JsonNumber, JsonValue};
+use tea_core::scheduler::ModelProvider;
+use tea_core::state::StopReason;
+use tea_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
+use tea_core::scheduler::CancellationToken;
+use tea_luau::{PolicyLimits, tool_handler::HandlerLimits};
+use tea_protocol::{JsonNumber, JsonValue};
+use tea_providers::RetryPolicy;
+use tea_providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
 use factory_settings::{
     MAX_PROVIDER_RETRIES, PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
 };
@@ -38,7 +37,7 @@ fn main() -> ExitCode {
     match smol::block_on(run()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("factory-pi-host failed closed: {error}");
+            eprintln!("factory-tea-host failed closed: {error}");
             ExitCode::FAILURE
         }
     }
@@ -100,13 +99,13 @@ async fn run() -> Result<(), String> {
         Ok(result) => result,
         Err(error) => {
             if let Some(report) = provider.last_error_report() {
-                eprintln!("factory-pi-host provider failure: {report}");
+                eprintln!("factory-tea-host provider failure: {report}");
             }
             return Err(error.to_string());
         }
     };
     eprintln!(
-        "factory-pi-host execution: turns_started={} engineering_phase={} stop_reason={:?} terminal={} cost_known={}",
+        "factory-tea-host execution: turns_started={} engineering_phase={} stop_reason={:?} terminal={} cost_known={}",
         result.diagnostics.turns_started,
         result.diagnostics.engineering_phase,
         result.stop_reason(),
@@ -217,7 +216,7 @@ impl LiveTranscriptWriter {
         let line = match project_event(event) {
             Ok(line) => line,
             Err(error) => {
-                eprintln!("factory-pi-host live transcript projection failed: {error}");
+                eprintln!("factory-tea-host live transcript projection failed: {error}");
                 return;
             }
         };
@@ -235,7 +234,7 @@ impl LiveTranscriptWriter {
             return;
         }
         if let Err(error) = state.file.write_all(&line).and_then(|()| state.file.flush()) {
-            eprintln!("factory-pi-host live transcript write failed: {error}");
+            eprintln!("factory-tea-host live transcript write failed: {error}");
             state.truncated = true;
             return;
         }
@@ -439,7 +438,7 @@ fn project_event(event: &AgentEvent) -> Result<String, String> {
         }
         AgentEventKind::MessageEnd { message } => {
             fields.push(("type", JsonValue::String("message_end".to_owned())));
-            if let pi_agent_core::state::Message::Assistant { content, .. } = message {
+            if let tea_core::state::AgentMessage::Assistant { content, .. } = message {
                 fields.push((
                     "assistant_text",
                     JsonValue::String(bound(content, 16 * 1024)),
@@ -638,7 +637,7 @@ mod tests {
         gzip_transcript, gzip_upper_bound_len, micro_usd, packet_verification_error,
         provider_request_timeout, provider_retry_policy, provider_stall_timeout, CostSnapshot,
     };
-    use pi_agent_protocol::JsonValue;
+    use tea_protocol::JsonValue;
     use std::fs;
     use std::process::Command;
     use std::time::Duration;
@@ -725,7 +724,7 @@ mod tests {
         assert!(archive.len() * 2 < input.len());
 
         let path = std::env::temp_dir().join(format!(
-            "factory-pi-host-gzip-test-{}.gz",
+            "factory-tea-host-gzip-test-{}.gz",
             std::process::id()
         ));
         fs::write(&path, &archive).expect("write gzip test member");

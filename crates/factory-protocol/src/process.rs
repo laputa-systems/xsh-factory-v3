@@ -17,8 +17,8 @@ use crate::{
 
 pub const ASSIGNMENT_PACKET_V2_FORMAT: u16 = 2;
 
-/// One-time daemon-to-host admission gate sent over inherited FD 0 before Pi
-/// construction. The packet bytes and digest are both present so the host
+/// One-time daemon-to-host admission gate sent over inherited FD 0 before Tea
+/// agent construction. The packet bytes and digest are both present so the host
 /// can verify the exact immutable input; `session_revision` is the only
 /// revision accepted by subsequent session-scoped RPCs.
 #[derive(Clone, Debug, PartialEq, Eq, miniserde::Serialize, miniserde::Deserialize)]
@@ -134,7 +134,7 @@ pub struct AssignmentRuntimeWireV2 {
     /// Absolute path of the exact Rust host executable qualified by the
     /// installed runtime receipt.
     pub host_executable: String,
-    /// Full Git commit of the local `pi-agent-core-rs` checkout.
+    /// Full Git commit of the local Tea checkout.
     pub core_head: String,
     /// BLAKE3 identity of the closed core source inventory.
     pub core_source_digest: String,
@@ -370,7 +370,7 @@ impl RuntimeIdentityV2 {
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
             return Err(ContractError::InvalidValue {
-                field: "pi-agent-core HEAD",
+                field: "Tea HEAD",
                 reason: "must be exactly 40 lower-case hexadecimal characters",
             });
         }

@@ -582,7 +582,7 @@ async fn register_artifact(kernel: &KernelStore) -> ArtifactId {
         source_digest: digest(unique_number()),
         binary_digest: digest(unique_number()),
         schema_identity: SCHEMA_IDENTITY.to_owned(),
-        host_executable_path: "/opt/factory/pi-host".to_owned(),
+        host_executable_path: "/opt/factory/factory-tea-host".to_owned(),
         core_head: "9".repeat(40),
         rust_toolchain: "nightly-2026-07-24".to_owned(),
         core_source_digest: digest(unique_number()),

@@ -234,7 +234,7 @@ impl TicketScheduler {
     /// Applies a previously returned claim action through the ticket
     /// authority. The current-head requalification is supplied by the daemon
     /// after its deterministic product-boundary runner has produced both
-    /// observations; this module never runs that command or launches Pi.
+    /// observations; this module never runs that command or launches Tea.
     pub async fn claim_ready_ticket(
         &self,
         principal: &str,
