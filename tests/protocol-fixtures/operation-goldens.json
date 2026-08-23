@@ -393,7 +393,7 @@
       "client_command_id": "cmd-16",
       "expected_revision": 7,
       "staging_relative_path": "reports/transcript.jsonl.gz",
-      "role": "pi_transcript_gzip",
+      "role": "tea_trace_jsonl_gzip",
       "byte_limit": 4194304
     },
     "session.submit_terminal": {

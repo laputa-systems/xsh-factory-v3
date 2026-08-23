@@ -189,6 +189,15 @@ fn compiler_seals_all_declared_files_with_stable_identity() {
 }
 
 #[test]
+fn actor_tool_identity_has_one_canonical_round_trip() {
+    for tool in ActorToolV2::ALL {
+        assert_eq!(ActorToolV2::parse(tool.as_str()), Some(tool));
+        assert_eq!(tool.to_string(), tool.as_str());
+    }
+    assert_eq!(ActorToolV2::parse("workspace.read"), None);
+}
+
+#[test]
 fn domain_command_profile_spelling_is_exactly_parseable() {
     let profile = command("reproduce");
     let canonical = canonical_command_profile_json_from_domain_v2(&profile);

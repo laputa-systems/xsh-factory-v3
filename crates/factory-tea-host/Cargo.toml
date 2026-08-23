@@ -11,10 +11,12 @@ factory-settings = { path = "../factory-settings" }
 factory-protocol = { path = "../factory-protocol" }
 flate2.workspace = true
 miniserde.workspace = true
-tea-core = { path = "/Users/josh/d/tea-copy/crates/tea-core" }
-tea-luau = { path = "/Users/josh/d/tea-copy/crates/tea-luau" }
-tea-protocol = { path = "/Users/josh/d/tea-copy/crates/tea-protocol" }
-tea-providers = { path = "/Users/josh/d/tea-copy/crates/tea-providers", features = ["provider-openrouter"] }
+tea-core = { path = "/Users/josh/d/tea/crates/tea-core" }
+tea-luau = { path = "/Users/josh/d/tea/crates/tea-luau" }
+tea-protocol = { path = "/Users/josh/d/tea/crates/tea-protocol" }
+tea-providers = { path = "/Users/josh/d/tea/crates/tea-providers", features = ["provider-openrouter"] }
+tea-session = { path = "/Users/josh/d/tea/crates/tea-session" }
+tea-trace = { path = "/Users/josh/d/tea/crates/tea-trace" }
 smol.workspace = true
 thiserror.workspace = true
 

@@ -25,30 +25,33 @@ artifacts have been sealed; it never uses broad Git worktree pruning. The CAS
 object tree is intentionally retained today. A reference-safe collector is a
 documented missing capability, not permission to delete runtime data broadly.
 
-## Session transcript projection
+## Hosted-epoch trace evidence
 
-The Rust Tea agent implementation emits a compact audit projection before the
-host writes `session.ndjson`. The host streams it and seals one gzip archive at
-terminal state. The member uses the `flate2` Rust backend (`miniz_oxide`) for
-repetitive audit JSON and falls back to a stored block only when compression
-would expand the bounded artifact. Events outside the compact projection are
-omitted rather than represented as blank records. This retains the information
-useful for diagnosis:
+Tea's `TraceObserver` produces the machine trajectory; Factory does not project
+`AgentEventKind` into a second event model. A Factory-owned `RedactingSink`
+removes model inputs and credential-shaped tool fields before a bounded sink
+incrementally writes and flushes `session.ndjson`. At terminal state the host
+appends one `factory.execution_summary.v1` record and seals
+`tea-trace.jsonl.gz` under the versioned `tea_trace_jsonl_gzip` evidence role.
+That summary retains the Factory application revision, assignment, packet,
+policy, and host-build identities; exact provider/model selection; Tea harness
+snapshot, revision, and model-profile identities; standard Tea surface
+digests; engineering diagnostics; cost-stop state; and the selected terminal
+operation.
 
-- bounded assistant text;
-- tool names, boundaries, inputs, results, retries, and terminal reason;
-- usage, provider cost when reported, the `cost_limit` stop reason when live
-  cancellation fires, and the provider-reported Factory cost.
-
-It deliberately removes cumulative interactive message snapshots, session-tree
-and fork state, and provider thinking blocks. Tool arguments/results are size
-bounded; embedded base64 payloads are redacted to lengths. This prevents an
-interactive UI representation from becoming the factory's permanent evidence
-format while retaining actionable actor and tool diagnostics.
+The Tea JSONL records retain turns, bounded assistant output, tool calls and
+failures, cache evidence, compaction lifecycle, and stop reason. Model input is
+always replaced at the redaction boundary. Tool arguments recursively redact
+credential-shaped fields, and arguments, results, and errors are byte bounded.
+The sink reserves terminal and summary capacity before accepting ordinary
+records, records whether trajectory content was truncated, and uses a
+conservative gzip upper bound so the sealed member remains within packet
+authority. The gzip member uses the `flate2` Rust backend (`miniz_oxide`) and a
+stored-block fallback when compression would expand the bounded artifact.
 
 While a session is prepared or running, `factoryctl campaign status` exposes
 the absolute path to its flushed `staging/assignment-<id>/session.ndjson`
-stream. The host appends the same bounded compact projection as events settle,
+stream. The host appends the same redacted Tea JSONL records as events settle,
 so an operator can follow live progress without reading the actor socket. The
 staging path is transient; after terminal cleanup, use the durable cycle
 transcript export path instead.

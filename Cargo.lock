@@ -518,6 +518,8 @@ dependencies = [
  "tea-luau",
  "tea-protocol",
  "tea-providers",
+ "tea-session",
+ "tea-trace",
  "thiserror",
 ]
 
@@ -1748,7 +1750,9 @@ dependencies = [
  "http",
  "percent-encoding",
  "tea-core",
+ "tea-luau",
  "tea-protocol",
+ "tea-session",
 ]
 
 [[package]]

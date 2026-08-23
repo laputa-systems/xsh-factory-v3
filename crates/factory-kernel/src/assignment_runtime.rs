@@ -1728,29 +1728,7 @@ fn terminal_name(value: TerminalOperationV2) -> &'static str {
     }
 }
 fn tool_name(value: factory_protocol::ActorToolV2) -> &'static str {
-    match value {
-        factory_protocol::ActorToolV2::WorkspaceRead => "workspace_read",
-        factory_protocol::ActorToolV2::WorkspaceWrite => "workspace_write",
-        factory_protocol::ActorToolV2::WorkspaceEdit => "workspace_edit",
-        factory_protocol::ActorToolV2::WorkspaceSearch => "workspace_search",
-        factory_protocol::ActorToolV2::WorkspaceList => "workspace_list",
-        factory_protocol::ActorToolV2::Shell => "shell",
-        factory_protocol::ActorToolV2::ForumSearch => "forum_search",
-        factory_protocol::ActorToolV2::ForumListTopics => "forum_list_topics",
-        factory_protocol::ActorToolV2::ForumListThreads => "forum_list_threads",
-        factory_protocol::ActorToolV2::ForumReadThread => "forum_read_thread",
-        factory_protocol::ActorToolV2::PublicationCreate => "publication_create",
-        factory_protocol::ActorToolV2::ArtifactSeal => "artifact_seal",
-        factory_protocol::ActorToolV2::ArtifactRead => "artifact_read",
-        factory_protocol::ActorToolV2::ProductSubmitTicket => "product_submit_ticket",
-        factory_protocol::ActorToolV2::CandidateCheckpointRegression => {
-            "candidate_checkpoint_regression"
-        }
-        factory_protocol::ActorToolV2::CandidateSubmit => "candidate_submit",
-        factory_protocol::ActorToolV2::QualityRunFullSuite => "quality_run_full_suite",
-        factory_protocol::ActorToolV2::QualitySubmitReview => "quality_submit_review",
-        factory_protocol::ActorToolV2::WorkComplete => "work_complete",
-    }
+    value.as_str()
 }
 
 fn base64(bytes: &[u8]) -> String {

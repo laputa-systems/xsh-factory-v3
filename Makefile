@@ -1,7 +1,7 @@
 # The local Tea checkout is intentionally explicit. Cargo does not expand `~`
-# in a dependency path. During the port this is a frozen copy, not the active
-# development checkout.
-TEA_ROOT ?= /Users/josh/d/tea-copy
+# in a dependency path. Qualification freezes this reviewed checkout together
+# with the Factory source graph and installed runtime.
+TEA_ROOT ?= /Users/josh/d/tea
 TEA_MANIFEST := $(TEA_ROOT)/Cargo.toml
 FACTORY_OPERATION_DEADLINE_MS ?= 900000
 FACTORYCTL ?= $(CURDIR)/target/release/factoryctl
@@ -443,7 +443,7 @@ application-contract-test:
 # frame contract, terminal gate, and transcript primitives without selecting a
 # live provider. Provider-backed campaigns remain a separately authorized act.
 provider-free-host:
-	cargo test -p factory-tea-host
+	FACTORY_APPLICATION_SOURCE_ROOT="$(CURDIR)/applications/xsh" cargo test -p factory-tea-host
 
 # The generic resident-composition judge needs a fresh disposable schema. It
 # runs the typed candidate-to-delivery vertical without a provider.

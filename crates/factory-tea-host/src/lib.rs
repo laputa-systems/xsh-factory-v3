@@ -9,8 +9,8 @@
 #![warn(missing_docs)]
 
 mod admission;
-mod agent_host;
 mod execution;
+mod tea_harness;
 mod tool_bridge;
 mod transport;
 
@@ -19,16 +19,14 @@ pub use admission::{
     MAX_ADMISSION_FRAME_BYTES, read_admission, read_admission_from_fd0,
 };
 pub use factory_settings::{RUNTIME_NAME, TEA_SOURCE};
-pub use agent_host::{AgentHost, AgentHostError, BareAgentHost, load_luau_policy};
 pub use execution::{
     CostReader, CostSnapshot, ExecutionDiagnostics, ExecutionError, ExecutionInput, ExecutionResult,
-    PreparedExecution, SealedPolicySource, UsageSummary, build_factory_execution_input,
-    build_policy_tools, factory_capability_bindings,
+    PreparedExecution, build_factory_execution_input,
 };
 pub use tool_bridge::{
     BoundTool, CommandContext, DaemonError, DaemonFuture, DeferredTerminal, FACTORY_CAPABILITY,
     FactoryCapability, FramedDaemon, LocalToolExecutor, PolicyBindingError, TerminalDeferral,
-    ToolExecutionDiagnostic, ToolName, bind_policy,
+    ToolExecutionDiagnostic, ToolName, bind_extension_tools, tool_contract,
 };
 pub use transport::{
     FrameClient, FrameTransportError, MAX_REQUEST_FRAME_BYTES, MAX_RESPONSE_FRAME_BYTES,

@@ -10,11 +10,13 @@
 //! map so the surrounding host can use the same value for Luau, frame, and
 //! transcript boundaries without adding a second JSON representation.
 
-use tea_core::scheduler::CancellationToken;
-use tea_luau::tool_handler::{
-    CapabilityError, CapabilityFuture, CapabilityRequest, CapabilityResponse, LuauCapability,
+use tea_core::harness::extension::{
+    ExtensionCapability, ExtensionCapabilityError, ExtensionCapabilityFuture,
+    ExtensionCapabilityRequest, ExtensionCapabilityResponse, ExtensionToolDescription,
 };
+use tea_core::scheduler::CancellationToken;
 use tea_protocol::{JsonNumber, JsonValue};
+pub use factory_protocol::ActorToolV2 as ToolName;
 pub use factory_settings::FACTORY_CAPABILITY;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -24,177 +26,48 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Product research is open-ended.  The host preserves phase and terminal-operation
-/// contracts, while live campaign-cost cancellation supplies the economic stop condition.
-/// A closed set of actor tools.  Keep this list in lockstep with the packet
-/// contract; parsing unknown names is an admission error, never a no-op.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum ToolName {
-    /// Kernel-ledger workspace read.
-    WorkspaceRead,
-    /// Host-local workspace write.
-    WorkspaceWrite,
-    /// Host-local workspace edit.
-    WorkspaceEdit,
-    /// Host-local workspace search.
-    WorkspaceSearch,
-    /// Host-local workspace list.
-    WorkspaceList,
-    /// Host-local shell execution.
-    Shell,
-    /// Bounded Forum search.
-    ForumSearch,
-    /// Bounded Forum topic listing.
-    ForumListTopics,
-    /// Bounded Forum thread listing.
-    ForumListThreads,
-    /// Bounded Forum thread read.
-    ForumReadThread,
-    /// Immutable publication creation.
-    PublicationCreate,
-    /// Immutable workspace artifact sealing.
-    ArtifactSeal,
-    /// Read one admitted evidence artifact.
-    ArtifactRead,
-    /// Product ticket proposal.
-    ProductSubmitTicket,
-    /// Engineering regression checkpoint.
-    CandidateCheckpointRegression,
-    /// Engineering candidate submission.
-    CandidateSubmit,
-    /// Quality full-suite execution.
-    QualityRunFullSuite,
-    /// Quality review submission.
-    QualitySubmitReview,
-    /// Assignment terminal operation.
-    WorkComplete,
+/// Stable Factory dispatch metadata keyed by the closed actor tool identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FactoryToolContract {
+    /// Capability method yielded by the sealed policy handler.
+    pub capability_method: &'static str,
+    /// Framed daemon operation, or `None` for rooted host-local execution.
+    pub daemon_operation: Option<&'static str>,
 }
 
-impl ToolName {
-    /// Parse one packet/policy spelling.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "workspace_read" => Self::WorkspaceRead,
-            "workspace_write" => Self::WorkspaceWrite,
-            "workspace_edit" => Self::WorkspaceEdit,
-            "workspace_search" => Self::WorkspaceSearch,
-            "workspace_list" => Self::WorkspaceList,
-            "shell" => Self::Shell,
-            "forum_search" => Self::ForumSearch,
-            "forum_list_topics" => Self::ForumListTopics,
-            "forum_list_threads" => Self::ForumListThreads,
-            "forum_read_thread" => Self::ForumReadThread,
-            "publication_create" => Self::PublicationCreate,
-            "artifact_seal" => Self::ArtifactSeal,
-            "artifact_read" => Self::ArtifactRead,
-            "product_submit_ticket" => Self::ProductSubmitTicket,
-            "candidate_checkpoint_regression" => Self::CandidateCheckpointRegression,
-            "candidate_submit" => Self::CandidateSubmit,
-            "quality_run_full_suite" => Self::QualityRunFullSuite,
-            "quality_submit_review" => Self::QualitySubmitReview,
-            "work_complete" => Self::WorkComplete,
-            _ => return None,
-        })
-    }
-
-    /// Return the stable model-facing spelling.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::WorkspaceRead => "workspace_read",
-            Self::WorkspaceWrite => "workspace_write",
-            Self::WorkspaceEdit => "workspace_edit",
-            Self::WorkspaceSearch => "workspace_search",
-            Self::WorkspaceList => "workspace_list",
-            Self::Shell => "shell",
-            Self::ForumSearch => "forum_search",
-            Self::ForumListTopics => "forum_list_topics",
-            Self::ForumListThreads => "forum_list_threads",
-            Self::ForumReadThread => "forum_read_thread",
-            Self::PublicationCreate => "publication_create",
-            Self::ArtifactSeal => "artifact_seal",
-            Self::ArtifactRead => "artifact_read",
-            Self::ProductSubmitTicket => "product_submit_ticket",
-            Self::CandidateCheckpointRegression => "candidate_checkpoint_regression",
-            Self::CandidateSubmit => "candidate_submit",
-            Self::QualityRunFullSuite => "quality_run_full_suite",
-            Self::QualitySubmitReview => "quality_submit_review",
-            Self::WorkComplete => "work_complete",
-        }
-    }
-
-    /// Return the exact daemon operation, when this tool is daemon-bound.
-    #[must_use]
-    pub const fn daemon_operation(self) -> Option<&'static str> {
-        Some(match self {
-            Self::WorkspaceRead => "workspace.read",
-            Self::ForumSearch => "forum.search",
-            Self::ForumListTopics => "forum.list_topics",
-            Self::ForumListThreads => "forum.list_threads",
-            Self::ForumReadThread => "forum.read_thread",
-            Self::PublicationCreate => "publication.create",
-            Self::ArtifactSeal => "artifact.seal_workspace_file",
-            Self::ArtifactRead => "artifact.read",
-            Self::ProductSubmitTicket => "product.submit_ticket",
-            Self::CandidateCheckpointRegression => "candidate.checkpoint_regression",
-            Self::CandidateSubmit => "candidate.submit",
-            Self::QualityRunFullSuite => "quality.run_full_suite",
-            Self::QualitySubmitReview => "quality.submit_review",
-            Self::WorkComplete => "work.complete",
-            Self::WorkspaceWrite
-            | Self::WorkspaceEdit
-            | Self::WorkspaceSearch
-            | Self::WorkspaceList
-            | Self::Shell => return None,
-        })
-    }
-
-    /// Return the capability method expected from a Luau handler.
-    #[must_use]
-    pub fn capability_method(self) -> &'static str {
-        match self {
-            Self::WorkspaceWrite => "workspace.write",
-            Self::WorkspaceEdit => "workspace.edit",
-            Self::WorkspaceSearch => "workspace.search",
-            Self::WorkspaceList => "workspace.list",
-            Self::Shell => "shell.exec",
-            _ => self.daemon_operation().unwrap_or(""),
-        }
-    }
-
-    /// Whether this tool is the one-shot terminal surface.
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::CandidateSubmit | Self::QualitySubmitReview | Self::WorkComplete
-        )
-    }
-
-    const fn defers_without_daemon(self) -> bool {
-        matches!(self, Self::WorkComplete)
-    }
-
-    /// Whether the operation receives host-owned retry identity fields.
-    #[must_use]
-    pub const fn is_mutating(self) -> bool {
-        matches!(
-            self,
-            Self::ArtifactSeal
-                | Self::PublicationCreate
-                | Self::ProductSubmitTicket
-                | Self::CandidateCheckpointRegression
-                | Self::CandidateSubmit
-                | Self::QualityRunFullSuite
-                | Self::QualitySubmitReview
-        )
+/// Return the stable Factory execution contract for one actor tool.
+#[must_use]
+pub fn tool_contract(tool: ToolName) -> FactoryToolContract {
+    match tool {
+        ToolName::WorkspaceRead => contract("workspace.read", Some("workspace.read")),
+        ToolName::WorkspaceWrite => contract("workspace.write", None),
+        ToolName::WorkspaceEdit => contract("workspace.edit", None),
+        ToolName::WorkspaceSearch => contract("workspace.search", None),
+        ToolName::WorkspaceList => contract("workspace.list", None),
+        ToolName::Shell => contract("shell.exec", None),
+        ToolName::ForumSearch => contract("forum.search", Some("forum.search")),
+        ToolName::ForumListTopics => contract("forum.list_topics", Some("forum.list_topics")),
+        ToolName::ForumListThreads => contract("forum.list_threads", Some("forum.list_threads")),
+        ToolName::ForumReadThread => contract("forum.read_thread", Some("forum.read_thread")),
+        ToolName::PublicationCreate => contract("publication.create", Some("publication.create")),
+        ToolName::ArtifactSeal => contract("artifact.seal_workspace_file", Some("artifact.seal_workspace_file")),
+        ToolName::ArtifactRead => contract("artifact.read", Some("artifact.read")),
+        ToolName::ProductSubmitTicket => contract("product.submit_ticket", Some("product.submit_ticket")),
+        ToolName::CandidateCheckpointRegression => contract("candidate.checkpoint_regression", Some("candidate.checkpoint_regression")),
+        ToolName::CandidateSubmit => contract("candidate.submit", Some("candidate.submit")),
+        ToolName::QualityRunFullSuite => contract("quality.run_full_suite", Some("quality.run_full_suite")),
+        ToolName::QualitySubmitReview => contract("quality.submit_review", Some("quality.submit_review")),
+        ToolName::WorkComplete => contract("work.complete", Some("work.complete")),
     }
 }
 
-impl fmt::Display for ToolName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
+const fn contract(
+    capability_method: &'static str,
+    daemon_operation: Option<&'static str>,
+) -> FactoryToolContract {
+    FactoryToolContract {
+        capability_method,
+        daemon_operation,
     }
 }
 
@@ -662,14 +535,19 @@ impl fmt::Display for PolicyBindingError {
 
 impl std::error::Error for PolicyBindingError {}
 
-/// Validate sealed Luau declarations against an exact packet allowlist.
-///
-/// The slice type is intentionally generic at the host boundary: callers pass
-/// `LuaPolicy::tools()` directly. No policy source is read from disk here.
-pub fn bind_policy(
-    policy_tools: &[tea_luau::PolicyTool],
-    packet_tools: &[ToolName],
+/// Validate Tea's language-neutral extension declarations against an exact
+/// Factory packet allowlist.
+pub fn bind_extension_tools(
+    extension_tools: &[ExtensionToolDescription],
+    packet_tool_names: &[String],
 ) -> Result<Vec<BoundTool>, PolicyBindingError> {
+    let packet_tools = packet_tool_names
+        .iter()
+        .map(|name| {
+            ToolName::parse(name)
+                .ok_or_else(|| PolicyBindingError(format!("packet contains unknown tool {name:?}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let packet: BTreeSet<_> = packet_tools.iter().copied().collect();
     if packet.len() != packet_tools.len() {
         return Err(PolicyBindingError(
@@ -677,8 +555,8 @@ pub fn bind_policy(
         ));
     }
     let mut seen = BTreeSet::new();
-    let mut bound = Vec::with_capacity(policy_tools.len());
-    for declaration in policy_tools {
+    let mut bound = Vec::with_capacity(extension_tools.len());
+    for declaration in extension_tools {
         let name = ToolName::parse(&declaration.name).ok_or_else(|| {
             PolicyBindingError(format!(
                 "policy declares unknown tool {:?}",
@@ -752,7 +630,7 @@ impl<C> FactoryCapability<C>
 where
     C: FramedDaemon + 'static,
 {
-    /// Construct a capability from declarations admitted by [`bind_policy`].
+    /// Construct a capability from declarations admitted by [`bind_extension_tools`].
     pub fn new(
         daemon: Arc<C>,
         tools: Vec<BoundTool>,
@@ -783,55 +661,55 @@ where
 
     async fn invoke_request(
         &self,
-        request: CapabilityRequest,
+        request: ExtensionCapabilityRequest,
         cancellation: CancellationToken,
-    ) -> Result<CapabilityResponse, CapabilityError> {
+    ) -> Result<ExtensionCapabilityResponse, ExtensionCapabilityError> {
         let name =
-            ToolName::parse(&request.tool_name).ok_or_else(|| CapabilityError::MethodDenied {
+            ToolName::parse(&request.tool_name).ok_or_else(|| ExtensionCapabilityError::MethodDenied {
                 capability: request.capability.clone(),
                 method: request.method.clone(),
             })?;
         let declaration = self
             .tools
             .get(&name)
-            .ok_or_else(|| CapabilityError::MethodDenied {
+            .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
                 capability: request.capability.clone(),
                 method: request.method.clone(),
             })?;
         if request.capability != FACTORY_CAPABILITY
-            || request.method != name.capability_method()
+            || request.method != tool_contract(name).capability_method
             || declaration.name != name
         {
-            return Err(CapabilityError::MethodDenied {
+            return Err(ExtensionCapabilityError::MethodDenied {
                 capability: request.capability,
                 method: request.method,
             });
         }
         validate_json_schema(&declaration.schema, &request.arguments).map_err(|error| {
-            CapabilityError::InvalidArguments {
+            ExtensionCapabilityError::InvalidArguments {
                 message: error.to_string(),
             }
         })?;
         if cancellation.is_cancelled() {
-            return Err(CapabilityError::Cancelled);
+            return Err(ExtensionCapabilityError::Cancelled);
         }
 
         let payload = normalize_wire_input(name, request.arguments, &self.command_context)
-            .map_err(|error| CapabilityError::InvalidArguments { message: error })?;
+            .map_err(|error| ExtensionCapabilityError::InvalidArguments { message: error })?;
         if name == ToolName::WorkComplete && self.command_context.product_submission_rejected() {
-            return Err(CapabilityError::Execution {
+            return Err(ExtensionCapabilityError::Execution {
                 message: "The previous Product ticket submission was rejected. Repair and resubmit a valid proposal or continue the investigation; work_complete is not available yet.".into(),
             });
         }
         self.command_context
             .require_engineering_checkpoint_before(name)
-            .map_err(|message| CapabilityError::Execution {
+            .map_err(|message| ExtensionCapabilityError::Execution {
                 message: message.to_owned(),
             })?;
         if name == ToolName::CandidateSubmit {
             self.command_context
                 .validate_engineering_submission_identity(&payload)
-                .map_err(|message| CapabilityError::Execution {
+                .map_err(|message| ExtensionCapabilityError::Execution {
                     message: message.to_owned(),
                 })?;
         }
@@ -839,24 +717,24 @@ where
             .to_json_string().map_or_else(|_| format!("{name}:<unserializable>"), |arguments| format!("{name}:{arguments}"));
         self.command_context
             .record_engineering_tool_call(name, &tool_signature)
-            .map_err(|message| CapabilityError::Execution {
+            .map_err(|message| ExtensionCapabilityError::Execution {
                 message: message.to_owned(),
             })?;
-        if name.defers_without_daemon() {
+        if name == ToolName::WorkComplete {
             self.terminal
                 .defer(name, payload)
-                .map_err(|error| CapabilityError::Execution {
+                .map_err(|error| ExtensionCapabilityError::Execution {
                     message: error.to_string(),
                 })?;
-            return Ok(CapabilityResponse {
+            return Ok(ExtensionCapabilityResponse {
                 value: capability_result(
                     name,
                     JsonValue::object([("accepted", JsonValue::Bool(true))]),
                 )
-                .map_err(|message| CapabilityError::Execution { message })?,
+                .map_err(|message| ExtensionCapabilityError::Execution { message })?,
             });
         }
-        let value = if let Some(operation) = name.daemon_operation() {
+        let value = if let Some(operation) = tool_contract(name).daemon_operation {
             let started = std::time::Instant::now();
             let value = match self.daemon.call(operation, payload.clone()).await {
                 Ok(value) => value,
@@ -866,7 +744,7 @@ where
                     if name == ToolName::ProductSubmitTicket {
                         self.command_context.mark_product_submission_rejected();
                     }
-                    return Err(CapabilityError::Execution {
+                    return Err(ExtensionCapabilityError::Execution {
                         message: task_diagnostic(name, &error.to_string()),
                     });
                 }
@@ -877,7 +755,7 @@ where
                 if name == ToolName::ProductSubmitTicket {
                     self.command_context.mark_product_submission_rejected();
                 }
-                return Err(CapabilityError::Execution {
+                return Err(ExtensionCapabilityError::Execution {
                     message: task_diagnostic(name, &error),
                 });
             }
@@ -889,7 +767,7 @@ where
                 self.command_context.clear_product_submission_rejected();
                 self.terminal
                     .defer(ToolName::WorkComplete, JsonValue::Object(BTreeMap::new()))
-                    .map_err(|error| CapabilityError::Execution {
+                    .map_err(|error| ExtensionCapabilityError::Execution {
                         message: error.to_string(),
                     })?;
             }
@@ -903,14 +781,14 @@ where
                 }
                 self.command_context
                     .record_engineering_checkpoint()
-                    .map_err(|message| CapabilityError::Execution {
+                    .map_err(|message| ExtensionCapabilityError::Execution {
                         message: message.to_owned(),
                     })?;
             }
             if name == ToolName::CandidateSubmit {
                 self.command_context
                     .record_engineering_submission()
-                    .map_err(|message| CapabilityError::Execution {
+                    .map_err(|message| ExtensionCapabilityError::Execution {
                         message: message.to_owned(),
                     })?;
             }
@@ -924,7 +802,7 @@ where
             if name.is_terminal() {
                 self.terminal
                     .defer(name, payload)
-                    .map_err(|error| CapabilityError::Execution {
+                    .map_err(|error| ExtensionCapabilityError::Execution {
                         message: error.to_string(),
                     })?;
             }
@@ -935,7 +813,7 @@ where
             let local = self
                 .local
                 .as_ref()
-                .ok_or_else(|| CapabilityError::MethodDenied {
+                .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
                     capability: FACTORY_CAPABILITY.into(),
                     method: request.method,
                 })?;
@@ -949,32 +827,32 @@ where
                 Err(error) => {
                     self.command_context
                         .record_tool_execution(name, started.elapsed(), false);
-                    return Err(CapabilityError::Execution {
+                    return Err(ExtensionCapabilityError::Execution {
                         message: task_diagnostic(name, &error.to_string()),
                     });
                 }
             }
         };
-        Ok(CapabilityResponse {
+        Ok(ExtensionCapabilityResponse {
             value: capability_result_with_termination(
                 name,
                 value,
                 name.is_terminal() || name == ToolName::ProductSubmitTicket,
             )
-            .map_err(|message| CapabilityError::Execution { message })?,
+            .map_err(|message| ExtensionCapabilityError::Execution { message })?,
         })
     }
 }
 
-impl<C> LuauCapability for FactoryCapability<C>
+impl<C> ExtensionCapability for FactoryCapability<C>
 where
     C: FramedDaemon + 'static,
 {
     fn invoke(
         &self,
-        request: CapabilityRequest,
+        request: ExtensionCapabilityRequest,
         cancellation: CancellationToken,
-    ) -> CapabilityFuture {
+    ) -> ExtensionCapabilityFuture {
         // The handler's future must own the capability object. Cloning the
         // explicit state avoids borrowing a host mutex across an await.
         let capability = Arc::new(self.clone_for_future());
@@ -1620,7 +1498,7 @@ mod tests {
     use tea_core::scheduler::CancellationToken;
     use tea_core::state::ToolCallId;
     use tea_core::tool::ToolUpdateSink;
-    use tea_luau::tool_handler::{CapabilityRequest, LuauCapability};
+    use tea_core::harness::extension::{ExtensionCapability, ExtensionCapabilityRequest};
 
     struct ProductSubmissionDaemon;
 
@@ -1799,11 +1677,13 @@ mod tests {
             Arc::clone(&terminal),
             None,
         );
-        let request = CapabilityRequest {
+        let request = ExtensionCapabilityRequest {
             call_id: ToolCallId::new("product-submit").expect("test call ID is non-empty"),
             tool_name: ToolName::ProductSubmitTicket.as_str().to_owned(),
             capability: FACTORY_CAPABILITY.to_owned(),
-            method: ToolName::ProductSubmitTicket.capability_method().to_owned(),
+            method: tool_contract(ToolName::ProductSubmitTicket)
+                .capability_method
+                .to_owned(),
             arguments: object([]),
             updates: ToolUpdateSink::disabled(),
         };
@@ -1818,6 +1698,39 @@ mod tests {
             terminal.pending().map(|pending| pending.tool),
             Some(ToolName::WorkComplete)
         );
+    }
+
+    #[test]
+    fn factory_capability_rejects_a_method_outside_the_bound_tool_contract() {
+        let terminal = Arc::new(TerminalDeferral::new([ToolName::WorkComplete]));
+        let capability = FactoryCapability::new(
+            Arc::new(ProductSubmissionDaemon),
+            vec![BoundTool {
+                name: ToolName::ProductSubmitTicket,
+                description: "Submit one proposal".to_owned(),
+                schema: object([
+                    ("type", JsonValue::String("object".to_owned())),
+                    ("additionalProperties", JsonValue::Bool(false)),
+                ]),
+                execution_mode: "sequential".to_owned(),
+            }],
+            CommandContext::new(1),
+            terminal,
+            None,
+        );
+        let request = ExtensionCapabilityRequest {
+            call_id: ToolCallId::new("wrong-method").expect("test call ID is non-empty"),
+            tool_name: ToolName::ProductSubmitTicket.as_str().to_owned(),
+            capability: FACTORY_CAPABILITY.to_owned(),
+            method: "product.unbound".to_owned(),
+            arguments: object([]),
+            updates: ToolUpdateSink::disabled(),
+        };
+
+        assert!(matches!(
+            smol::block_on(capability.invoke(request, CancellationToken::new())),
+            Err(ExtensionCapabilityError::MethodDenied { .. })
+        ));
     }
 
     #[test]

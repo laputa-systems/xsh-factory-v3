@@ -7,6 +7,7 @@
 //! loaded from the application checkout by a running actor.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::{
     AbsoluteHostPath, ApplicationRelativePath, AssignmentRole, ContentDigest, ContractError,
@@ -381,7 +382,85 @@ pub enum ActorToolV2 {
 }
 
 impl ActorToolV2 {
-    fn is_allowed_for(self, assignment_role: AssignmentRole) -> bool {
+    /// Complete closed V2 actor-tool identity in wire declaration order.
+    pub const ALL: [Self; 19] = [
+        Self::WorkspaceRead,
+        Self::WorkspaceWrite,
+        Self::WorkspaceEdit,
+        Self::WorkspaceSearch,
+        Self::WorkspaceList,
+        Self::Shell,
+        Self::ForumSearch,
+        Self::ForumListTopics,
+        Self::ForumListThreads,
+        Self::ForumReadThread,
+        Self::PublicationCreate,
+        Self::ArtifactSeal,
+        Self::ArtifactRead,
+        Self::ProductSubmitTicket,
+        Self::CandidateCheckpointRegression,
+        Self::CandidateSubmit,
+        Self::QualityRunFullSuite,
+        Self::QualitySubmitReview,
+        Self::WorkComplete,
+    ];
+
+    /// Parse the only stable model-facing spellings in the V2 actor surface.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "workspace_read" => Self::WorkspaceRead,
+            "workspace_write" => Self::WorkspaceWrite,
+            "workspace_edit" => Self::WorkspaceEdit,
+            "workspace_search" => Self::WorkspaceSearch,
+            "workspace_list" => Self::WorkspaceList,
+            "shell" => Self::Shell,
+            "forum_search" => Self::ForumSearch,
+            "forum_list_topics" => Self::ForumListTopics,
+            "forum_list_threads" => Self::ForumListThreads,
+            "forum_read_thread" => Self::ForumReadThread,
+            "publication_create" => Self::PublicationCreate,
+            "artifact_seal" => Self::ArtifactSeal,
+            "artifact_read" => Self::ArtifactRead,
+            "product_submit_ticket" => Self::ProductSubmitTicket,
+            "candidate_checkpoint_regression" => Self::CandidateCheckpointRegression,
+            "candidate_submit" => Self::CandidateSubmit,
+            "quality_run_full_suite" => Self::QualityRunFullSuite,
+            "quality_submit_review" => Self::QualitySubmitReview,
+            "work_complete" => Self::WorkComplete,
+            _ => return None,
+        })
+    }
+
+    /// Return the stable model-facing spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkspaceRead => "workspace_read",
+            Self::WorkspaceWrite => "workspace_write",
+            Self::WorkspaceEdit => "workspace_edit",
+            Self::WorkspaceSearch => "workspace_search",
+            Self::WorkspaceList => "workspace_list",
+            Self::Shell => "shell",
+            Self::ForumSearch => "forum_search",
+            Self::ForumListTopics => "forum_list_topics",
+            Self::ForumListThreads => "forum_list_threads",
+            Self::ForumReadThread => "forum_read_thread",
+            Self::PublicationCreate => "publication_create",
+            Self::ArtifactSeal => "artifact_seal",
+            Self::ArtifactRead => "artifact_read",
+            Self::ProductSubmitTicket => "product_submit_ticket",
+            Self::CandidateCheckpointRegression => "candidate_checkpoint_regression",
+            Self::CandidateSubmit => "candidate_submit",
+            Self::QualityRunFullSuite => "quality_run_full_suite",
+            Self::QualitySubmitReview => "quality_submit_review",
+            Self::WorkComplete => "work_complete",
+        }
+    }
+
+    /// Whether this tool belongs to the fixed authority of `assignment_role`.
+    #[must_use]
+    pub fn is_allowed_for(self, assignment_role: AssignmentRole) -> bool {
         match self {
             Self::ProductSubmitTicket => assignment_role == AssignmentRole::ProductResearch,
             Self::CandidateCheckpointRegression | Self::CandidateSubmit => {
@@ -405,6 +484,36 @@ impl ActorToolV2 {
             | Self::ArtifactRead
             | Self::WorkComplete => true,
         }
+    }
+
+    /// Whether selecting this tool is a one-shot assignment terminal claim.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::CandidateSubmit | Self::QualitySubmitReview | Self::WorkComplete
+        )
+    }
+
+    /// Whether Factory supplies host-owned replay identity to this operation.
+    #[must_use]
+    pub const fn is_mutating(self) -> bool {
+        matches!(
+            self,
+            Self::ArtifactSeal
+                | Self::PublicationCreate
+                | Self::ProductSubmitTicket
+                | Self::CandidateCheckpointRegression
+                | Self::CandidateSubmit
+                | Self::QualityRunFullSuite
+                | Self::QualitySubmitReview
+        )
+    }
+}
+
+impl fmt::Display for ActorToolV2 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 

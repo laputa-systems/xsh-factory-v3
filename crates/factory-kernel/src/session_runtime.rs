@@ -886,7 +886,7 @@ impl KernelSessionRpc {
             )?;
         self.require_packet_verified()?;
         if request.expected_revision != self.session.resulting_revision.get()
-            || request.role != "pi_transcript_gzip"
+            || request.role != "tea_trace_jsonl_gzip"
             || request.byte_limit == 0
             || request.byte_limit > self.cas.maximum_object_bytes()
         {

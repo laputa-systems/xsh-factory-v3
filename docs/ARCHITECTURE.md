@@ -50,8 +50,18 @@ qualified runtime/evidence set.
 packet to Tea, and speaks the framed kernel descriptor. It has
 no independent lifecycle authority.
 
+Each process contains one Tea hosted epoch: the immutable model-facing prompt,
+ordered tools, resolved extension hooks, runtime policies, capability-binding
+identity, and provider-surface fingerprints. Factory's outer session still owns
+the process, assignment, institutional state, budget, evidence sealing, and
+delivery authority. The hosted epoch creates no Tea session store, files,
+artifact tools, authoring tools, provider discovery, or executor. Factory seeds
+an immutable Tea harness from explicit packet values, resolves the sealed role
+policy through `LuauExtensionEngine`, keeps self-extension off, and lets Tea's
+shared runtime construction path build the caller-driven agent.
+
 The active actor runtime is one qualified Rust executable built against the
-direct local `/Users/josh/d/tea-copy` checkout and the pinned
+direct local `/Users/josh/d/tea` checkout and the pinned
 `nightly-2026-07-24` toolchain. The installed-runtime receipt binds the host
 binary, complete host source graph, core `Cargo.lock`, exact core `HEAD`,
 complete core source inventory, and their digests. Qualification refuses a
@@ -71,8 +81,9 @@ is never retained in daemon environment state. Child tools and evidence do not
 receive it.
 
 The application bundle is V2-only and inert. Each role's sealed Luau policy is
-carried in the packet, checked against the exact packet tool allowlist, and
-bound to narrow Rust capabilities. A policy declaration is prompt-facing data,
+carried in the packet, adapted to a standard Tea extension source tree, checked
+against the exact packet tool allowlist, and bound through an immutable,
+versioned `factory` capability grant. A policy declaration is prompt-facing data,
 not authority: it cannot open files, inspect the environment, access a socket
 or database, run a process, or choose another assignment. The host never reads
 mutable application source at actor runtime.

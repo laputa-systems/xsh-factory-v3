@@ -17,7 +17,7 @@ sandbox. See [trust assumptions](docs/trust-assumptions.md).
 ## Local setup
 
 Factory links directly to the frozen local Tea checkout at
-`/Users/josh/d/tea-copy`. Factory never uses a package-registry runtime or
+`/Users/josh/d/tea`. Factory never uses a package-registry runtime or
 discovers agent code from the environment.
 Populate both Cargo workspaces once:
 

@@ -2280,28 +2280,7 @@ fn validate_credential_environment(field: &'static str, value: &str) -> Result<(
 }
 
 fn is_known_assignment_tool(value: &str) -> bool {
-    matches!(
-        value,
-        "workspace_read"
-            | "workspace_write"
-            | "workspace_edit"
-            | "workspace_search"
-            | "workspace_list"
-            | "shell"
-            | "forum_search"
-            | "forum_list_topics"
-            | "forum_list_threads"
-            | "forum_read_thread"
-            | "publication_create"
-            | "artifact_seal"
-            | "artifact_read"
-            | "product_submit_ticket"
-            | "candidate_checkpoint_regression"
-            | "candidate_submit"
-            | "quality_run_full_suite"
-            | "quality_submit_review"
-            | "work_complete"
-    )
+    ActorToolV2::parse(value).is_some()
 }
 
 fn is_known_terminal_operation(value: &str) -> bool {
@@ -3268,26 +3247,5 @@ fn parse_approved_tool(value: &str) -> Result<ApprovedToolV2, String> {
 }
 
 fn parse_tool(value: &str) -> Result<ActorToolV2, String> {
-    match value {
-        "workspace_read" => Ok(ActorToolV2::WorkspaceRead),
-        "workspace_write" => Ok(ActorToolV2::WorkspaceWrite),
-        "workspace_edit" => Ok(ActorToolV2::WorkspaceEdit),
-        "workspace_search" => Ok(ActorToolV2::WorkspaceSearch),
-        "workspace_list" => Ok(ActorToolV2::WorkspaceList),
-        "shell" => Ok(ActorToolV2::Shell),
-        "forum_search" => Ok(ActorToolV2::ForumSearch),
-        "forum_list_topics" => Ok(ActorToolV2::ForumListTopics),
-        "forum_list_threads" => Ok(ActorToolV2::ForumListThreads),
-        "forum_read_thread" => Ok(ActorToolV2::ForumReadThread),
-        "publication_create" => Ok(ActorToolV2::PublicationCreate),
-        "artifact_seal" => Ok(ActorToolV2::ArtifactSeal),
-        "artifact_read" => Ok(ActorToolV2::ArtifactRead),
-        "product_submit_ticket" => Ok(ActorToolV2::ProductSubmitTicket),
-        "candidate_checkpoint_regression" => Ok(ActorToolV2::CandidateCheckpointRegression),
-        "candidate_submit" => Ok(ActorToolV2::CandidateSubmit),
-        "quality_run_full_suite" => Ok(ActorToolV2::QualityRunFullSuite),
-        "quality_submit_review" => Ok(ActorToolV2::QualitySubmitReview),
-        "work_complete" => Ok(ActorToolV2::WorkComplete),
-        _ => Err(format!("unsupported actor tool {value:?}")),
-    }
+    ActorToolV2::parse(value).ok_or_else(|| format!("unsupported actor tool {value:?}"))
 }

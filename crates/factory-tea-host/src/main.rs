@@ -13,12 +13,13 @@ use factory_protocol::{
 };
 use tea_core::scheduler::ModelProvider;
 use tea_core::state::StopReason;
-use tea_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
-use tea_core::scheduler::CancellationToken;
-use tea_luau::{PolicyLimits, tool_handler::HandlerLimits};
+use tea_core::event::EventObserver;
+use tea_core::trace::TraceObserver;
+use tea_core::{effect::RunProvenance, harness::HarnessSurfaceFingerprints};
 use tea_protocol::{JsonNumber, JsonValue};
 use tea_providers::RetryPolicy;
 use tea_providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
+use tea_trace::{JsonLinesSink, RedactingSink, Redactor, TraceEvent, TraceSink};
 use factory_settings::{
     MAX_PROVIDER_RETRIES, PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
 };
@@ -26,7 +27,7 @@ use flate2::{Compression, write::GzEncoder};
 use std::{
     env,
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{self, Write},
     path::Path,
     process::ExitCode,
     sync::{Arc, Mutex},
@@ -85,16 +86,19 @@ async fn run() -> Result<(), String> {
         command_context.clone(),
         terminal,
         Some(workspace),
-        PolicyLimits::default(),
-        HandlerLimits::default(),
         Some(cost_reader),
     )
     .map_err(|e| e.to_string())?;
     let prepared = input.prepare().map_err(|e| e.to_string())?;
-    let live_transcript = Arc::new(LiveTranscriptWriter::new(&admission)?);
-    let _live_transcript_subscription = prepared
+    let trace_sink = FactoryTraceSink::new(&admission)?;
+    let trace_observer = Arc::new(TraceObserver::new_with_provenance(
+        format!("factory-assignment-{}", admission.packet.assignment_id),
+        prepared.provenance().clone(),
+        RedactingSink::new(trace_sink.clone(), FactoryTraceRedactor),
+    ));
+    let _trace_subscription = prepared
         .agent()
-        .subscribe(Arc::clone(&live_transcript) as Arc<dyn EventObserver>);
+        .subscribe(Arc::clone(&trace_observer) as Arc<dyn EventObserver>);
     let result = match prepared.drive().await {
         Ok(result) => result,
         Err(error) => {
@@ -112,7 +116,20 @@ async fn run() -> Result<(), String> {
         result.terminal.is_some(),
         result.cost_micro_usd.is_some(),
     );
-    let transcript = write_transcript(&admission, &result.events, &result.diagnostics)?;
+    if trace_observer.failed_events() != 0 {
+        return Err("Tea trace persistence failed during assignment execution".to_owned());
+    }
+    let summary = execution_summary(
+        &admission,
+        prepared.provenance(),
+        prepared.surface_fingerprints(),
+        &result.diagnostics,
+        result.cost_limit_reached,
+        result.terminal.as_ref().map(|terminal| terminal.tool),
+        trace_sink.truncated()?,
+    )?;
+    trace_sink.append_summary(&summary)?;
+    let transcript = gzip_transcript(&trace_sink.bytes()?)?;
     let transcript_id =
         seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
     let usage = provider.usage_snapshot();
@@ -182,18 +199,25 @@ async fn run() -> Result<(), String> {
     Ok(())
 }
 
-struct LiveTranscriptState {
+const TRACE_SUMMARY_RESERVE: usize = 8 * 1024;
+const TRACE_END_RESERVE: usize = 2 * 1024;
+
+struct FactoryTraceState {
     file: File,
-    byte_length: usize,
+    bytes: Vec<u8>,
     truncated: bool,
-    byte_limit: usize,
+    trace_limit: usize,
+    end_limit: usize,
+    raw_limit: usize,
 }
 
-struct LiveTranscriptWriter {
-    state: Mutex<LiveTranscriptState>,
+/// Factory-owned bounded persistence for already-redacted Tea trace records.
+#[derive(Clone)]
+struct FactoryTraceSink {
+    state: Arc<Mutex<FactoryTraceState>>,
 }
 
-impl LiveTranscriptWriter {
+impl FactoryTraceSink {
     fn new(admission: &Admission) -> Result<Self, String> {
         let path = Path::new(&admission.packet.staging_root).join("session.ndjson");
         let file = OpenOptions::new()
@@ -202,56 +226,103 @@ impl LiveTranscriptWriter {
             .write(true)
             .open(&path)
             .map_err(|error| format!("create live transcript {}: {error}", path.display()))?;
+        let raw_limit = max_gzip_input(admission.packet.limits.output_byte_limit as usize);
+        if raw_limit < TRACE_SUMMARY_RESERVE + TRACE_END_RESERVE + 1024 {
+            return Err("assignment output limit is too small for required Tea trace evidence".to_owned());
+        }
         Ok(Self {
-            state: Mutex::new(LiveTranscriptState {
+            state: Arc::new(Mutex::new(FactoryTraceState {
                 file,
-                byte_length: 0,
+                bytes: Vec::new(),
                 truncated: false,
-                byte_limit: admission.packet.limits.output_byte_limit as usize,
-            }),
+                trace_limit: raw_limit - TRACE_SUMMARY_RESERVE - TRACE_END_RESERVE,
+                end_limit: raw_limit - TRACE_SUMMARY_RESERVE,
+                raw_limit,
+            })),
         })
     }
 
-    fn append(&self, event: &AgentEvent) {
-        let line = match project_event(event) {
-            Ok(line) => line,
-            Err(error) => {
-                eprintln!("factory-tea-host live transcript projection failed: {error}");
-                return;
-            }
-        };
-        if line.is_empty() {
-            return;
-        }
-        let mut line = line.into_bytes();
+    fn append_summary(&self, summary: &str) -> Result<(), String> {
+        let mut line = summary.as_bytes().to_vec();
         line.push(b'\n');
-        let mut state = self.state.lock().expect("live transcript mutex poisoned");
-        if state.truncated {
-            return;
+        let mut state = self.state.lock().map_err(|_| "Tea trace mutex poisoned")?;
+        if state.bytes.len().saturating_add(line.len()) > state.raw_limit {
+            return Err("Factory execution summary exceeds reserved Tea trace evidence space".to_owned());
         }
-        if state.byte_length.saturating_add(line.len()) > state.byte_limit {
-            state.truncated = true;
-            return;
-        }
-        if let Err(error) = state.file.write_all(&line).and_then(|()| state.file.flush()) {
-            eprintln!("factory-tea-host live transcript write failed: {error}");
-            state.truncated = true;
-            return;
-        }
-        state.byte_length = state.byte_length.saturating_add(line.len());
+        append_trace_bytes(&mut state, &line).map_err(|error| error.to_string())
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        self.state
+            .lock()
+            .map(|state| state.bytes.clone())
+            .map_err(|_| "Tea trace mutex poisoned".to_owned())
+    }
+
+    fn truncated(&self) -> Result<bool, String> {
+        self.state
+            .lock()
+            .map(|state| state.truncated)
+            .map_err(|_| "Tea trace mutex poisoned".to_owned())
     }
 }
 
-impl EventObserver for LiveTranscriptWriter {
-    fn observe<'a>(
-        &'a self,
-        event: &'a AgentEvent,
-        _cancellation: CancellationToken,
-    ) -> ObserverFuture<'a> {
-        Box::pin(async move {
-            self.append(event);
-            Ok(())
-        })
+impl TraceSink for FactoryTraceSink {
+    type Error = io::Error;
+
+    fn append(&mut self, event: TraceEvent) -> Result<(), Self::Error> {
+        let is_terminal = matches!(event, TraceEvent::EpisodeEnd(_));
+        let mut encoder = JsonLinesSink::new(Vec::new());
+        encoder.append(event)?;
+        let line = encoder.into_inner();
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Tea trace mutex poisoned"))?;
+        let limit = if is_terminal {
+            state.end_limit
+        } else {
+            state.trace_limit
+        };
+        if state.bytes.len().saturating_add(line.len()) > limit {
+            state.truncated = true;
+            return Ok(());
+        }
+        append_trace_bytes(&mut state, &line)
+    }
+}
+
+fn append_trace_bytes(state: &mut FactoryTraceState, bytes: &[u8]) -> io::Result<()> {
+    state.file.write_all(bytes)?;
+    state.file.flush()?;
+    state.bytes.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Factory's trace boundary removes prompts and credentials before persistence.
+#[derive(Clone, Copy)]
+struct FactoryTraceRedactor;
+
+impl Redactor for FactoryTraceRedactor {
+    fn redact(&self, event: TraceEvent) -> TraceEvent {
+        match event {
+            TraceEvent::Turn(mut turn) => {
+                turn.input = "[redacted model input]".to_owned();
+                turn.output = turn.output.map(|output| bound(&output, 16 * 1024));
+                TraceEvent::Turn(turn)
+            }
+            TraceEvent::Tool(mut tool) => {
+                tool.input = redact_tool_input(&tool.input);
+                tool.output = tool.output.map(|output| bound(&output, 16 * 1024));
+                tool.error = tool.error.map(|error| bound(&error, 4 * 1024));
+                TraceEvent::Tool(tool)
+            }
+            TraceEvent::EpisodeEnd(mut end) => {
+                end.error = end.error.map(|error| bound(&error, 1024));
+                TraceEvent::EpisodeEnd(end)
+            }
+            event @ (TraceEvent::EpisodeHeader(_) | TraceEvent::Compaction(_)) => event,
+        }
     }
 }
 
@@ -317,7 +388,7 @@ async fn seal_transcript(
     transcript: Vec<u8>,
     command_context: &CommandContext,
 ) -> Result<i64, String> {
-    let path = Path::new(&admission.packet.staging_root).join("session.ndjson.gz");
+    let path = Path::new(&admission.packet.staging_root).join("tea-trace.jsonl.gz");
     fs::write(path, transcript).map_err(|e| format!("write transcript: {e}"))?;
     let response = daemon
         .call(
@@ -333,9 +404,12 @@ async fn seal_transcript(
                 ),
                 (
                     "staging_relative_path",
-                    JsonValue::String("session.ndjson.gz".to_owned()),
+                    JsonValue::String("tea-trace.jsonl.gz".to_owned()),
                 ),
-                ("role", JsonValue::String("pi_transcript_gzip".to_owned())),
+                (
+                    "role",
+                    JsonValue::String("tea_trace_jsonl_gzip".to_owned()),
+                ),
                 (
                     "byte_limit",
                     number(u64::from(admission.packet.limits.output_byte_limit))?,
@@ -365,33 +439,15 @@ async fn seal_transcript(
     Ok(receipt.artifact_id)
 }
 
-fn write_transcript(
+fn execution_summary(
     admission: &Admission,
-    events: &[AgentEvent],
+    provenance: &RunProvenance,
+    surfaces: &HarnessSurfaceFingerprints,
     diagnostics: &ExecutionDiagnostics,
-) -> Result<Vec<u8>, String> {
-    let limit = admission.packet.limits.output_byte_limit as usize;
-    let mut lines = Vec::new();
-    for event in events {
-        let line = project_event(event)?;
-        if line.is_empty() {
-            continue;
-        }
-        if gzip_upper_bound_len(lines.len() + line.len() + 1) > limit {
-            break;
-        }
-        lines.extend_from_slice(line.as_bytes());
-        lines.push(b'\n');
-    }
-    let summary = execution_summary(diagnostics)?;
-    if gzip_upper_bound_len(lines.len() + summary.len() + 1) <= limit {
-        lines.extend_from_slice(summary.as_bytes());
-        lines.push(b'\n');
-    }
-    gzip_transcript(&lines)
-}
-
-fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, String> {
+    cost_limit_reached: bool,
+    terminal: Option<ToolName>,
+    trace_truncated: bool,
+) -> Result<String, String> {
     let tool_executions = diagnostics
         .tool_executions
         .iter()
@@ -406,7 +462,126 @@ fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, Strin
         })
         .collect::<Result<Vec<_>, String>>()?;
     JsonValue::object([
-        ("type", JsonValue::String("execution_summary".to_owned())),
+        (
+            "schema_version",
+            JsonValue::Number(JsonNumber::Unsigned(1)),
+        ),
+        (
+            "type",
+            JsonValue::String("factory.execution_summary.v1".to_owned()),
+        ),
+        (
+            "factory",
+            JsonValue::object([
+                (
+                    "application_revision_id",
+                    JsonValue::String(admission.packet.application_revision_id.to_string()),
+                ),
+                (
+                    "assignment_id",
+                    JsonValue::String(admission.packet.assignment_id.to_string()),
+                ),
+                (
+                    "kernel_build_id",
+                    JsonValue::String(admission.packet.kernel_build_id.clone()),
+                ),
+                (
+                    "rust_host_identity",
+                    JsonValue::String(factory_settings::RUST_HOST_IDENTITY.to_owned()),
+                ),
+                (
+                    "packet_digest",
+                    JsonValue::String(admission.frame.packet_digest.clone()),
+                ),
+                (
+                    "policy_digest",
+                    JsonValue::String(admission.packet.policy_digest.clone()),
+                ),
+            ]),
+        ),
+        (
+            "model",
+            JsonValue::object([
+                (
+                    "provider",
+                    JsonValue::String(admission.packet.model.provider.clone()),
+                ),
+                (
+                    "model_id",
+                    JsonValue::String(admission.packet.model.model_id.clone()),
+                ),
+                (
+                    "thinking_level",
+                    JsonValue::String(admission.packet.model.thinking_level.clone()),
+                ),
+            ]),
+        ),
+        (
+            "tea_provenance",
+            JsonValue::object([
+                (
+                    "session_id",
+                    optional_borrowed_string(provenance.session_id.as_deref()),
+                ),
+                (
+                    "operation_id",
+                    optional_borrowed_string(provenance.operation_id.as_deref()),
+                ),
+                (
+                    "epoch_id",
+                    optional_borrowed_string(provenance.epoch_id.as_deref()),
+                ),
+                (
+                    "core_run_id",
+                    optional_borrowed_string(provenance.core_run_id.as_deref()),
+                ),
+                (
+                    "harness_snapshot_id",
+                    optional_borrowed_string(provenance.harness_snapshot_id.as_deref()),
+                ),
+                (
+                    "harness_revision_id",
+                    optional_borrowed_string(provenance.harness_revision_id.as_deref()),
+                ),
+                (
+                    "model_harness_profile_id",
+                    optional_borrowed_string(provenance.model_harness_profile_id.as_deref()),
+                ),
+                (
+                    "provider_surface_digest",
+                    optional_borrowed_string(provenance.provider_surface_digest.as_deref()),
+                ),
+            ]),
+        ),
+        (
+            "tea_surfaces",
+            JsonValue::object([
+                (
+                    "system_prompt_digest",
+                    JsonValue::String(surfaces.system_prompt_digest.to_hex()),
+                ),
+                (
+                    "ordered_tool_definitions_digest",
+                    JsonValue::String(surfaces.ordered_tool_definitions_digest.to_hex()),
+                ),
+                (
+                    "hook_bundle_digest",
+                    JsonValue::String(surfaces.hook_bundle_digest.to_hex()),
+                ),
+                (
+                    "capability_bindings_digest",
+                    JsonValue::String(surfaces.capability_bindings_digest.to_hex()),
+                ),
+                (
+                    "compaction_policy_digest",
+                    JsonValue::String(surfaces.compaction_policy_digest.to_hex()),
+                ),
+                (
+                    "provider_surface_digest",
+                    JsonValue::String(surfaces.provider_surface_digest.to_hex()),
+                ),
+            ]),
+        ),
         (
             "turns_started",
             number(u64::from(diagnostics.turns_started))?,
@@ -415,64 +590,26 @@ fn execution_summary(diagnostics: &ExecutionDiagnostics) -> Result<String, Strin
             "engineering_phase",
             JsonValue::String(diagnostics.engineering_phase.clone()),
         ),
+        ("cost_limit_reached", JsonValue::Bool(cost_limit_reached)),
+        (
+            "terminal_operation",
+            terminal.map_or(JsonValue::Null, |tool| {
+                JsonValue::String(tool.as_str().to_owned())
+            }),
+        ),
+        ("trace_truncated", JsonValue::Bool(trace_truncated)),
         ("tool_executions", JsonValue::Array(tool_executions)),
     ])
     .to_json_string()
     .map_err(|e| e.to_string())
 }
 
-fn project_event(event: &AgentEvent) -> Result<String, String> {
-    let mut fields = vec![("sequence", number(event.sequence.0)?)];
-    match &event.kind {
-        AgentEventKind::AgentStart => {
-            fields.push(("type", JsonValue::String("agent_start".to_owned())));
-        }
-        AgentEventKind::TurnStart { turn_id } => {
-            fields.push(("type", JsonValue::String("turn_start".to_owned())));
-            fields.push(("turn_id", number(turn_id.0)?));
-        }
-        AgentEventKind::TurnEnd { turn_id, reason } => {
-            fields.push(("type", JsonValue::String("turn_end".to_owned())));
-            fields.push(("turn_id", number(turn_id.0)?));
-            fields.push(("reason", JsonValue::String(format!("{reason:?}"))));
-        }
-        AgentEventKind::MessageEnd { message } => {
-            fields.push(("type", JsonValue::String("message_end".to_owned())));
-            if let tea_core::state::AgentMessage::Assistant { content, .. } = message {
-                fields.push((
-                    "assistant_text",
-                    JsonValue::String(bound(content, 16 * 1024)),
-                ));
-            }
-        }
-        AgentEventKind::ToolExecutionStart {
-            tool_name,
-            arguments,
-            ..
-        } => {
-            fields.push(("type", JsonValue::String("tool_start".to_owned())));
-            fields.push(("tool", JsonValue::String(tool_name.clone())));
-            fields.push(("arguments", redacted_json(arguments.as_str())));
-        }
-        AgentEventKind::ToolExecutionEnd {
-            tool_name, result, ..
-        } => {
-            fields.push(("type", JsonValue::String("tool_end".to_owned())));
-            fields.push(("tool", JsonValue::String(tool_name.clone())));
-            fields.push((
-                "result",
-                JsonValue::String(bound(&result.content, 16 * 1024)),
-            ));
-            fields.push(("is_error", JsonValue::Bool(result.is_error)));
-        }
-        AgentEventKind::AgentEnd { .. } => {
-            fields.push(("type", JsonValue::String("agent_end".to_owned())));
-        }
-        _ => return Ok(String::new()),
-    }
-    JsonValue::object(fields)
+fn redact_tool_input(text: &str) -> String {
+    let value = redacted_json(text);
+    value
         .to_json_string()
-        .map_err(|e| e.to_string())
+        .map(|value| bound(&value, 16 * 1024))
+        .unwrap_or_else(|_| "\"invalid tool JSON\"".to_owned())
 }
 
 fn redacted_json(text: &str) -> JsonValue {
@@ -557,6 +694,10 @@ fn optional_string(value: Option<String>) -> JsonValue {
     value.map_or(JsonValue::Null, JsonValue::String)
 }
 
+fn optional_borrowed_string(value: Option<&str>) -> JsonValue {
+    value.map_or(JsonValue::Null, |value| JsonValue::String(value.to_owned()))
+}
+
 fn optional_number(value: Option<u64>) -> Result<JsonValue, String> {
     value
         .map(number)
@@ -613,6 +754,20 @@ fn gzip_upper_bound_len(input_len: usize) -> usize {
     }
 }
 
+fn max_gzip_input(output_limit: usize) -> usize {
+    let mut low = 0;
+    let mut high = output_limit;
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if gzip_upper_bound_len(middle) <= output_limit {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    low
+}
+
 fn gzip_transcript(input: &[u8]) -> Result<Vec<u8>, String> {
     let compressed = gzip_with_level(input, Compression::default())?;
     if compressed.len() < gzip_upper_bound_len(input.len()) {
@@ -634,10 +789,17 @@ fn gzip_with_level(input: &[u8], level: Compression) -> Result<Vec<u8>, String> 
 #[cfg(test)]
 mod tests {
     use super::{
-        gzip_transcript, gzip_upper_bound_len, micro_usd, packet_verification_error,
-        provider_request_timeout, provider_retry_policy, provider_stall_timeout, CostSnapshot,
+        CostSnapshot, FactoryTraceRedactor, execution_summary, gzip_transcript,
+        gzip_upper_bound_len, max_gzip_input, micro_usd, packet_verification_error,
+        provider_request_timeout, provider_retry_policy, provider_stall_timeout,
     };
+    use factory_protocol::{AssignmentPacketWireV2, SessionAdmissionFrameV2};
+    use factory_tea_host::{Admission, ExecutionDiagnostics, ToolName};
+    use tea_core::effect::RunProvenance;
+    use tea_core::harness::HarnessSurfaceFingerprints;
     use tea_protocol::JsonValue;
+    use tea_session::Digest;
+    use tea_trace::{Redactor, Tool, TraceEvent, Turn};
     use std::fs;
     use std::process::Command;
     use std::time::Duration;
@@ -706,6 +868,122 @@ mod tests {
         };
         assert_eq!(snapshot.reported_micro_usd, Some(25));
         assert!(!snapshot.complete);
+    }
+
+    #[test]
+    fn trace_redaction_happens_before_persistence_shape() {
+        let redactor = FactoryTraceRedactor;
+        let TraceEvent::Turn(turn) = redactor.redact(TraceEvent::Turn(
+            Turn::new(0, "sealed assignment prompt").with_output("bounded answer"),
+        )) else {
+            panic!("turn kind is preserved");
+        };
+        assert_eq!(turn.input, "[redacted model input]");
+        assert!(!turn.input.contains("sealed assignment"));
+
+        let TraceEvent::Tool(tool) = redactor.redact(TraceEvent::Tool(
+            Tool::new(
+                0,
+                "call-1",
+                "fixture",
+                r#"{"api_key":"private","nested":{"authorization":"bearer"}}"#,
+            )
+            .with_output("ok"),
+        )) else {
+            panic!("tool kind is preserved");
+        };
+        assert!(!tool.input.contains("private"));
+        assert!(!tool.input.contains("bearer"));
+        assert!(tool.input.contains("[redacted]"));
+    }
+
+    #[test]
+    fn execution_summary_retains_factory_and_tea_epoch_identities() {
+        let packet: AssignmentPacketWireV2 = miniserde::json::from_str(include_str!(
+            "../../../tests/protocol-fixtures/assignment-packet-v2.json"
+        ))
+        .expect("generic packet fixture parses");
+        let admission = Admission {
+            frame: SessionAdmissionFrameV2 {
+                r#type: "session.admitted".to_owned(),
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
+                assignment_id: packet.assignment_id.to_string(),
+                session_id: 9,
+                session_revision: 7,
+                packet_digest: packet.packet_digest.clone(),
+                packet_b64: "AA==".to_owned(),
+            },
+            packet_bytes: Vec::new(),
+            packet,
+        };
+        let provenance = RunProvenance {
+            harness_snapshot_id: Some("snapshot-id".to_owned()),
+            harness_revision_id: Some("revision-id".to_owned()),
+            model_harness_profile_id: Some("profile-id".to_owned()),
+            provider_surface_digest: Some("provider-surface".to_owned()),
+            ..RunProvenance::default()
+        };
+        let surfaces = HarnessSurfaceFingerprints {
+            system_prompt_digest: Digest::from_bytes("system"),
+            ordered_tool_definitions_digest: Digest::from_bytes("tools"),
+            hook_bundle_digest: Digest::from_bytes("hooks"),
+            capability_bindings_digest: Digest::from_bytes("bindings"),
+            compaction_policy_digest: Digest::from_bytes("compaction"),
+            provider_surface_digest: Digest::from_bytes("provider"),
+        };
+
+        let summary = execution_summary(
+            &admission,
+            &provenance,
+            &surfaces,
+            &ExecutionDiagnostics {
+                turns_started: 1,
+                engineering_phase: "submitted".to_owned(),
+                tool_executions: Vec::new(),
+            },
+            false,
+            Some(ToolName::WorkComplete),
+            false,
+        )
+        .expect("summary is canonical JSON");
+        let summary = JsonValue::parse(&summary).expect("summary parses");
+        let factory = summary.get("factory").expect("Factory identities exist");
+        assert_eq!(
+            factory.get("application_revision_id").and_then(JsonValue::as_str),
+            Some("33"),
+        );
+        assert_eq!(
+            factory.get("rust_host_identity").and_then(JsonValue::as_str),
+            Some(factory_settings::RUST_HOST_IDENTITY),
+        );
+        let tea = summary.get("tea_provenance").expect("Tea identities exist");
+        assert_eq!(
+            tea.get("harness_snapshot_id").and_then(JsonValue::as_str),
+            Some("snapshot-id"),
+        );
+        assert_eq!(
+            tea.get("harness_revision_id").and_then(JsonValue::as_str),
+            Some("revision-id"),
+        );
+        assert_eq!(
+            tea.get("model_harness_profile_id").and_then(JsonValue::as_str),
+            Some("profile-id"),
+        );
+        assert_eq!(
+            summary
+                .get("tea_surfaces")
+                .and_then(|value| value.get("provider_surface_digest"))
+                .and_then(JsonValue::as_str),
+            Some(surfaces.provider_surface_digest.to_hex().as_str()),
+        );
+    }
+
+    #[test]
+    fn trace_raw_limit_has_a_conservative_gzip_bound() {
+        let output_limit = 1_000_000;
+        let raw_limit = max_gzip_input(output_limit);
+        assert!(gzip_upper_bound_len(raw_limit) <= output_limit);
+        assert!(gzip_upper_bound_len(raw_limit + 1) > output_limit);
     }
 
     #[test]

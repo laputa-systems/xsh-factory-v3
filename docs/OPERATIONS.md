@@ -2,7 +2,7 @@
 
 ## Build and qualification
 
-Use the frozen local Tea checkout at `/Users/josh/d/tea-copy`. It supplies the
+Use the frozen local Tea checkout at `/Users/josh/d/tea`. It supplies the
 reviewed Rust agent crates; Factory never calls a system agent binary or
 resolves runtime code through a package registry.
 
@@ -23,7 +23,7 @@ Architect's pre-commit gate: it runs the local Tea tests,
 formats and checks Rust source, and runs the Factory workspace tests. Neither
 starts a provider-backed actor or uses remote Git. The shared toolchain is the
 pinned `nightly-2026-07-24`; qualification also refuses a missing or dirty
-`/Users/josh/d/tea-copy` checkout and records its exact source
+`/Users/josh/d/tea` checkout and records its exact source
 identity.
 
 ## Initialize and serve
@@ -135,16 +135,18 @@ build identity with the current release `factoryd` identity. A mismatch fails
 closed with the live and expected IDs, because an older resident daemon cannot
 serve newer status operations; restart it through `make factory-start`.
 For a prepared or running session, `factoryctl campaign status` also reports
-the absolute path to the flushed live `session.ndjson` staging stream; follow
-that transient file for progress and use the terminal export below after
-cleanup.
+the absolute path to the flushed live `session.ndjson` staging stream. Its
+records use Tea trace JSONL after Factory redaction; follow that transient file
+for progress and use the terminal export below after cleanup.
 After the aggregate projection, the daemon selects the newest terminal
 campaign (completed, failed, or cancelled), reads its session artifact IDs from
 PostgreSQL, verifies the corresponding CAS bytes, and writes available
 transcripts under the OS temporary directory at
 `cycle-<campaign-id>-status/`. Complete archives are named
 `session-<id>-transcript.ndjson.gz`; `make status` preserves each archive and
-gunzips a readable `session-<id>-transcript.ndjson` copy beside it. Interrupted-
+gunzips a readable `session-<id>-transcript.ndjson` copy beside it. Complete
+archives were sealed under `tea_trace_jsonl_gzip` and end with one
+`factory.execution_summary.v1` identity/diagnostic record. Interrupted-
 session evidence is retained as `session-<id>-partial.ndjson`. The status output
 reports the directory, the number of archives made readable, and any terminal
 sessions for which no transcript artifact exists.
