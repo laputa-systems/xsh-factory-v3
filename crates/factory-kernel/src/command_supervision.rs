@@ -36,9 +36,7 @@ use std::{
 use factory_protocol::{
     ApprovedToolV2, CommandProfileV2, ContentDigest, ExecutableV2, RepositoryRelativePath,
 };
-use factory_settings::{
-    CARGO_TOOLCHAIN_ENVIRONMENT_NAMES, MINIMAL_ENVIRONMENT,
-};
+use factory_settings::{CARGO_TOOLCHAIN_ENVIRONMENT_NAMES, MINIMAL_ENVIRONMENT};
 use rustix::process::{Pid, Signal, kill_process_group};
 use thiserror::Error;
 

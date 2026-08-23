@@ -1175,12 +1175,11 @@ impl InstalledRuntimeManifest {
         }
         let mut core_files = Vec::with_capacity(core_count);
         for _ in 0..core_count {
-            let relative_path = RuntimeRelativePath::parse(
-                cursor.bounded_text("Tea source file", 4_096)?,
-            )
-            .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
-                reason: "Tea source file path is invalid",
-            })?;
+            let relative_path =
+                RuntimeRelativePath::parse(cursor.bounded_text("Tea source file", 4_096)?)
+                    .map_err(|_| InstalledRuntimeError::ReceiptInvalid {
+                        reason: "Tea source file path is invalid",
+                    })?;
             core_files.push(InstalledSourceFile {
                 relative_path,
                 digest: cursor.digest()?,
@@ -1235,12 +1234,9 @@ impl InstalledRuntimeManifest {
                 evidence: "Rust agent host executable digest changed",
             });
         }
-        if canonical_directory("Tea checkout", &self.tea.root)?
-            != self.tea.root
-            || digest_regular_file(
-                "Tea Cargo.lock",
-                &self.tea.root.join("Cargo.lock"),
-            )? != self.core_lock_digest
+        if canonical_directory("Tea checkout", &self.tea.root)? != self.tea.root
+            || digest_regular_file("Tea Cargo.lock", &self.tea.root.join("Cargo.lock"))?
+                != self.core_lock_digest
         {
             return Err(InstalledRuntimeError::RuntimeDrift {
                 evidence: "Tea lockfile identity changed",
@@ -1267,9 +1263,7 @@ impl InstalledRuntimeManifest {
             });
         }
         let observed_core = qualify_tea()?;
-        if observed_core != self.tea
-            || observed_core.source_digest != self.tea.source_digest
-        {
+        if observed_core != self.tea || observed_core.source_digest != self.tea.source_digest {
             return Err(InstalledRuntimeError::RuntimeDrift {
                 evidence: "Tea checkout HEAD or source identity changed",
             });
@@ -1560,7 +1554,7 @@ fn inventory_core_files(
         }
         files.push(InstalledSourceFile {
             relative_path,
-                digest: digest_regular_file("Tea source file", &path)?,
+            digest: digest_regular_file("Tea source file", &path)?,
         });
     }
     Ok(files)

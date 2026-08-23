@@ -9,11 +9,11 @@ use std::str::FromStr;
 
 use crate::cas::{CasArtifact, CasStore};
 use crate::installed_runtime::InstalledKernelBuildReceiptV2;
-use factory_settings::{STORAGE_ACQUIRE_TIMEOUT, STORAGE_MAX_CONNECTIONS};
 use factory_protocol::{
     AggregateRevision, ApplicationKey, ApplicationRevisionId, ArtifactId, ContentDigest,
     ExpectedRevision, KernelBuildId, RepositoryId,
 };
+use factory_settings::{STORAGE_ACQUIRE_TIMEOUT, STORAGE_MAX_CONNECTIONS};
 use sqlx::{
     PgPool, Postgres,
     migrate::{MigrateError, Migrator},
@@ -1172,9 +1172,7 @@ impl InstallKernelBuild {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
-            return Err(StoreError::InvalidCommandComponent {
-                field: "Tea HEAD",
-            });
+            return Err(StoreError::InvalidCommandComponent { field: "Tea HEAD" });
         }
         validate_text("Rust toolchain", &self.rust_toolchain, 240)?;
         Ok(())

@@ -23,10 +23,6 @@ use factory_kernel::installed_runtime::{
 };
 use factory_kernel::local_transport::OperatorClient;
 use factory_kernel::storage::SCHEMA_IDENTITY;
-use factory_settings::{
-    DEFAULT_FORUM_PAGE_LIMIT, DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT,
-    FACTORYCTL_OPERATION_DEADLINE_MILLIS,
-};
 use factory_protocol::{
     ApplicationRevisionReceiptResponse, ApplicationShowResponse, ArchitectDecideCandidateRequest,
     ArchitectDecisionReceiptResponse, ArchitectReleaseTicketAttemptRequest,
@@ -39,10 +35,13 @@ use factory_protocol::{
     OperatorArtifactSealRequest, OperatorAuditShowRequest, OperatorCampaignStatusRequest,
     OperatorCancelCampaignRequest, OperatorCandidateShowRequest,
     OperatorCycleTranscriptExportRequest, OperatorCycleTranscriptExportResponse,
-    OperatorFactoryStatusRequest,
-    OperatorStartCampaignRequest, OperatorTicketListRequest, OperatorTicketShowRequest,
-    PROTOCOL_VERSION_V2, RuntimeRelativePath, SealedArtifactReferenceWireV2, TicketListResponse,
-    TicketShowResponse,
+    OperatorFactoryStatusRequest, OperatorStartCampaignRequest, OperatorTicketListRequest,
+    OperatorTicketShowRequest, PROTOCOL_VERSION_V2, RuntimeRelativePath,
+    SealedArtifactReferenceWireV2, TicketListResponse, TicketShowResponse,
+};
+use factory_settings::{
+    DEFAULT_FORUM_PAGE_LIMIT, DEFAULT_PROVIDER_CREDENTIAL_ENVIRONMENT,
+    FACTORYCTL_OPERATION_DEADLINE_MILLIS,
 };
 
 fn main() -> ExitCode {

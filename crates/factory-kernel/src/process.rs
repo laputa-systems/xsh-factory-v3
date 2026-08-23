@@ -15,8 +15,8 @@ use factory_protocol::{
     SessionId, SessionLimitsV2, SessionState, StopReasonV2, TerminalCostV2, TerminalOperationV2,
     TerminalReportV2, ThinkingLevelV2, TicketAttemptId, UsageTotalsV2,
 };
-use sqlx::{PgPool, Postgres};
 use factory_settings::CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM;
+use sqlx::{PgPool, Postgres};
 
 use crate::cas::{CasArtifact, CasStore};
 use crate::harness_store::{RecordHarnessCompilation, persist_harness_compilation};

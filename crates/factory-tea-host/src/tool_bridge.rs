@@ -10,12 +10,6 @@
 //! map so the surrounding host can use the same value for Luau, frame, and
 //! transcript boundaries without adding a second JSON representation.
 
-use tea_core::harness::extension::{
-    ExtensionCapability, ExtensionCapabilityError, ExtensionCapabilityFuture,
-    ExtensionCapabilityRequest, ExtensionCapabilityResponse, ExtensionToolDescription,
-};
-use tea_core::scheduler::CancellationToken;
-use tea_protocol::{JsonNumber, JsonValue};
 pub use factory_protocol::ActorToolV2 as ToolName;
 pub use factory_settings::FACTORY_CAPABILITY;
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +19,12 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tea_core::harness::extension::{
+    ExtensionCapability, ExtensionCapabilityError, ExtensionCapabilityFuture,
+    ExtensionCapabilityRequest, ExtensionCapabilityResponse, ExtensionToolDescription,
+};
+use tea_core::scheduler::CancellationToken;
+use tea_protocol::{JsonNumber, JsonValue};
 
 /// Stable Factory dispatch metadata keyed by the closed actor tool identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,13 +50,25 @@ pub fn tool_contract(tool: ToolName) -> FactoryToolContract {
         ToolName::ForumListThreads => contract("forum.list_threads", Some("forum.list_threads")),
         ToolName::ForumReadThread => contract("forum.read_thread", Some("forum.read_thread")),
         ToolName::PublicationCreate => contract("publication.create", Some("publication.create")),
-        ToolName::ArtifactSeal => contract("artifact.seal_workspace_file", Some("artifact.seal_workspace_file")),
+        ToolName::ArtifactSeal => contract(
+            "artifact.seal_workspace_file",
+            Some("artifact.seal_workspace_file"),
+        ),
         ToolName::ArtifactRead => contract("artifact.read", Some("artifact.read")),
-        ToolName::ProductSubmitTicket => contract("product.submit_ticket", Some("product.submit_ticket")),
-        ToolName::CandidateCheckpointRegression => contract("candidate.checkpoint_regression", Some("candidate.checkpoint_regression")),
+        ToolName::ProductSubmitTicket => {
+            contract("product.submit_ticket", Some("product.submit_ticket"))
+        }
+        ToolName::CandidateCheckpointRegression => contract(
+            "candidate.checkpoint_regression",
+            Some("candidate.checkpoint_regression"),
+        ),
         ToolName::CandidateSubmit => contract("candidate.submit", Some("candidate.submit")),
-        ToolName::QualityRunFullSuite => contract("quality.run_full_suite", Some("quality.run_full_suite")),
-        ToolName::QualitySubmitReview => contract("quality.submit_review", Some("quality.submit_review")),
+        ToolName::QualityRunFullSuite => {
+            contract("quality.run_full_suite", Some("quality.run_full_suite"))
+        }
+        ToolName::QualitySubmitReview => {
+            contract("quality.submit_review", Some("quality.submit_review"))
+        }
         ToolName::WorkComplete => contract("work.complete", Some("work.complete")),
     }
 }
@@ -229,9 +241,10 @@ impl CommandContext {
 
     pub(crate) fn set_engineering_regression_identity(&self, identity: &str) {
         if let Ok(mut state) = self.engineering.lock()
-            && !identity.is_empty() {
-                state.regression_identity = Some(identity.to_owned());
-            }
+            && !identity.is_empty()
+        {
+            state.regression_identity = Some(identity.to_owned());
+        }
     }
 
     pub(crate) fn validate_engineering_submission_identity(
@@ -664,18 +677,19 @@ where
         request: ExtensionCapabilityRequest,
         cancellation: CancellationToken,
     ) -> Result<ExtensionCapabilityResponse, ExtensionCapabilityError> {
-        let name =
-            ToolName::parse(&request.tool_name).ok_or_else(|| ExtensionCapabilityError::MethodDenied {
+        let name = ToolName::parse(&request.tool_name).ok_or_else(|| {
+            ExtensionCapabilityError::MethodDenied {
                 capability: request.capability.clone(),
                 method: request.method.clone(),
-            })?;
-        let declaration = self
-            .tools
-            .get(&name)
-            .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
-                capability: request.capability.clone(),
-                method: request.method.clone(),
-            })?;
+            }
+        })?;
+        let declaration =
+            self.tools
+                .get(&name)
+                .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
+                    capability: request.capability.clone(),
+                    method: request.method.clone(),
+                })?;
         if request.capability != FACTORY_CAPABILITY
             || request.method != tool_contract(name).capability_method
             || declaration.name != name
@@ -713,19 +727,21 @@ where
                     message: message.to_owned(),
                 })?;
         }
-        let tool_signature = payload
-            .to_json_string().map_or_else(|_| format!("{name}:<unserializable>"), |arguments| format!("{name}:{arguments}"));
+        let tool_signature = payload.to_json_string().map_or_else(
+            |_| format!("{name}:<unserializable>"),
+            |arguments| format!("{name}:{arguments}"),
+        );
         self.command_context
             .record_engineering_tool_call(name, &tool_signature)
             .map_err(|message| ExtensionCapabilityError::Execution {
                 message: message.to_owned(),
             })?;
         if name == ToolName::WorkComplete {
-            self.terminal
-                .defer(name, payload)
-                .map_err(|error| ExtensionCapabilityError::Execution {
+            self.terminal.defer(name, payload).map_err(|error| {
+                ExtensionCapabilityError::Execution {
                     message: error.to_string(),
-                })?;
+                }
+            })?;
             return Ok(ExtensionCapabilityResponse {
                 value: capability_result(
                     name,
@@ -800,23 +816,23 @@ where
                 self.command_context.advance_revision(revision);
             }
             if name.is_terminal() {
-                self.terminal
-                    .defer(name, payload)
-                    .map_err(|error| ExtensionCapabilityError::Execution {
+                self.terminal.defer(name, payload).map_err(|error| {
+                    ExtensionCapabilityError::Execution {
                         message: error.to_string(),
-                    })?;
+                    }
+                })?;
             }
             self.command_context
                 .record_tool_execution(name, started.elapsed(), true);
             value
         } else {
-            let local = self
-                .local
-                .as_ref()
-                .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
-                    capability: FACTORY_CAPABILITY.into(),
-                    method: request.method,
-                })?;
+            let local =
+                self.local
+                    .as_ref()
+                    .ok_or_else(|| ExtensionCapabilityError::MethodDenied {
+                        capability: FACTORY_CAPABILITY.into(),
+                        method: request.method,
+                    })?;
             let started = std::time::Instant::now();
             match local.invoke(name, payload, cancellation).await {
                 Ok(value) => {
@@ -1495,10 +1511,10 @@ fn json_type_matches(kind: &str, value: &JsonValue) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tea_core::harness::extension::{ExtensionCapability, ExtensionCapabilityRequest};
     use tea_core::scheduler::CancellationToken;
     use tea_core::state::ToolCallId;
     use tea_core::tool::ToolUpdateSink;
-    use tea_core::harness::extension::{ExtensionCapability, ExtensionCapabilityRequest};
 
     struct ProductSubmissionDaemon;
 

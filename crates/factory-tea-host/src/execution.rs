@@ -8,21 +8,21 @@ use crate::tool_bridge::{
     CommandContext, FactoryCapability, FramedDaemon, TerminalDeferral, ToolExecutionDiagnostic,
     ToolName,
 };
+use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tea_core::agent::Agent;
 use tea_core::effect::NoopEffectGate;
 use tea_core::error::CoreError;
 use tea_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
+use tea_core::harness::extension::ExtensionCapability;
 use tea_core::hooks::{
     AfterToolCall, AgentLoopTurnUpdate, BeforeToolCall, ContextEnvelope, HookFuture, HookSet,
 };
-use tea_core::harness::extension::ExtensionCapability;
-use tea_providers::openai::OpenAiContextHook;
 use tea_core::scheduler::{CancellationToken, ModelProvider};
 use tea_core::state::{RunSnapshot, StopReason};
 use tea_core::tool::{AgentToolResult, ToolCall};
-use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use tea_providers::openai::OpenAiContextHook;
 
 /// A provider accounting snapshot. The reported amount may be partial while a
 /// run is still active; `complete` is required before treating it as the
@@ -123,7 +123,10 @@ impl fmt::Debug for PreparedExecution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PreparedExecution")
             .field("assignment_id", &self.admission.packet.assignment_id)
-            .field("has_model_provider", &self.hosted.agent().has_model_provider())
+            .field(
+                "has_model_provider",
+                &self.hosted.agent().has_model_provider(),
+            )
             .field("tools", &self.hosted.agent().tool_definitions())
             .field("command_context", &self.command_context)
             .finish_non_exhaustive()
@@ -265,9 +268,9 @@ impl HookSet for PhaseHookSet {
             .inner
             .should_stop_after_turn_async(context, cancellation);
         let command_context = self.command_context.clone();
-        Box::pin(async move {
-            Ok(command_context.engineering_should_stop_after_turn() || inner.await?)
-        })
+        Box::pin(
+            async move { Ok(command_context.engineering_should_stop_after_turn() || inner.await?) },
+        )
     }
 
     fn prepare_next_turn_async(
@@ -297,8 +300,8 @@ pub fn build_factory_execution_input<C>(
 where
     C: FramedDaemon + 'static,
 {
-    let verified = crate::tea_harness::verify_extension(&admission)
-        .map_err(ExecutionError::Harness)?;
+    let verified =
+        crate::tea_harness::verify_extension(&admission).map_err(ExecutionError::Harness)?;
     let capability: Arc<dyn ExtensionCapability> = Arc::new(FactoryCapability::new(
         daemon,
         verified.tools.clone(),
@@ -363,14 +366,12 @@ impl PreparedExecution {
             Arc::new(TurnCostObserver {
                 reader: Arc::clone(reader),
                 cancellation: cancellation.clone(),
-                allowance: self
-                    .admission
-                    .packet
-                    .remaining_campaign_allowance_micro_usd,
+                allowance: self.admission.packet.remaining_campaign_allowance_micro_usd,
                 reached: Arc::clone(&cost_limit_reached),
             }) as Arc<dyn EventObserver>
         });
-        let _cost_subscription = cost_observer.map(|observer| self.hosted.agent().subscribe(observer));
+        let _cost_subscription =
+            cost_observer.map(|observer| self.hosted.agent().subscribe(observer));
         let drive_result = handle.drive().await;
         let snapshot = handle.snapshot();
         let events = handle.events();
@@ -389,15 +390,13 @@ impl PreparedExecution {
             snapshot,
             events,
             self.terminal.pending(),
-            self.cost_reader
-                .as_ref()
-                .and_then(|reader| {
-                    let snapshot = reader();
-                    snapshot
-                        .complete
-                        .then_some(snapshot.reported_micro_usd)
-                        .flatten()
-                }),
+            self.cost_reader.as_ref().and_then(|reader| {
+                let snapshot = reader();
+                snapshot
+                    .complete
+                    .then_some(snapshot.reported_micro_usd)
+                    .flatten()
+            }),
             cost_limit_reached.load(Ordering::Acquire),
             &self.command_context,
         ))
@@ -541,10 +540,7 @@ mod tests {
         command_context
             .record_engineering_checkpoint()
             .expect("checkpoint advances the phase");
-        let hooks = phase_hook_set(
-            Arc::new(tea_core::hooks::NoHooks),
-            command_context.clone(),
-        );
+        let hooks = phase_hook_set(Arc::new(tea_core::hooks::NoHooks), command_context.clone());
         let context = ContextEnvelope {
             version: 1,
             messages: Vec::new(),

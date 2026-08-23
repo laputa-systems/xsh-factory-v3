@@ -51,8 +51,8 @@ use crate::{
         TerminalArtifactSeals, TerminalReceipt,
     },
     process_custody::{
-        TeaHostSpawnSpec, ProcessCancellation, ProcessCustodyError, ProcessStopReason,
-        ProcessSupervisionSpec, SupervisedProcessOutcome,
+        ProcessCancellation, ProcessCustodyError, ProcessStopReason, ProcessSupervisionSpec,
+        SupervisedProcessOutcome, TeaHostSpawnSpec,
     },
     product_runtime::{ExecuteProductProposal, execute_product_proposal},
     publication_store::PublicationStore,
@@ -3041,7 +3041,10 @@ mod tests {
 
     #[test]
     fn parses_live_cost_cancellation_as_a_closed_stop_reason() {
-        assert_eq!(parse_stop_reason("cost_limit"), Some(StopReasonV2::CostLimit));
+        assert_eq!(
+            parse_stop_reason("cost_limit"),
+            Some(StopReasonV2::CostLimit)
+        );
         assert_eq!(parse_stop_reason("length"), None);
     }
 }

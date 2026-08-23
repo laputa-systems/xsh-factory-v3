@@ -20,8 +20,7 @@ use factory_protocol::{
     TicketAttemptId, TicketId, TicketRevisionId, ValidationId,
 };
 use factory_settings::{
-    COMMAND_SET_LIMIT, TREE_PROBE_STREAM_LIMIT, TREE_PROBE_TIMEOUT_MILLIS,
-    VALIDATION_LOG_LIMIT,
+    COMMAND_SET_LIMIT, TREE_PROBE_STREAM_LIMIT, TREE_PROBE_TIMEOUT_MILLIS, VALIDATION_LOG_LIMIT,
 };
 use miniserde::{Serialize, json};
 use thiserror::Error;

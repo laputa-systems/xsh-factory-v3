@@ -435,10 +435,11 @@ impl UsageTotalsV2 {
     /// retained for diagnostics and evidence, but is never substituted for a
     /// missing provider total.
     pub fn provider_cost(self) -> Result<MicroUsd, ContractError> {
-        self.reported_cost_micro_usd.ok_or(ContractError::InvalidValue {
-            field: "session cost",
-            reason: "complete provider-reported terminal cost is absent",
-        })
+        self.reported_cost_micro_usd
+            .ok_or(ContractError::InvalidValue {
+                field: "session cost",
+                reason: "complete provider-reported terminal cost is absent",
+            })
     }
 }
 

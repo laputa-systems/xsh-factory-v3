@@ -9,10 +9,10 @@ use factory_protocol::{
     AuditEntryResponse, AuditShowResponse, CandidateDecisionNavigationResponse,
     CandidateReviewNavigationResponse, CandidateShowResponse,
     CandidateValidationNavigationResponse, ContentDigest, ContractError,
-    DeliveryNavigationResponse, ErrorResponse, EvidenceArtifactResponse, FactoryStatusResponse,
-    FrameError, InstitutionalObjectKind, InstitutionalReference, InstitutionalSearchHitResponse,
-    InstitutionalSearchResponse, InstitutionalShowResponse, OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS,
-    OP_OPERATOR_FACTORY_STATUS,
+    CycleTranscriptFileResponse, DeliveryNavigationResponse, ErrorResponse,
+    EvidenceArtifactResponse, FactoryStatusResponse, FrameError, InstitutionalObjectKind,
+    InstitutionalReference, InstitutionalSearchHitResponse, InstitutionalSearchResponse,
+    InstitutionalShowResponse, OP_OPERATOR_EXPORT_CYCLE_TRANSCRIPTS, OP_OPERATOR_FACTORY_STATUS,
     OP_OPERATOR_INSTITUTIONAL_SEARCH, OP_OPERATOR_INSTITUTIONAL_SHOW, OP_OPERATOR_LIST_TICKETS,
     OP_OPERATOR_SHOW_AUDIT, OP_OPERATOR_SHOW_CANDIDATE, OP_OPERATOR_SHOW_TICKET,
     OperatorAuditShowRequest, OperatorCandidateShowRequest, OperatorCycleTranscriptExportRequest,
@@ -20,12 +20,15 @@ use factory_protocol::{
     OperatorInstitutionalSearchRequest, OperatorInstitutionalShowRequest,
     OperatorTicketListRequest, OperatorTicketShowRequest, PROTOCOL_VERSION_V2,
     TicketAttemptNavigationResponse, TicketListItemResponse, TicketListResponse,
-    TicketShowResponse, CycleTranscriptFileResponse, decode_operation_request,
-    decode_routing_envelope,
+    TicketShowResponse, decode_operation_request, decode_routing_envelope,
 };
 use miniserde::json;
 use sqlx::{PgPool, Row};
-use std::{fs, path::{Path, PathBuf}, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use thiserror::Error;
 
 use crate::cas::CasStore;
@@ -255,10 +258,7 @@ impl OperatorNavigationRpc {
     /// from durable artifact identities and kernel-owned CAS bytes. This keeps
     /// transcript bytes off the operator protocol frame while making failed
     /// campaigns inspectable through the same `make status` command.
-    async fn export_cycle_transcripts(
-        &self,
-        frame: &[u8],
-    ) -> Result<Vec<u8>, NavigationRejection> {
+    async fn export_cycle_transcripts(&self, frame: &[u8]) -> Result<Vec<u8>, NavigationRejection> {
         let request: OperatorCycleTranscriptExportRequest = decode_operation_request(
             frame,
             factory_protocol::REQUEST_FRAME_MAX_BYTES,
@@ -309,11 +309,13 @@ impl OperatorNavigationRpc {
                   LIMIT $2",
             )
             .bind(campaign_id)
-            .bind(i64::try_from(CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM + 1).map_err(|_| {
-                NavigationRejection::Navigation(NavigationError::Corrupt {
-                    field: "campaign session export limit",
-                })
-            })?)
+            .bind(
+                i64::try_from(CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM + 1).map_err(|_| {
+                    NavigationRejection::Navigation(NavigationError::Corrupt {
+                        field: "campaign session export limit",
+                    })
+                })?,
+            )
             .fetch_all(&self.pool)
             .await
             .map_err(navigation_database)?;
@@ -331,7 +333,10 @@ impl OperatorNavigationRpc {
             let mut files = Vec::new();
             let mut missing_session_ids = Vec::new();
             for row in rows {
-                let session_id = positive(row.try_get("session_id").map_err(navigation_database)?, "session ID")?;
+                let session_id = positive(
+                    row.try_get("session_id").map_err(navigation_database)?,
+                    "session ID",
+                )?;
                 let transcript_artifact_id = row
                     .try_get::<Option<i64>, _>("transcript_artifact_id")
                     .map_err(navigation_database)?;
@@ -379,12 +384,8 @@ impl OperatorNavigationRpc {
                     )?;
                 }
                 if partial_transcript_artifact_id.is_some() {
-                    let bytes = read_export_artifact(
-                        cas,
-                        &row,
-                        "partial_digest",
-                        "partial_byte_length",
-                    )?;
+                    let bytes =
+                        read_export_artifact(cas, &row, "partial_digest", "partial_byte_length")?;
                     let file_name = format!("session-{session_id}-partial.ndjson");
                     write_export_file(&directory, &file_name, &bytes)?;
                     files.push(CycleTranscriptFileResponse {
@@ -399,7 +400,11 @@ impl OperatorNavigationRpc {
                     missing_session_ids.push(session_id);
                 }
             }
-            (Some(directory.display().to_string()), files, missing_session_ids)
+            (
+                Some(directory.display().to_string()),
+                files,
+                missing_session_ids,
+            )
         } else {
             (None, Vec::new(), Vec::new())
         };

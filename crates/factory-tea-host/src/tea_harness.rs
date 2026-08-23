@@ -13,13 +13,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tea_core::effect::{EffectGate, RunProvenance};
 use tea_core::harness::extension::{
-    ExtensionCapability, ExtensionEngine, ExtensionLimits, ExtensionSourceTree,
-    ExtensionToolLimits,
+    ExtensionCapability, ExtensionEngine, ExtensionLimits, ExtensionSourceTree, ExtensionToolLimits,
 };
 use tea_core::harness::{
-    CapabilityBindingRef, HarnessActor, HarnessError, HarnessResourceLimits,
+    CapabilityBindingRef, HarnessActor, HarnessError, HarnessResolver, HarnessResourceLimits,
     HarnessRuntimePolicyDescriptors, HarnessSeedBuilder, HarnessSeedExtension,
-    HarnessSeedExtensionScope, HarnessResolver, ModelHarnessProfile, PluginCapabilityBinding,
+    HarnessSeedExtensionScope, ModelHarnessProfile, PluginCapabilityBinding,
     PluginCapabilityCatalog, SelfExtensionMode, ToolPresentationDescriptor,
 };
 use tea_core::hooks::HookSet;
@@ -53,8 +52,9 @@ pub(crate) fn verify_extension(admission: &Admission) -> Result<VerifiedExtensio
             "packet policy entrypoint is not factory_policy",
         ));
     }
-    let bytes = crate::admission::decode_base64(&packet.policy_bytes_b64)
-        .ok_or_else(|| HarnessError::invalid_state("packet policy bytes are not canonical base64"))?;
+    let bytes = crate::admission::decode_base64(&packet.policy_bytes_b64).ok_or_else(|| {
+        HarnessError::invalid_state("packet policy bytes are not canonical base64")
+    })?;
     if bytes.is_empty() || bytes.len() > packet.policy_byte_limit as usize {
         return Err(HarnessError::invalid_state(
             "sealed policy source exceeds its admitted byte limit",
@@ -147,8 +147,7 @@ pub(crate) fn prepare_hosted_epoch(
         capability_version: binding.capability_version().to_owned(),
         binding_digest: binding.binding_digest(),
     };
-    let artifacts: Arc<dyn tea_session::ArtifactStore> =
-        Arc::new(MemoryArtifactStore::default());
+    let artifacts: Arc<dyn tea_session::ArtifactStore> = Arc::new(MemoryArtifactStore::default());
     let policies = HarnessRuntimePolicyDescriptors {
         hook_bundle_digest: hook_bundle_digest(admission),
         compaction_policy_digest: Digest::from_bytes(FACTORY_COMPACTION_POLICY),
@@ -171,7 +170,10 @@ pub(crate) fn prepare_hosted_epoch(
     }])
     .capability_bindings(vec![binding_reference])
     .seed(HarnessActor::Host, 0)?;
-    verify_resolved_tool_surface(&seeded.snapshot.spec.plugin_tool_presentations, &verified.tools)?;
+    verify_resolved_tool_surface(
+        &seeded.snapshot.spec.plugin_tool_presentations,
+        &verified.tools,
+    )?;
     let revision_id = seeded.revision.revision_id.clone();
     let mut catalog = PluginCapabilityCatalog::new();
     catalog
@@ -220,14 +222,8 @@ fn extension_manifest(
     limits: &HarnessResourceLimits,
 ) -> Result<String, HarnessError> {
     JsonValue::object([
-        (
-            "abi_version",
-            JsonValue::Number(JsonNumber::Unsigned(1)),
-        ),
-        (
-            "entrypoint",
-            JsonValue::String("main.luau".to_owned()),
-        ),
+        ("abi_version", JsonValue::Number(JsonNumber::Unsigned(1))),
+        ("entrypoint", JsonValue::String("main.luau".to_owned())),
         ("id", JsonValue::String(extension_id.to_owned())),
         (
             "modules",
@@ -242,9 +238,7 @@ fn extension_manifest(
             JsonValue::object([
                 (
                     "instruction_checks",
-                    JsonValue::Number(JsonNumber::Unsigned(u64::from(
-                        limits.instruction_checks,
-                    ))),
+                    JsonValue::Number(JsonNumber::Unsigned(u64::from(limits.instruction_checks))),
                 ),
                 (
                     "memory_bytes",
@@ -256,10 +250,7 @@ fn extension_manifest(
                 ),
             ]),
         ),
-        (
-            "schema_version",
-            JsonValue::Number(JsonNumber::Unsigned(1)),
-        ),
+        ("schema_version", JsonValue::Number(JsonNumber::Unsigned(1))),
     ])
     .to_json_string()
     .map_err(|error| HarnessError::invalid_state(error.to_string()))
@@ -339,7 +330,10 @@ fn capability_host_identity(
     writer.u64("tool_count", tools.len() as u64);
     for tool in tools {
         writer.string("tool", tool.name.as_str());
-        writer.string("method", crate::tool_bridge::tool_contract(tool.name).capability_method);
+        writer.string(
+            "method",
+            crate::tool_bridge::tool_contract(tool.name).capability_method,
+        );
         writer.string("execution_mode", &tool.execution_mode);
     }
     writer.u64("max_source_bytes", limits.max_source_bytes as u64);
@@ -372,7 +366,10 @@ fn factory_provenance(admission: &Admission) -> RunProvenance {
     RunProvenance {
         session_id: Some(admission.frame.session_id.to_string()),
         lane_id: None,
-        operation_id: Some(format!("factory-assignment-{}", admission.packet.assignment_id)),
+        operation_id: Some(format!(
+            "factory-assignment-{}",
+            admission.packet.assignment_id
+        )),
         epoch_id: Some(format!(
             "factory-hosted-epoch-{}",
             admission.packet.assignment_id
@@ -429,11 +426,11 @@ mod tests {
     struct NoProviderCalls(AtomicUsize);
 
     impl ModelProvider for NoProviderCalls {
-        fn stream<'a>(
-            &'a self,
+        fn stream(
+            &self,
             _request: ModelRequest,
             _cancellation: CancellationToken,
-        ) -> ModelFuture<'a> {
+        ) -> ModelFuture<'_> {
             self.0.fetch_add(1, Ordering::Relaxed);
             panic!("harness preparation contacted the provider")
         }
@@ -458,11 +455,11 @@ mod tests {
     }
 
     impl ModelProvider for ScriptedProvider {
-        fn stream<'a>(
-            &'a self,
+        fn stream(
+            &self,
             _request: ModelRequest,
             _cancellation: CancellationToken,
-        ) -> ModelFuture<'a> {
+        ) -> ModelFuture<'_> {
             let stream = self
                 .streams
                 .lock()
@@ -528,7 +525,12 @@ mod tests {
         let first = verify_extension(&admission).expect("policy verifies");
         let second = verify_extension(&admission).expect("same policy verifies again");
         assert_eq!(first.source, second.source);
-        assert!(first.source.extension_id.starts_with("factory.33.engineering."));
+        assert!(
+            first
+                .source
+                .extension_id
+                .starts_with("factory.33.engineering.")
+        );
         let descriptor = LuauExtensionEngine
             .describe(&first.source)
             .expect("generated manifest and source resolve");
@@ -579,7 +581,10 @@ mod tests {
         );
 
         let mut extra_packet_tool = admission(POLICY);
-        extra_packet_tool.packet.tools.push("workspace_read".to_owned());
+        extra_packet_tool
+            .packet
+            .tools
+            .push("workspace_read".to_owned());
         assert!(
             verify_extension(&extra_packet_tool)
                 .expect_err("packet tool missing from policy is rejected")
@@ -587,10 +592,7 @@ mod tests {
                 .contains("policy does not declare packet tools: workspace_read")
         );
 
-        let unbound_policy = POLICY.replace(
-            "capability = \"factory\"",
-            "capability = \"unbound\"",
-        );
+        let unbound_policy = POLICY.replace("capability = \"factory\"", "capability = \"unbound\"");
         assert!(
             verify_extension(&admission(&unbound_policy))
                 .expect_err("unbound policy capability is rejected")
@@ -618,10 +620,19 @@ mod tests {
         assert_eq!(provider.0.load(Ordering::Relaxed), 0);
         let snapshot = hosted.agent().snapshot();
         assert_eq!(snapshot.system_prompt, "sealed system");
-        assert_eq!(snapshot.model.as_ref().map(|model| model.provider.as_str()), Some("provider"));
-        assert_eq!(snapshot.model.as_ref().map(|model| model.model.as_str()), Some("model"));
+        assert_eq!(
+            snapshot.model.as_ref().map(|model| model.provider.as_str()),
+            Some("provider")
+        );
+        assert_eq!(
+            snapshot.model.as_ref().map(|model| model.model.as_str()),
+            Some("model")
+        );
         assert_eq!(snapshot.thinking_level, ThinkingLevel::High);
-        assert_eq!(decode_assignment_prompt(&admission).unwrap(), "sealed assignment");
+        assert_eq!(
+            decode_assignment_prompt(&admission).unwrap(),
+            "sealed assignment"
+        );
         let definitions = hosted.agent().tool_definitions();
         assert_eq!(definitions.len(), expected_tools.len());
         for (definition, expected) in definitions.iter().zip(&expected_tools) {
@@ -633,7 +644,10 @@ mod tests {
                 expected.execution_mode,
             );
         }
-        let provider_surface = hosted.surface_fingerprints().provider_surface_digest.to_hex();
+        let provider_surface = hosted
+            .surface_fingerprints()
+            .provider_surface_digest
+            .to_hex();
         assert_eq!(
             hosted.provenance().provider_surface_digest.as_deref(),
             Some(provider_surface.as_str())
@@ -655,7 +669,10 @@ mod tests {
             let policy_path = root.join(profile.policy.source_path.as_str());
             let policy = std::fs::read_to_string(&policy_path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", policy_path.display()));
-            assert_eq!(ContentDigest::of_bytes(policy.as_bytes()), profile.policy.digest);
+            assert_eq!(
+                ContentDigest::of_bytes(policy.as_bytes()),
+                profile.policy.digest
+            );
             let mut admission = admission(&policy);
             admission.packet.assignment_role = match profile.assignment_role {
                 factory_protocol::AssignmentRole::ProductResearch => "product_research",

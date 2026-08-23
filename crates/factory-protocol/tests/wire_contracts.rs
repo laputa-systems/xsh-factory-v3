@@ -347,13 +347,16 @@ fn canonical_bundle_parser_admits_closed_domain_values() {
     let admitted = wire::parse_application_bundle_v2(payload.as_bytes()).expect("closed bundle");
     assert_eq!(admitted.application_key.as_str(), "example");
 
-    let formatted = format!("\n  {}\n", payload);
+    let formatted = format!("\n  {payload}\n");
     let (formatted_bundle, formatted_digest, canonical_bytes) =
         wire::admit_application_bundle_source_v2(formatted.as_bytes())
             .expect("formatted source bundle");
     assert_eq!(formatted_bundle, admitted);
     assert_eq!(canonical_bytes, payload.as_bytes());
-    assert_eq!(formatted_digest, ContentDigest::of_bytes(payload.as_bytes()));
+    assert_eq!(
+        formatted_digest,
+        ContentDigest::of_bytes(payload.as_bytes())
+    );
 
     let mut xhigh_bundle = bundle.clone();
     xhigh_bundle.assignment_role_profiles[1]

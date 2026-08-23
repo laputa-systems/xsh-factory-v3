@@ -6,9 +6,9 @@ use factory_protocol::{
 };
 pub use factory_settings::DEFAULT_MAX_PACKET_BYTES;
 use miniserde::json;
-use tea_protocol::JsonValue;
 use std::fmt;
 use std::io::{self, Read};
+use tea_protocol::JsonValue;
 
 /// Maximum packet payload admitted after base64 decoding.
 ///

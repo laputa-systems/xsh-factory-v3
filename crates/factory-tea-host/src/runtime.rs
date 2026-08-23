@@ -1,13 +1,11 @@
 //! Binary-only inherited-descriptor and rooted-workspace adapters.
 
+use factory_protocol::{PROTOCOL_VERSION_V2, RepositoryRelativePath, encode_frame};
+use factory_settings::{HOST_FALLBACK_PATH, HOST_KILL_EXECUTABLE, HOST_SHELL_EXECUTABLE};
 use factory_tea_host::{
     DaemonError, DaemonFuture, FrameClient, FramedDaemon, LocalToolExecutor,
     MAX_REQUEST_FRAME_BYTES, ToolName,
 };
-use factory_protocol::{PROTOCOL_VERSION_V2, RepositoryRelativePath, encode_frame};
-use factory_settings::{HOST_FALLBACK_PATH, HOST_KILL_EXECUTABLE, HOST_SHELL_EXECUTABLE};
-use tea_core::scheduler::CancellationToken;
-use tea_protocol::{JsonNumber, JsonValue};
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
@@ -19,6 +17,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tea_core::scheduler::CancellationToken;
+use tea_protocol::{JsonNumber, JsonValue};
 
 pub(crate) struct InheritedDaemon {
     client: Mutex<FrameClient<File, File>>,
@@ -732,9 +732,9 @@ mod tests {
         REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest, decode_operation_request,
         decode_product_submit_ticket_request_v2, encode_frame,
     };
+    use std::{path::Path, time::Duration};
     use tea_core::scheduler::CancellationToken;
     use tea_protocol::{JsonNumber, JsonValue};
-    use std::{path::Path, time::Duration};
 
     #[test]
     fn shell_reaps_background_descendants_before_joining_pipes() {

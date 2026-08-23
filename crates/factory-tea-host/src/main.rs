@@ -2,26 +2,17 @@
 
 mod runtime;
 
-use factory_tea_host::{
-    Admission, AdmissionConfig, CommandContext, CostReader, CostSnapshot, ExecutionDiagnostics,
-    FramedDaemon,
-    TerminalDeferral, ToolName, build_factory_execution_input, read_admission_from_fd0,
-};
 use factory_protocol::{
     ArtifactReceiptResponse, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
     OP_SESSION_VERIFY_PACKET,
 };
-use tea_core::scheduler::ModelProvider;
-use tea_core::state::StopReason;
-use tea_core::event::EventObserver;
-use tea_core::trace::TraceObserver;
-use tea_core::{effect::RunProvenance, harness::HarnessSurfaceFingerprints};
-use tea_protocol::{JsonNumber, JsonValue};
-use tea_providers::RetryPolicy;
-use tea_providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
-use tea_trace::{JsonLinesSink, RedactingSink, Redactor, TraceEvent, TraceSink};
 use factory_settings::{
     MAX_PROVIDER_RETRIES, PROVIDER_RETRY_INITIAL_BACKOFF, PROVIDER_RETRY_MAX_BACKOFF,
+};
+use factory_tea_host::{
+    Admission, AdmissionConfig, CommandContext, CostReader, CostSnapshot, ExecutionDiagnostics,
+    FramedDaemon, TerminalDeferral, ToolName, build_factory_execution_input,
+    read_admission_from_fd0,
 };
 use flate2::{Compression, write::GzEncoder};
 use std::{
@@ -33,6 +24,15 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tea_core::event::EventObserver;
+use tea_core::scheduler::ModelProvider;
+use tea_core::state::StopReason;
+use tea_core::trace::TraceObserver;
+use tea_core::{effect::RunProvenance, harness::HarnessSurfaceFingerprints};
+use tea_protocol::{JsonNumber, JsonValue};
+use tea_providers::RetryPolicy;
+use tea_providers::openrouter::{OpenRouterConfig, OpenRouterProvider};
+use tea_trace::{JsonLinesSink, RedactingSink, Redactor, TraceEvent, TraceSink};
 
 fn main() -> ExitCode {
     match smol::block_on(run()) {
@@ -228,7 +228,9 @@ impl FactoryTraceSink {
             .map_err(|error| format!("create live transcript {}: {error}", path.display()))?;
         let raw_limit = max_gzip_input(admission.packet.limits.output_byte_limit as usize);
         if raw_limit < TRACE_SUMMARY_RESERVE + TRACE_END_RESERVE + 1024 {
-            return Err("assignment output limit is too small for required Tea trace evidence".to_owned());
+            return Err(
+                "assignment output limit is too small for required Tea trace evidence".to_owned(),
+            );
         }
         Ok(Self {
             state: Arc::new(Mutex::new(FactoryTraceState {
@@ -247,7 +249,9 @@ impl FactoryTraceSink {
         line.push(b'\n');
         let mut state = self.state.lock().map_err(|_| "Tea trace mutex poisoned")?;
         if state.bytes.len().saturating_add(line.len()) > state.raw_limit {
-            return Err("Factory execution summary exceeds reserved Tea trace evidence space".to_owned());
+            return Err(
+                "Factory execution summary exceeds reserved Tea trace evidence space".to_owned(),
+            );
         }
         append_trace_bytes(&mut state, &line).map_err(|error| error.to_string())
     }
@@ -278,7 +282,7 @@ impl TraceSink for FactoryTraceSink {
         let mut state = self
             .state
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Tea trace mutex poisoned"))?;
+            .map_err(|_| io::Error::other("Tea trace mutex poisoned"))?;
         let limit = if is_terminal {
             state.end_limit
         } else {
@@ -406,10 +410,7 @@ async fn seal_transcript(
                     "staging_relative_path",
                     JsonValue::String("tea-trace.jsonl.gz".to_owned()),
                 ),
-                (
-                    "role",
-                    JsonValue::String("tea_trace_jsonl_gzip".to_owned()),
-                ),
+                ("role", JsonValue::String("tea_trace_jsonl_gzip".to_owned())),
                 (
                     "byte_limit",
                     number(u64::from(admission.packet.limits.output_byte_limit))?,
@@ -462,10 +463,7 @@ fn execution_summary(
         })
         .collect::<Result<Vec<_>, String>>()?;
     JsonValue::object([
-        (
-            "schema_version",
-            JsonValue::Number(JsonNumber::Unsigned(1)),
-        ),
+        ("schema_version", JsonValue::Number(JsonNumber::Unsigned(1))),
         (
             "type",
             JsonValue::String("factory.execution_summary.v1".to_owned()),
@@ -607,9 +605,7 @@ fn execution_summary(
 fn redact_tool_input(text: &str) -> String {
     let value = redacted_json(text);
     value
-        .to_json_string()
-        .map(|value| bound(&value, 16 * 1024))
-        .unwrap_or_else(|_| "\"invalid tool JSON\"".to_owned())
+        .to_json_string().map_or_else(|_| "\"invalid tool JSON\"".to_owned(), |value| bound(&value, 16 * 1024))
 }
 
 fn redacted_json(text: &str) -> JsonValue {
@@ -744,7 +740,7 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 /// Returns a conservative size bound for the stored-block fallback. The
-/// miniz_oxide backend may split uncompressed data below the DEFLATE maximum
+/// `miniz_oxide` backend may split uncompressed data below the DEFLATE maximum
 /// block size, so this deliberately assumes 32 KiB blocks.
 fn gzip_upper_bound_len(input_len: usize) -> usize {
     if input_len == 0 {
@@ -795,14 +791,14 @@ mod tests {
     };
     use factory_protocol::{AssignmentPacketWireV2, SessionAdmissionFrameV2};
     use factory_tea_host::{Admission, ExecutionDiagnostics, ToolName};
+    use std::fs;
+    use std::process::Command;
+    use std::time::Duration;
     use tea_core::effect::RunProvenance;
     use tea_core::harness::HarnessSurfaceFingerprints;
     use tea_protocol::JsonValue;
     use tea_session::Digest;
     use tea_trace::{Redactor, Tool, TraceEvent, Turn};
-    use std::fs;
-    use std::process::Command;
-    use std::time::Duration;
 
     #[test]
     fn packet_verification_error_preserves_daemon_rejection() {
@@ -827,11 +823,8 @@ mod tests {
 
     #[test]
     fn provider_request_timeout_matches_assignment_wall() {
-        assert_eq!(
-            provider_request_timeout(1_800_000),
-            Duration::from_mins(30)
-        );
-        assert_eq!(provider_request_timeout(900_000), Duration::from_secs(900));
+        assert_eq!(provider_request_timeout(1_800_000), Duration::from_mins(30));
+        assert_eq!(provider_request_timeout(900_000), Duration::from_mins(15));
         assert_eq!(provider_request_timeout(120_000), Duration::from_secs(120));
         assert_eq!(
             provider_request_timeout(3_600_000),
@@ -847,9 +840,12 @@ mod tests {
     #[test]
     fn provider_stall_timeout_matches_assignment_wall() {
         assert_eq!(provider_stall_timeout(1_800_000), Duration::from_mins(30));
-        assert_eq!(provider_stall_timeout(900_000), Duration::from_secs(900));
+        assert_eq!(provider_stall_timeout(900_000), Duration::from_mins(15));
         assert_eq!(provider_stall_timeout(120_000), Duration::from_secs(120));
-        assert_eq!(provider_stall_timeout(3_600_000), Duration::from_secs(3_600));
+        assert_eq!(
+            provider_stall_timeout(3_600_000),
+            Duration::from_secs(3_600)
+        );
     }
 
     #[test]
@@ -949,11 +945,15 @@ mod tests {
         let summary = JsonValue::parse(&summary).expect("summary parses");
         let factory = summary.get("factory").expect("Factory identities exist");
         assert_eq!(
-            factory.get("application_revision_id").and_then(JsonValue::as_str),
+            factory
+                .get("application_revision_id")
+                .and_then(JsonValue::as_str),
             Some("33"),
         );
         assert_eq!(
-            factory.get("rust_host_identity").and_then(JsonValue::as_str),
+            factory
+                .get("rust_host_identity")
+                .and_then(JsonValue::as_str),
             Some(factory_settings::RUST_HOST_IDENTITY),
         );
         let tea = summary.get("tea_provenance").expect("Tea identities exist");
@@ -966,7 +966,8 @@ mod tests {
             Some("revision-id"),
         );
         assert_eq!(
-            tea.get("model_harness_profile_id").and_then(JsonValue::as_str),
+            tea.get("model_harness_profile_id")
+                .and_then(JsonValue::as_str),
             Some("profile-id"),
         );
         assert_eq!(

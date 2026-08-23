@@ -19,8 +19,8 @@ use factory_protocol::{
     ReadExactFileV2, ReadObservationV2, RepositoryRelativePath, WorkspaceReadRequest,
     WorkspaceReadResponse, decode_operation_request,
 };
-use miniserde::{Serialize, json};
 pub use factory_settings::WORKSPACE_READ_MAX_BYTES;
+use miniserde::{Serialize, json};
 use thiserror::Error;
 
 use crate::{

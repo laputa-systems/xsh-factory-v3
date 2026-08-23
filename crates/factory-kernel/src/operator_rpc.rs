@@ -16,7 +16,12 @@
 //! again; no resolver result can waive them.  Until that trusted composition
 //! exists, those operations reject before any durable authority call.
 
-use std::{future::Future, path::{Path, PathBuf}, pin::Pin, sync::Arc};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+};
 
 use factory_protocol::{
     AggregateRevision, ArchitectDecideCandidateRequest, ArchitectDecisionKindV2,
