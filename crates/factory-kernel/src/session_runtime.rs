@@ -47,7 +47,7 @@ use crate::{
         ActorConnectionBinding, ActorDisconnect, BoundActorFrame, LocalDaemon, LocalTransportError,
     },
     process::{
-        ProcessStore, ReconciledSessionCancellation, SessionReceipt, StartSession,
+        ProcessStore, ProviderEffectLedger, ReconciledSessionCancellation, SessionReceipt, StartSession,
         TerminalArtifactSeals, TerminalReceipt,
     },
     process_custody::{
@@ -450,6 +450,9 @@ pub enum SessionRuntimeError {
     #[error("terminal operation or stop reason is not in the closed V2 contract")]
     InvalidTerminalContract,
 
+    #[error("terminal provider report conflicts with the durable provider-effect ledger")]
+    ProviderLedgerConflict,
+
     #[error("terminal transcript identity does not match the daemon-sealed artifact")]
     TranscriptIdentityMismatch,
 
@@ -477,6 +480,7 @@ struct RegisteredSessionArtifact {
 struct SessionRpcState {
     packet_verified: bool,
     transcript: Option<RegisteredSessionArtifact>,
+    execution_summary: Option<RegisteredSessionArtifact>,
     terminal_request: Option<factory_protocol::SessionSubmitTerminalRequest>,
     engineering: EngineeringSessionState,
     quality: QualitySessionState,
@@ -757,6 +761,12 @@ impl KernelSessionRpc {
         match frame.envelope().operation.as_str() {
             factory_protocol::OP_SESSION_VERIFY_PACKET => self.verify_packet(frame.frame()),
             factory_protocol::OP_SESSION_SEAL_ARTIFACT => self.seal_artifact(frame.frame()).await,
+            factory_protocol::OP_SESSION_PROVIDER_REQUEST_START => {
+                self.provider_request_start(frame.frame()).await
+            }
+            factory_protocol::OP_SESSION_PROVIDER_REQUEST_SETTLE => {
+                self.provider_request_settle(frame.frame()).await
+            }
             factory_protocol::OP_ARTIFACT_SEAL_WORKSPACE_FILE => {
                 self.seal_workspace_file(frame.frame()).await
             }
@@ -886,7 +896,11 @@ impl KernelSessionRpc {
             )?;
         self.require_packet_verified()?;
         if request.expected_revision != self.session.resulting_revision.get()
-            || request.role != "tea_trace_jsonl_gzip"
+            || !matches!(
+                (request.role.as_str(), request.staging_relative_path.as_str()),
+                ("tea_trace_jsonl_gzip", "tea-trace.jsonl.gz")
+                    | ("factory_execution_summary_json", "factory-execution-summary.json")
+            )
             || request.byte_limit == 0
             || request.byte_limit > self.cas.maximum_object_bytes()
         {
@@ -917,16 +931,19 @@ impl KernelSessionRpc {
             .state
             .lock()
             .map_err(|_| invalid_rpc("session.seal_artifact", "session RPC state is poisoned"))?;
-        if state
-            .transcript
-            .is_some_and(|prior| prior.seal != seal || prior.artifact_id != receipt.artifact_id)
+        let target = match request.role.as_str() {
+            "tea_trace_jsonl_gzip" => &mut state.transcript,
+            "factory_execution_summary_json" => &mut state.execution_summary,
+            _ => unreachable!("closed artifact role was checked before adoption"),
+        };
+        if target.is_some_and(|prior| prior.seal != seal || prior.artifact_id != receipt.artifact_id)
         {
             return Err(invalid_rpc(
                 "session.seal_artifact",
-                "a different transcript was already sealed",
+                "a different artifact was already sealed for this role",
             ));
         }
-        state.transcript = Some(registered);
+        *target = Some(registered);
         drop(state);
         Ok(json::to_string(&factory_protocol::ArtifactReceiptResponse {
             protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
@@ -936,6 +953,48 @@ impl KernelSessionRpc {
             digest: seal.digest().to_hex(),
             byte_length: seal.byte_length(),
             aggregate_revision: self.session.resulting_revision.get(),
+        })
+        .into_bytes())
+    }
+
+    async fn provider_request_start(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
+        let request: factory_protocol::SessionProviderRequestStartRequest =
+            factory_protocol::decode_operation_request(
+                frame,
+                factory_protocol::REQUEST_FRAME_MAX_BYTES,
+                factory_protocol::OP_SESSION_PROVIDER_REQUEST_START,
+            )?;
+        self.require_packet_verified()?;
+        let state = self
+            .process
+            .provider_effect_start(self.session.session_id, self.packet.assignment_id, &request)
+            .await?;
+        Ok(json::to_string(&factory_protocol::ProviderEffectReceiptResponse {
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
+            request_id: request.request_id,
+            operation: factory_protocol::OP_SESSION_PROVIDER_REQUEST_START.to_owned(),
+            effect_state: state.name().to_owned(),
+        })
+        .into_bytes())
+    }
+
+    async fn provider_request_settle(&self, frame: &[u8]) -> Result<Vec<u8>, LocalTransportError> {
+        let request: factory_protocol::SessionProviderRequestSettleRequest =
+            factory_protocol::decode_operation_request(
+                frame,
+                factory_protocol::REQUEST_FRAME_MAX_BYTES,
+                factory_protocol::OP_SESSION_PROVIDER_REQUEST_SETTLE,
+            )?;
+        self.require_packet_verified()?;
+        let state = self
+            .process
+            .provider_effect_settle(self.session.session_id, self.packet.assignment_id, &request)
+            .await?;
+        Ok(json::to_string(&factory_protocol::ProviderEffectReceiptResponse {
+            protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
+            request_id: request.request_id,
+            operation: factory_protocol::OP_SESSION_PROVIDER_REQUEST_SETTLE.to_owned(),
+            effect_state: state.name().to_owned(),
         })
         .into_bytes())
     }
@@ -1791,6 +1850,21 @@ impl KernelSessionRpc {
                     "transcript artifact identity does not match",
                 ));
             }
+            let execution_summary = state.execution_summary.ok_or_else(|| {
+                invalid_rpc("session.submit_terminal", "execution summary is not sealed")
+            })?;
+            if execution_summary.artifact_id.get() != request.execution_summary_artifact_id {
+                return Err(invalid_rpc(
+                    "session.submit_terminal",
+                    "execution summary artifact identity does not match",
+                ));
+            }
+            if execution_summary.artifact_id == transcript.artifact_id {
+                return Err(invalid_rpc(
+                    "session.submit_terminal",
+                    "trace and execution summary must be separately sealed artifacts",
+                ));
+            }
             if state
                 .terminal_request
                 .as_ref()
@@ -2229,7 +2303,7 @@ async fn reconcile_terminal(
         ));
     }
 
-    let usage = terminal_request.map(|terminal| UsageTotalsV2 {
+    let terminal_usage = terminal_request.map(|terminal| UsageTotalsV2 {
         input_tokens: terminal.input_tokens,
         output_tokens: terminal.output_tokens,
         cache_read_tokens: terminal.cache_read_tokens,
@@ -2237,6 +2311,13 @@ async fn reconcile_terminal(
         reasoning_tokens: terminal.reasoning_tokens,
         reported_cost_micro_usd: terminal.reported_cost_micro_usd.map(MicroUsd::new),
     });
+    let provider_ledger = process.provider_effect_ledger(session.session_id).await?;
+    let usage = reconcile_provider_usage(terminal_usage, provider_ledger)?;
+    let execution_summary = rpc_state
+        .lock()
+        .map_err(|_| SessionRuntimeError::RpcStatePoisoned)?
+        .execution_summary
+        .map(|registered| registered.seal);
     let evidence = process
         .verify_terminal_evidence_with_packet_bytes(
             cas,
@@ -2249,6 +2330,7 @@ async fn reconcile_terminal(
                 stdout,
                 stderr,
                 partial_transcript,
+                execution_summary,
             },
             assertion,
             usage,
@@ -2309,6 +2391,46 @@ async fn reconcile_terminal(
         )
         .await
         .map_err(SessionRuntimeError::from)
+}
+
+/// Reconcile the host's optional terminal report with persisted provider
+/// effect facts. The ledger is authoritative for recovery because its start
+/// and settlement records bracket physical provider dispatch. An incomplete
+/// ledger can never be upgraded to known cost by a host-side aggregate.
+fn reconcile_provider_usage(
+    terminal_usage: Option<UsageTotalsV2>,
+    ledger: ProviderEffectLedger,
+) -> Result<Option<UsageTotalsV2>, SessionRuntimeError> {
+    if ledger.complete_cost {
+        if let Some(terminal) = terminal_usage {
+            if terminal.reported_cost_micro_usd.is_some()
+                && terminal.reported_cost_micro_usd != ledger.usage.reported_cost_micro_usd
+            {
+                return Err(SessionRuntimeError::ProviderLedgerConflict);
+            }
+            if terminal.input_tokens.is_some() && terminal.input_tokens != ledger.usage.input_tokens
+                || terminal.output_tokens.is_some()
+                    && terminal.output_tokens != ledger.usage.output_tokens
+                || terminal.cache_read_tokens.is_some()
+                    && terminal.cache_read_tokens != ledger.usage.cache_read_tokens
+                || terminal.cache_write_tokens.is_some()
+                    && terminal.cache_write_tokens != ledger.usage.cache_write_tokens
+                || terminal.reasoning_tokens.is_some()
+                    && terminal.reasoning_tokens != ledger.usage.reasoning_tokens
+            {
+                return Err(SessionRuntimeError::ProviderLedgerConflict);
+            }
+        }
+        return Ok(Some(ledger.usage));
+    }
+    // A started-but-unsettled request, a failed request, or a response without
+    // exact cost must preserve the existing fail-closed unknown-cost path.
+    // Keep diagnostic counters supplied by the host but never let them make
+    // incomplete provider economics printable as known.
+    Ok(terminal_usage.map(|mut usage| {
+        usage.reported_cost_micro_usd = None;
+        usage
+    }))
 }
 
 fn actor_session_principal(session: &SessionReceipt, packet: &AssignmentPacketV2) -> String {
@@ -2818,6 +2940,73 @@ mod tests {
             revision: AggregateRevision::initial(),
             packet_digest: ContentDigest::of_bytes(b"fixture packet"),
         }
+    }
+
+    #[test]
+    fn terminal_usage_recovers_the_complete_provider_ledger() {
+        let ledger = ProviderEffectLedger {
+            provider_effect_count: 1,
+            settled_provider_effect_count: 1,
+            complete_usage: true,
+            complete_cost: true,
+            usage: UsageTotalsV2 {
+                input_tokens: Some(3),
+                output_tokens: Some(4),
+                cache_read_tokens: Some(0),
+                cache_write_tokens: Some(0),
+                reasoning_tokens: Some(1),
+                reported_cost_micro_usd: Some(MicroUsd::new(9)),
+            },
+        };
+        assert_eq!(
+            reconcile_provider_usage(None, ledger).expect("recover complete ledger"),
+            Some(ledger.usage)
+        );
+    }
+
+    #[test]
+    fn terminal_usage_rejects_a_conflicting_complete_provider_total() {
+        let ledger = ProviderEffectLedger {
+            provider_effect_count: 1,
+            settled_provider_effect_count: 1,
+            complete_usage: true,
+            complete_cost: true,
+            usage: UsageTotalsV2 {
+                input_tokens: Some(1),
+                output_tokens: Some(1),
+                cache_read_tokens: Some(1),
+                cache_write_tokens: Some(1),
+                reasoning_tokens: Some(1),
+                reported_cost_micro_usd: Some(MicroUsd::new(4)),
+            },
+        };
+        let report = UsageTotalsV2 {
+            reported_cost_micro_usd: Some(MicroUsd::new(5)),
+            ..ledger.usage
+        };
+        assert!(matches!(
+            reconcile_provider_usage(Some(report), ledger),
+            Err(SessionRuntimeError::ProviderLedgerConflict)
+        ));
+    }
+
+    #[test]
+    fn incomplete_provider_ledger_cannot_preserve_host_cost_as_known() {
+        let ledger = ProviderEffectLedger {
+            provider_effect_count: 1,
+            settled_provider_effect_count: 0,
+            complete_usage: false,
+            complete_cost: false,
+            usage: UsageTotalsV2::default(),
+        };
+        let report = UsageTotalsV2 {
+            input_tokens: Some(2),
+            reported_cost_micro_usd: Some(MicroUsd::new(5)),
+            ..UsageTotalsV2::default()
+        };
+        let usage = reconcile_provider_usage(Some(report), ledger)
+            .expect("incomplete ledger remains terminal evidence");
+        assert_eq!(usage.expect("host diagnostics").reported_cost_micro_usd, None);
     }
 
     #[test]

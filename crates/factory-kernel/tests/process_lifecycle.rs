@@ -1093,6 +1093,13 @@ impl Fixture {
             format!("transcript-{session_id}").as_bytes(),
         )
         .await;
+        let execution_summary = seal_and_register(
+            &self.store,
+            &self.build,
+            "execution-summary",
+            format!("summary-{session_id}").as_bytes(),
+        )
+        .await;
         let stdout = seal_and_register(
             &self.store,
             &self.build,
@@ -1111,8 +1118,8 @@ impl Fixture {
             None
         } else {
             Some(UsageTotalsV2 {
-                input_tokens: 1,
-                output_tokens: 1,
+                input_tokens: Some(1),
+                output_tokens: Some(1),
                 reported_cost_micro_usd: Some(MicroUsd::new(if index == 1 {
                     7
                 } else if index == 2 {
@@ -1132,6 +1139,7 @@ impl Fixture {
                 &assignment.command.packet_bytes,
                 factory_kernel::process::TerminalArtifactSeals {
                     transcript: transcript.sealed,
+                    execution_summary: Some(execution_summary.sealed),
                     stdout: stdout.sealed,
                     stderr: stderr.sealed,
                     partial_transcript: None,

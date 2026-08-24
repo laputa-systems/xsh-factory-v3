@@ -2995,7 +2995,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires FACTORY_TEST_DATABASE_URL for a disposable PostgreSQL 18 database"]
-    fn postgres_authority_schema_has_exactly_thirty_six_named_tables() {
+    fn postgres_authority_schema_has_exactly_thirty_seven_named_tables() {
         smol::block_on(async {
             let database_url = std::env::var("FACTORY_TEST_DATABASE_URL")
                 .expect("FACTORY_TEST_DATABASE_URL must name a disposable PostgreSQL 18 database");
@@ -3029,8 +3029,8 @@ mod tests {
             .await
             .expect("count Factory tables");
             assert_eq!(
-                table_count, 36,
-                "institutional and harness records use a fixed, concrete table budget"
+                table_count, 37,
+                "institutional records and the one narrow provider-effect ledger use a fixed, concrete table budget"
             );
             for relation in [
                 "candidates",
@@ -3049,6 +3049,7 @@ mod tests {
                 "publication_attachments",
                 "harness_compilations",
                 "harness_context_items",
+                "provider_effects",
             ] {
                 let exists = sqlx::query_scalar::<_, bool>(
                     "SELECT to_regclass(format('factory.%s', $1)) IS NOT NULL",

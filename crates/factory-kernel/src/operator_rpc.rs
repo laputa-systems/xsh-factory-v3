@@ -916,6 +916,11 @@ fn campaign_status_response(
                     outcome: session_state_name(session.outcome).to_owned(),
                     cost_state: cost_state.to_owned(),
                     cost_micro_usd,
+                    input_tokens: session.usage.input_tokens,
+                    output_tokens: session.usage.output_tokens,
+                    cache_read_tokens: session.usage.cache_read_tokens,
+                    cache_write_tokens: session.usage.cache_write_tokens,
+                    reasoning_tokens: session.usage.reasoning_tokens,
                     elapsed_millis: session.elapsed_millis,
                     transcript_path: live_transcript_path(
                         runtime_root,

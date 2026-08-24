@@ -967,6 +967,13 @@ impl Fixture {
             )
             .await
             .expect("assertion artifact");
+        let execution_summary = register(
+            &self.store,
+            &self.build,
+            "execution-summary",
+            format!("summary-{}", session.session_id).as_bytes(),
+        )
+        .await;
         let evidence = process
             .verify_terminal_evidence_with_packet_bytes(
                 &self.build.cas,
@@ -976,14 +983,15 @@ impl Fixture {
                 &session.packet_bytes,
                 TerminalArtifactSeals {
                     transcript: self.common.sealed,
+                    execution_summary: Some(execution_summary.sealed),
                     stdout: self.common.sealed,
                     stderr: self.common.sealed,
                     partial_transcript: None,
                 },
                 assertion,
                 Some(UsageTotalsV2 {
-                    input_tokens: 1,
-                    output_tokens: 1,
+                    input_tokens: Some(1),
+                    output_tokens: Some(1),
                     reported_cost_micro_usd: Some(MicroUsd::new(1)),
                     ..UsageTotalsV2::default()
                 }),

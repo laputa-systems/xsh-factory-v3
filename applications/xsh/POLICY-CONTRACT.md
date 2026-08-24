@@ -22,7 +22,8 @@ Every role policy returns the `tea-luau` V1 policy declaration:
 
 - `prompt_sections` is present and currently empty;
 - each model-visible tool has a closed `schema_json`, sequential execution,
-  and a coroutine `handler_source`; and
+  explicit exclusive-batch and cancellation-settlement policy, and a coroutine
+  `handler_source`; and
 - every handler yields the single `factory` capability with an explicit
   operation method. The Rust host validates the parsed JSON and binds methods
   to the connection-owned operation for the admitted assignment.
@@ -60,3 +61,8 @@ required-read accounting, command envelopes, terminal legality, evidence
 sealing, cancellation, and model-visible result filtering. Luau cannot open a
 file, run a process, inspect the environment, access a socket, access a
 database, or choose a different assignment.
+
+The closed `execution_policy` table in each role source declares
+`requires_exclusive_batch` and `cancellation_settlement_mode` for every tool. The
+Rust `FactoryToolContract` verifies those values against the operation's real
+durability boundary; a Luau policy cannot relax or broaden it.

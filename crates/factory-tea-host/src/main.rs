@@ -3,7 +3,7 @@
 mod runtime;
 
 use factory_protocol::{
-    ArtifactReceiptResponse, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
+    ArtifactReceiptResponse, MicroUsd, OP_SESSION_SEAL_ARTIFACT, OP_SESSION_SUBMIT_TERMINAL,
     OP_SESSION_VERIFY_PACKET,
 };
 use factory_settings::{
@@ -11,7 +11,7 @@ use factory_settings::{
 };
 use factory_tea_host::{
     Admission, AdmissionConfig, CommandContext, CostReader, CostSnapshot, ExecutionDiagnostics,
-    FramedDaemon, TerminalDeferral, ToolName, build_factory_execution_input,
+    FramedDaemon, ProviderEffectDiagnostics, TerminalDeferral, ToolName, build_factory_execution_input,
     read_admission_from_fd0,
 };
 use flate2::{Compression, write::GzEncoder};
@@ -124,14 +124,31 @@ async fn run() -> Result<(), String> {
         prepared.provenance(),
         prepared.surface_fingerprints(),
         &result.diagnostics,
+        prepared.provider_effect_diagnostics(),
         result.cost_limit_reached,
         result.terminal.as_ref().map(|terminal| terminal.tool),
         trace_sink.truncated()?,
     )?;
-    trace_sink.append_summary(&summary)?;
     let transcript = gzip_transcript(&trace_sink.bytes()?)?;
     let transcript_id =
-        seal_transcript(daemon.as_ref(), &admission, transcript, &command_context).await?;
+        seal_session_artifact(
+            daemon.as_ref(),
+            &admission,
+            "tea-trace.jsonl.gz",
+            "tea_trace_jsonl_gzip",
+            transcript,
+            &command_context,
+        )
+        .await?;
+    let summary_id = seal_session_artifact(
+        daemon.as_ref(),
+        &admission,
+        "factory-execution-summary.json",
+        "factory_execution_summary_json",
+        summary.into_bytes(),
+        &command_context,
+    )
+    .await?;
     let usage = provider.usage_snapshot();
     // A live cost cancellation is a failed economic stop, even if a terminal tool
     // raced with the monitor.  Never submit the deferred operation in that case.
@@ -182,10 +199,14 @@ async fn run() -> Result<(), String> {
                     JsonValue::String(base64(terminal_payload.as_bytes())),
                 ),
                 ("transcript_artifact_id", number(transcript_id as u64)?),
-                ("input_tokens", number(usage.input_tokens.unwrap_or(0))?),
-                ("output_tokens", number(usage.output_tokens.unwrap_or(0))?),
-                ("cache_read_tokens", number(0)?),
-                ("cache_write_tokens", number(0)?),
+                (
+                    "execution_summary_artifact_id",
+                    number(summary_id as u64)?,
+                ),
+                ("input_tokens", optional_number(usage.input_tokens)?),
+                ("output_tokens", optional_number(usage.output_tokens)?),
+                ("cache_read_tokens", optional_number(usage.cache_read_tokens)?),
+                ("cache_write_tokens", optional_number(usage.cache_write_tokens)?),
                 ("reasoning_tokens", optional_number(usage.reasoning_tokens)?),
                 (
                     "reported_cost_micro_usd",
@@ -199,7 +220,6 @@ async fn run() -> Result<(), String> {
     Ok(())
 }
 
-const TRACE_SUMMARY_RESERVE: usize = 8 * 1024;
 const TRACE_END_RESERVE: usize = 2 * 1024;
 
 struct FactoryTraceState {
@@ -208,7 +228,6 @@ struct FactoryTraceState {
     truncated: bool,
     trace_limit: usize,
     end_limit: usize,
-    raw_limit: usize,
 }
 
 /// Factory-owned bounded persistence for already-redacted Tea trace records.
@@ -227,7 +246,7 @@ impl FactoryTraceSink {
             .open(&path)
             .map_err(|error| format!("create live transcript {}: {error}", path.display()))?;
         let raw_limit = max_gzip_input(admission.packet.limits.output_byte_limit as usize);
-        if raw_limit < TRACE_SUMMARY_RESERVE + TRACE_END_RESERVE + 1024 {
+        if raw_limit < TRACE_END_RESERVE + 1024 {
             return Err(
                 "assignment output limit is too small for required Tea trace evidence".to_owned(),
             );
@@ -237,23 +256,10 @@ impl FactoryTraceSink {
                 file,
                 bytes: Vec::new(),
                 truncated: false,
-                trace_limit: raw_limit - TRACE_SUMMARY_RESERVE - TRACE_END_RESERVE,
-                end_limit: raw_limit - TRACE_SUMMARY_RESERVE,
-                raw_limit,
+                trace_limit: raw_limit - TRACE_END_RESERVE,
+                end_limit: raw_limit,
             })),
         })
-    }
-
-    fn append_summary(&self, summary: &str) -> Result<(), String> {
-        let mut line = summary.as_bytes().to_vec();
-        line.push(b'\n');
-        let mut state = self.state.lock().map_err(|_| "Tea trace mutex poisoned")?;
-        if state.bytes.len().saturating_add(line.len()) > state.raw_limit {
-            return Err(
-                "Factory execution summary exceeds reserved Tea trace evidence space".to_owned(),
-            );
-        }
-        append_trace_bytes(&mut state, &line).map_err(|error| error.to_string())
     }
 
     fn bytes(&self) -> Result<Vec<u8>, String> {
@@ -386,21 +392,26 @@ fn packet_verification_error(response: &JsonValue) -> Option<String> {
     ))
 }
 
-async fn seal_transcript(
+async fn seal_session_artifact(
     daemon: &runtime::InheritedDaemon,
     admission: &Admission,
-    transcript: Vec<u8>,
+    staging_file_name: &'static str,
+    role: &'static str,
+    bytes: Vec<u8>,
     command_context: &CommandContext,
 ) -> Result<i64, String> {
-    let path = Path::new(&admission.packet.staging_root).join("tea-trace.jsonl.gz");
-    fs::write(path, transcript).map_err(|e| format!("write transcript: {e}"))?;
+    if bytes.len() > admission.packet.limits.output_byte_limit as usize {
+        return Err(format!("{role} exceeds packet evidence authority"));
+    }
+    let path = Path::new(&admission.packet.staging_root).join(staging_file_name);
+    fs::write(path, bytes).map_err(|e| format!("write {role}: {e}"))?;
     let response = daemon
         .call(
             OP_SESSION_SEAL_ARTIFACT,
             JsonValue::object([
                 (
                     "client_command_id",
-                    JsonValue::String(format!("host-transcript-{}", admission.frame.session_id)),
+                    JsonValue::String(format!("host-{role}-{}", admission.frame.session_id)),
                 ),
                 (
                     "expected_revision",
@@ -408,9 +419,9 @@ async fn seal_transcript(
                 ),
                 (
                     "staging_relative_path",
-                    JsonValue::String("tea-trace.jsonl.gz".to_owned()),
+                    JsonValue::String(staging_file_name.to_owned()),
                 ),
-                ("role", JsonValue::String("tea_trace_jsonl_gzip".to_owned())),
+                ("role", JsonValue::String(role.to_owned())),
                 (
                     "byte_limit",
                     number(u64::from(admission.packet.limits.output_byte_limit))?,
@@ -425,16 +436,16 @@ async fn seal_transcript(
             .and_then(JsonValue::as_str)
             .unwrap_or("no rejection detail provided");
         return Err(format!(
-            "daemon transcript seal rejected: {error_code}: {message}"
+            "daemon {role} seal rejected: {error_code}: {message}"
         ));
     }
     let text = response.to_json_string().map_err(|e| e.to_string())?;
     let receipt: ArtifactReceiptResponse = miniserde::json::from_str(&text)
-        .map_err(|_| "daemon transcript receipt is invalid".to_owned())?;
+        .map_err(|_| format!("daemon {role} receipt is invalid"))?;
     if receipt.operation != OP_SESSION_SEAL_ARTIFACT
         || receipt.byte_length as usize > admission.packet.limits.output_byte_limit as usize
     {
-        return Err("daemon transcript receipt is outside packet limits".to_owned());
+        return Err(format!("daemon {role} receipt is outside packet limits"));
     }
     command_context.advance_revision(receipt.aggregate_revision);
     Ok(receipt.artifact_id)
@@ -445,6 +456,7 @@ fn execution_summary(
     provenance: &RunProvenance,
     surfaces: &HarnessSurfaceFingerprints,
     diagnostics: &ExecutionDiagnostics,
+    provider_effects: ProviderEffectDiagnostics,
     cost_limit_reached: bool,
     terminal: Option<ToolName>,
     trace_truncated: bool,
@@ -563,6 +575,10 @@ fn execution_summary(
                     JsonValue::String(surfaces.ordered_tool_definitions_digest.to_hex()),
                 ),
                 (
+                    "tool_execution_policy_digest",
+                    JsonValue::String(surfaces.tool_execution_policy_digest.to_hex()),
+                ),
+                (
                     "hook_bundle_digest",
                     JsonValue::String(surfaces.hook_bundle_digest.to_hex()),
                 ),
@@ -587,6 +603,31 @@ fn execution_summary(
         (
             "engineering_phase",
             JsonValue::String(diagnostics.engineering_phase.clone()),
+        ),
+        (
+            "provider_effects",
+            JsonValue::object([
+                (
+                    "count",
+                    number(u64::from(provider_effects.provider_effect_count))?,
+                ),
+                (
+                    "settled_count",
+                    number(u64::from(provider_effects.settled_provider_effect_count))?,
+                ),
+                (
+                    "complete_usage",
+                    JsonValue::Bool(provider_effects.complete_provider_usage),
+                ),
+                (
+                    "complete_cost",
+                    JsonValue::Bool(provider_effects.complete_provider_cost),
+                ),
+                // The summary is sealed before terminal reconciliation. A
+                // recovery can only occur after a host has disappeared, so
+                // this successful host path is explicitly not recovered.
+                ("recovered_from_provider_ledger", JsonValue::Bool(false)),
+            ]),
         ),
         ("cost_limit_reached", JsonValue::Bool(cost_limit_reached)),
         (
@@ -647,35 +688,10 @@ fn provider_cost(provider: &OpenRouterProvider) -> CostSnapshot {
         reported_micro_usd: report
             .reported_total_usd_exact
             .as_deref()
-            .and_then(micro_usd),
+            .and_then(|value| MicroUsd::parse_decimal_usd(value).ok())
+            .map(MicroUsd::get),
         complete: report.complete,
     }
-}
-
-fn micro_usd(value: &str) -> Option<u64> {
-    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
-    let whole = whole.parse::<u64>().ok()?;
-    let mut digits = fraction
-        .as_bytes()
-        .iter()
-        .copied()
-        .take(6)
-        .collect::<Vec<_>>();
-    if !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    while digits.len() < 6 {
-        digits.push(b'0');
-    }
-    let fractional = std::str::from_utf8(&digits).ok()?.parse::<u64>().ok()?;
-    let round_up = fraction
-        .as_bytes()
-        .get(6..)
-        .is_some_and(|tail| tail.iter().any(|byte| *byte != b'0'));
-    whole
-        .checked_mul(1_000_000)?
-        .checked_add(fractional)?
-        .checked_add(u64::from(round_up))
 }
 
 fn stop_reason(reason: Option<StopReason>) -> &'static str {
@@ -786,11 +802,11 @@ fn gzip_with_level(input: &[u8], level: Compression) -> Result<Vec<u8>, String> 
 mod tests {
     use super::{
         CostSnapshot, FactoryTraceRedactor, execution_summary, gzip_transcript,
-        gzip_upper_bound_len, max_gzip_input, micro_usd, packet_verification_error,
+        gzip_upper_bound_len, max_gzip_input, packet_verification_error,
         provider_request_timeout, provider_retry_policy, provider_stall_timeout,
     };
     use factory_protocol::{AssignmentPacketWireV2, SessionAdmissionFrameV2};
-    use factory_tea_host::{Admission, ExecutionDiagnostics, ToolName};
+    use factory_tea_host::{Admission, ExecutionDiagnostics, ProviderEffectDiagnostics, ToolName};
     use std::fs;
     use std::process::Command;
     use std::time::Duration;
@@ -798,7 +814,7 @@ mod tests {
     use tea_core::harness::HarnessSurfaceFingerprints;
     use tea_protocol::JsonValue;
     use tea_session::Digest;
-    use tea_trace::{Redactor, Tool, TraceEvent, Turn};
+    use tea_trace::{EpisodeEnd, EpisodeHeader, Redactor, Tool, TraceEvent, TraceSink, Turn, decode_jsonl};
 
     #[test]
     fn packet_verification_error_preserves_daemon_rejection() {
@@ -849,14 +865,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_cost_conversion_rounds_up_to_micro_usd() {
-        assert_eq!(micro_usd("1.000000"), Some(1_000_000));
-        assert_eq!(micro_usd("0.0000011"), Some(2));
-        assert_eq!(micro_usd("0.1"), Some(100_000));
-        assert_eq!(micro_usd("invalid"), None);
-    }
-
-    #[test]
     fn partial_cost_snapshots_are_not_terminal_costs() {
         let snapshot = CostSnapshot {
             reported_micro_usd: Some(25),
@@ -894,6 +902,62 @@ mod tests {
     }
 
     #[test]
+    fn factory_trace_sink_seals_only_a_complete_tea_episode() {
+        let mut packet: AssignmentPacketWireV2 = miniserde::json::from_str(include_str!(
+            "../../../tests/protocol-fixtures/assignment-packet-v2.json"
+        ))
+        .expect("generic packet fixture parses");
+        let staging = std::env::temp_dir().join(format!(
+            "factory-tea-trace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock is after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&staging).expect("create trace staging directory");
+        packet.staging_root = staging.display().to_string();
+        let admission = Admission {
+            frame: SessionAdmissionFrameV2 {
+                r#type: "session.admitted".to_owned(),
+                protocol_version: factory_protocol::PROTOCOL_VERSION_V2,
+                assignment_id: packet.assignment_id.to_string(),
+                session_id: 9,
+                session_revision: 7,
+                packet_digest: packet.packet_digest.clone(),
+                packet_b64: "AA==".to_owned(),
+            },
+            packet_bytes: Vec::new(),
+            packet,
+        };
+        let mut sink = super::FactoryTraceSink::new(&admission).expect("trace sink");
+        sink.append(TraceEvent::from(EpisodeHeader::new("episode")))
+            .expect("header");
+        sink.append(TraceEvent::from(EpisodeEnd::completed()))
+            .expect("terminal event");
+        let trace = String::from_utf8(sink.bytes().expect("trace bytes")).expect("UTF-8 trace");
+        let events = decode_jsonl(&trace).expect("every record is a Tea trace event");
+        assert!(matches!(events.first(), Some(TraceEvent::EpisodeHeader(_))));
+        assert!(matches!(events.last(), Some(TraceEvent::EpisodeEnd(_))));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, TraceEvent::EpisodeHeader(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, TraceEvent::EpisodeEnd(_)))
+                .count(),
+            1
+        );
+        assert!(!trace.contains("factory.execution_summary"));
+        fs::remove_dir_all(staging).expect("remove trace staging directory");
+    }
+
+    #[test]
     fn execution_summary_retains_factory_and_tea_epoch_identities() {
         let packet: AssignmentPacketWireV2 = miniserde::json::from_str(include_str!(
             "../../../tests/protocol-fixtures/assignment-packet-v2.json"
@@ -922,6 +986,7 @@ mod tests {
         let surfaces = HarnessSurfaceFingerprints {
             system_prompt_digest: Digest::from_bytes("system"),
             ordered_tool_definitions_digest: Digest::from_bytes("tools"),
+            tool_execution_policy_digest: Digest::from_bytes("tool-execution-policy"),
             hook_bundle_digest: Digest::from_bytes("hooks"),
             capability_bindings_digest: Digest::from_bytes("bindings"),
             compaction_policy_digest: Digest::from_bytes("compaction"),
@@ -937,12 +1002,31 @@ mod tests {
                 engineering_phase: "submitted".to_owned(),
                 tool_executions: Vec::new(),
             },
+            ProviderEffectDiagnostics::default(),
             false,
             Some(ToolName::WorkComplete),
             false,
         )
         .expect("summary is canonical JSON");
         let summary = JsonValue::parse(&summary).expect("summary parses");
+        assert_eq!(
+            summary.to_json_string().expect("summary re-encodes"),
+            execution_summary(
+                &admission,
+                &provenance,
+                &surfaces,
+                &ExecutionDiagnostics {
+                    turns_started: 1,
+                    engineering_phase: "submitted".to_owned(),
+                    tool_executions: Vec::new(),
+                },
+                ProviderEffectDiagnostics::default(),
+                false,
+                Some(ToolName::WorkComplete),
+                false,
+            )
+            .expect("canonical summary")
+        );
         let factory = summary.get("factory").expect("Factory identities exist");
         assert_eq!(
             factory

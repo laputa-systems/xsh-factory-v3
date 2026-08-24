@@ -98,6 +98,12 @@ pub const OP_OPERATOR_PUBLICATION_CREATE: &str = "operator.publication.create";
 pub const OP_PUBLICATION_CREATE: &str = "publication.create";
 pub const OP_SESSION_VERIFY_PACKET: &str = "session.verify_packet";
 pub const OP_SESSION_SEAL_ARTIFACT: &str = "session.seal_artifact";
+/// Records one Tea provider request intent before the host dispatches it.
+/// This is deliberately narrower than an event API: Factory tools retain
+/// their own typed capability authority.
+pub const OP_SESSION_PROVIDER_REQUEST_START: &str = "session.provider_request_start";
+/// Records one settled Tea provider request before the core run advances.
+pub const OP_SESSION_PROVIDER_REQUEST_SETTLE: &str = "session.provider_request_settle";
 pub const OP_SESSION_SUBMIT_TERMINAL: &str = "session.submit_terminal";
 pub const OP_FORUM_LIST_TOPICS: &str = OP_FORUM_LIST_TOPICS_V2;
 pub const OP_FORUM_LIST_THREADS: &str = OP_FORUM_LIST_THREADS_V2;
@@ -284,6 +290,8 @@ pub fn is_known_operation(operation: &str) -> bool {
             | OP_PUBLICATION_CREATE
             | OP_SESSION_VERIFY_PACKET
             | OP_SESSION_SEAL_ARTIFACT
+            | OP_SESSION_PROVIDER_REQUEST_START
+            | OP_SESSION_PROVIDER_REQUEST_SETTLE
             | OP_SESSION_SUBMIT_TERMINAL
             | OP_FORUM_LIST_TOPICS
             | OP_FORUM_LIST_THREADS
@@ -1154,14 +1162,48 @@ mutating_request!(SessionSealArtifactRequest {
     role: String,
     byte_limit: u64,
 });
+// A content-free provider request intent. The actor socket has already bound
+// the Factory session and assignment, so neither is an untrusted wire field.
+// `request_fingerprint` is a BLAKE3 digest over the request's content
+// components and presentation surface; it is never prompt, message, tool
+// argument, authorization, or provider-body text.
+mutating_request!(SessionProviderRequestStartRequest {
+    core_run_id: String,
+    effect_id: u64,
+    harness_snapshot_id: String,
+    harness_revision_id: String,
+    model_harness_profile_id: String,
+    provider_surface_digest: String,
+    provider: String,
+    model: String,
+    request_fingerprint: String,
+});
+// The terminal accounting and bounded outcome for exactly one previously
+// recorded provider request. Nullable counters preserve provider unknowns;
+// `Some(0)` remains a known zero.
+mutating_request!(SessionProviderRequestSettleRequest {
+    core_run_id: String,
+    effect_id: u64,
+    outcome: String,
+    stop_reason: String,
+    context_overflow: bool,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    reported_cost_micro_usd: Option<u64>,
+    failure_class: Option<String>,
+});
 mutating_request!(SessionSubmitTerminalRequest {
     terminal_operation: Option<String>,
     terminal_payload_b64: String,
     transcript_artifact_id: i64,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
-    cache_write_tokens: u64,
+    execution_summary_artifact_id: i64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
     reasoning_tokens: Option<u64>,
     reported_cost_micro_usd: Option<u64>,
     stop_reason: String,
@@ -1178,6 +1220,19 @@ pub struct ArtifactReceiptResponse {
     pub digest: String,
     pub byte_length: u64,
     pub aggregate_revision: u64,
+}
+
+/// Receipt for a provider-effect intent or settlement. It carries no
+/// provider response text and does not advance the session aggregate
+/// revision: the expected revision is a concurrency guard for the actor's
+/// current session authority, while the ledger row is independently keyed by
+/// the stable provider-effect identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderEffectReceiptResponse {
+    pub protocol_version: u16,
+    pub request_id: String,
+    pub operation: String,
+    pub effect_state: String,
 }
 
 /// Receipt for an orderly daemon shutdown request. The response is sent
@@ -1499,6 +1554,16 @@ pub struct CampaignSessionCostResponse {
     pub outcome: String,
     pub cost_state: String,
     pub cost_micro_usd: Option<u64>,
+    /// Provider input tokens; `null` means this diagnostic category is unknown.
+    pub input_tokens: Option<u64>,
+    /// Provider output tokens; `null` means this diagnostic category is unknown.
+    pub output_tokens: Option<u64>,
+    /// Provider cache-read tokens; `null` means this diagnostic category is unknown.
+    pub cache_read_tokens: Option<u64>,
+    /// Provider cache-write tokens; `null` means this diagnostic category is unknown.
+    pub cache_write_tokens: Option<u64>,
+    /// Provider reasoning tokens; `null` means this diagnostic category is unknown.
+    pub reasoning_tokens: Option<u64>,
     pub elapsed_millis: Option<u64>,
     /// Absolute path to the live, flushed NDJSON transcript while this
     /// session is prepared or running. Terminal sessions use the durable

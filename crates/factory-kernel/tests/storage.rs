@@ -57,8 +57,8 @@ fn migration_identity_and_status_reads_are_provider_free_and_idempotent() {
         .await
         .expect("Factory table count");
         assert_eq!(
-            table_count, 36,
-            "the schema adds the small, concrete institutional, publication, and harness record set"
+            table_count, 37,
+            "the schema adds the small, concrete institutional, publication, harness, and provider-effect record set"
         );
         let ticket_maximum_nullable: String = sqlx::query_scalar(
             "SELECT is_nullable
@@ -335,8 +335,8 @@ fn application_admission_is_atomic_idempotent_and_revision_guarded() {
         .await
         .expect("Factory table count");
         assert!(
-            table_count <= 36,
-            "Factory table count exceeded the concrete institutional authority cap"
+            table_count <= 37,
+            "Factory table count exceeded the concrete institutional and provider-effect authority cap"
         );
         let fixed_templates = sqlx::query!(
             "SELECT mission_artifact_id,

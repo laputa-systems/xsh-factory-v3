@@ -20,12 +20,26 @@ end
 ]]
 end
 
+local execution_policy = {
+    workspace_read = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    workspace_search = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    workspace_list = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    shell = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    artifact_seal = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    product_submit_ticket = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    work_complete = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+}
+
 local function tool(name, description, schema_json, method)
+    local policy = execution_policy[name]
+    assert(policy ~= nil, "tool must declare execution policy")
     return {
         name = name,
         description = description,
         capability = "factory",
         execution_mode = "sequential",
+        requires_exclusive_batch = policy.requires_exclusive_batch,
+        cancellation_settlement_mode = policy.cancellation_settlement_mode,
         schema_json = schema_json,
         handler_source = handler(method),
     }

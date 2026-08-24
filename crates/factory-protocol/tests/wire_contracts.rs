@@ -465,14 +465,43 @@ fn cycle_transcript_export_projection_round_trips_with_missing_sessions() {
         directory: Some("/tmp/cycle-9-status".to_owned()),
         files: vec![CycleTranscriptFileResponse {
             session_id: 12,
-            kind: "transcript".to_owned(),
-            file_name: "session-12-transcript.ndjson.gz".to_owned(),
+            kind: "tea_trace".to_owned(),
+            file_name: "session-12-trace.ndjson.gz".to_owned(),
             byte_length: 128,
         }],
         missing_session_ids: vec![13],
     };
     let decoded: OperatorCycleTranscriptExportResponse =
         json::from_str(&json::to_string(&response)).expect("export response round trip");
+    assert_eq!(decoded, response);
+}
+
+#[test]
+fn session_cost_projection_serializes_unknown_usage_as_null_not_zero() {
+    let response = CampaignSessionCostResponse {
+        session_id: 1,
+        assignment_id: 2,
+        assignment_role: "engineering".to_owned(),
+        model_provider: "provider".to_owned(),
+        model_id: "model".to_owned(),
+        outcome: "failed".to_owned(),
+        cost_state: "unknown".to_owned(),
+        cost_micro_usd: None,
+        input_tokens: None,
+        output_tokens: Some(0),
+        cache_read_tokens: None,
+        cache_write_tokens: Some(0),
+        reasoning_tokens: None,
+        elapsed_millis: None,
+        transcript_path: None,
+    };
+    let encoded = json::to_string(&response);
+    assert!(encoded.contains("\"input_tokens\":null"));
+    assert!(encoded.contains("\"output_tokens\":0"));
+    assert!(encoded.contains("\"cache_read_tokens\":null"));
+    assert!(encoded.contains("\"cache_write_tokens\":0"));
+    let decoded: CampaignSessionCostResponse =
+        json::from_str(&encoded).expect("session cost projection round trip");
     assert_eq!(decoded, response);
 }
 

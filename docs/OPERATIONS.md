@@ -141,15 +141,17 @@ for progress and use the terminal export below after cleanup.
 After the aggregate projection, the daemon selects the newest terminal
 campaign (completed, failed, or cancelled), reads its session artifact IDs from
 PostgreSQL, verifies the corresponding CAS bytes, and writes available
-transcripts under the OS temporary directory at
+session evidence under the OS temporary directory at
 `cycle-<campaign-id>-status/`. Complete archives are named
-`session-<id>-transcript.ndjson.gz`; `make status` preserves each archive and
-gunzips a readable `session-<id>-transcript.ndjson` copy beside it. Complete
-archives were sealed under `tea_trace_jsonl_gzip` and end with one
-`factory.execution_summary.v1` identity/diagnostic record. Interrupted-
-session evidence is retained as `session-<id>-partial.ndjson`. The status output
-reports the directory, the number of archives made readable, and any terminal
-sessions for which no transcript artifact exists.
+`session-<id>-trace.ndjson.gz`; `make status` preserves each archive and
+gunzips a readable `session-<id>-trace.ndjson` copy beside it. The trace was
+sealed under `tea_trace_jsonl_gzip` and ends at Tea's `EpisodeEnd`. Its separate
+canonical Factory summary is exported as
+`session-<id>-execution-summary.json` without gunzipping or parsing it as
+NDJSON. Interrupted-session evidence is retained as
+`session-<id>-partial.ndjson`. The status output reports the directory, the
+number of trace archives made readable, and any terminal sessions for which no
+trace artifact exists.
 
 ## One-commit paid cycle
 

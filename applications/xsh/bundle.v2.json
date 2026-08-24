@@ -32,7 +32,7 @@
       },
       "policy": {
         "byte_limit": 65536,
-        "digest": "88584df8f5afca2033a177a1ec28a33239c1d6039aa320499b24f13b6a2142f0",
+        "digest": "b7ad261292b1bf89f07c069982e97aea8cc593ee04dc54ad7cab4f602613d1b8",
         "entrypoint": "factory_policy",
         "source_path": "policies/product_research.luau"
       },
@@ -88,7 +88,7 @@
       },
       "policy": {
         "byte_limit": 65536,
-        "digest": "6c20ca13f0047252defbe7d9ba4001904d42f1af43049dd7eb51c800f34fbd77",
+        "digest": "0bb89841ddf9a981958fa44f0431f90c5688a86cc7a0f1e52228a5debe594f23",
         "entrypoint": "factory_policy",
         "source_path": "policies/engineering.luau"
       },
@@ -149,7 +149,7 @@
       },
       "policy": {
         "byte_limit": 65536,
-        "digest": "0d6825579f1abcf94e5420e95b5892f12d38c1c7d168d19241a55e712f625204",
+        "digest": "a403d79e7bb8c164ac8de590b1f8ff7c06f4959a56d023cbe205c95f5164f040",
         "entrypoint": "factory_policy",
         "source_path": "policies/quality.luau"
       },

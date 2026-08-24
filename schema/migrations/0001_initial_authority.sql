@@ -7,7 +7,9 @@
 
 CREATE SCHEMA factory;
 
-COMMENT ON SCHEMA factory IS 'factory-v3-schema:authority-v3';
+-- Fresh-authority schema revision: terminal token observations are nullable
+-- and a Factory execution summary is distinct from the Tea trace artifact.
+COMMENT ON SCHEMA factory IS 'factory-v3-schema:authority-v5';
 
 CREATE TABLE factory.kernel_builds (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -372,6 +374,7 @@ CREATE TABLE factory.sessions (
     process_started_at_unix_millis BIGINT NOT NULL CHECK (process_started_at_unix_millis > 0),
     lifecycle SMALLINT NOT NULL CHECK (lifecycle BETWEEN 0 AND 5),
     transcript_artifact_id BIGINT REFERENCES factory.artifacts (id),
+    execution_summary_artifact_id BIGINT REFERENCES factory.artifacts (id),
     stdout_artifact_id BIGINT REFERENCES factory.artifacts (id),
     stderr_artifact_id BIGINT REFERENCES factory.artifacts (id),
     partial_transcript_artifact_id BIGINT REFERENCES factory.artifacts (id),
@@ -395,6 +398,7 @@ CREATE TABLE factory.sessions (
     CHECK (lifecycle < 2 OR (terminal_at IS NOT NULL AND transcript_artifact_id IS NOT NULL
         AND required_read_assertion_artifact_id IS NOT NULL AND cost_state IS NOT NULL
         AND stop_reason IS NOT NULL)),
+    CHECK (lifecycle <> 2 OR execution_summary_artifact_id IS NOT NULL),
     CHECK (cost_state <> 0 OR cost_micro_usd IS NOT NULL),
     CHECK (cost_state <> 1 OR cost_micro_usd IS NULL),
     CHECK (required_read_satisfied_count IS NULL OR required_read_expected_count IS NOT NULL),
@@ -407,6 +411,45 @@ CREATE UNIQUE INDEX sessions_one_running_paid ON factory.sessions ((TRUE))
     WHERE lifecycle = 1;
 CREATE INDEX sessions_campaign_lifecycle_index
     ON factory.sessions (campaign_id, lifecycle, id);
+
+-- One provider request is the only cross-boundary effect that Factory must
+-- durably record outside its existing typed capability RPCs. This ledger
+-- stores attribution and accounting facts, never prompts, provider bodies,
+-- assistant text, tool arguments, or credentials.
+CREATE TABLE factory.provider_effects (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id BIGINT NOT NULL REFERENCES factory.sessions (id),
+    assignment_id BIGINT NOT NULL REFERENCES factory.assignments (id),
+    core_run_id TEXT NOT NULL CHECK (octet_length(core_run_id) BETWEEN 1 AND 60),
+    effect_id BIGINT NOT NULL CHECK (effect_id >= 0),
+    harness_snapshot_id TEXT NOT NULL CHECK (octet_length(harness_snapshot_id) BETWEEN 1 AND 240),
+    harness_revision_id TEXT NOT NULL CHECK (octet_length(harness_revision_id) BETWEEN 1 AND 240),
+    model_harness_profile_id TEXT NOT NULL CHECK (octet_length(model_harness_profile_id) BETWEEN 1 AND 240),
+    provider_surface_digest BYTEA NOT NULL CHECK (octet_length(provider_surface_digest) = 32),
+    provider TEXT NOT NULL CHECK (octet_length(provider) BETWEEN 1 AND 160),
+    model TEXT NOT NULL CHECK (octet_length(model) BETWEEN 1 AND 240),
+    request_fingerprint BYTEA NOT NULL CHECK (octet_length(request_fingerprint) = 32),
+    state SMALLINT NOT NULL CHECK (state BETWEEN 0 AND 3),
+    stop_reason TEXT CHECK (stop_reason IN ('stop', 'tool_use', 'length', 'aborted', 'cancelled', 'error')),
+    context_overflow BOOLEAN,
+    input_tokens BIGINT CHECK (input_tokens >= 0),
+    output_tokens BIGINT CHECK (output_tokens >= 0),
+    cache_read_tokens BIGINT CHECK (cache_read_tokens >= 0),
+    cache_write_tokens BIGINT CHECK (cache_write_tokens >= 0),
+    reasoning_tokens BIGINT CHECK (reasoning_tokens >= 0),
+    reported_cost_micro_usd BIGINT CHECK (reported_cost_micro_usd >= 0),
+    failure_class TEXT CHECK (failure_class IN ('provider_response_error', 'provider_transport_error')),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    settled_at TIMESTAMPTZ,
+    UNIQUE (session_id, core_run_id, effect_id),
+    CHECK (
+        (state = 0 AND settled_at IS NULL AND stop_reason IS NULL AND context_overflow IS NULL)
+        OR (state > 0 AND settled_at IS NOT NULL AND stop_reason IS NOT NULL AND context_overflow IS NOT NULL)
+    )
+);
+
+CREATE INDEX provider_effects_session_state_index
+    ON factory.provider_effects (session_id, state, id);
 
 CREATE FUNCTION factory.reject_session_identity_update()
 RETURNS trigger LANGUAGE plpgsql AS $$

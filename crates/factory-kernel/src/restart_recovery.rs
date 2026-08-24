@@ -252,6 +252,7 @@ async fn reconcile_one_session(
             &session.canonical_packet_bytes,
             TerminalArtifactSeals {
                 transcript,
+                execution_summary: None,
                 stdout,
                 stderr,
                 partial_transcript,

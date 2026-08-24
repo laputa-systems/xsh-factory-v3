@@ -19,12 +19,34 @@ end
 ]]
 end
 
+local execution_policy = {
+    workspace_read = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    workspace_search = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    workspace_list = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    forum_search = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    forum_list_topics = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    forum_list_threads = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    forum_read_thread = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    artifact_read = { requires_exclusive_batch = false, cancellation_settlement_mode = "drop_future" },
+    workspace_write = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    workspace_edit = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    shell = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    publication_create = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    artifact_seal = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    quality_run_full_suite = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+    quality_submit_review = { requires_exclusive_batch = true, cancellation_settlement_mode = "await_future" },
+}
+
 local function tool(name, description, schema_json, method)
+    local policy = execution_policy[name]
+    assert(policy ~= nil, "tool must declare execution policy")
     return {
         name = name,
         description = description,
         capability = "factory",
         execution_mode = "sequential",
+        requires_exclusive_batch = policy.requires_exclusive_batch,
+        cancellation_settlement_mode = policy.cancellation_settlement_mode,
         schema_json = schema_json,
         handler_source = handler(method),
     }

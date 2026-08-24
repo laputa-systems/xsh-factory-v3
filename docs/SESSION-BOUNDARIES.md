@@ -17,7 +17,8 @@ owner requires updating this document and its focused tests in the same change.
 | Live session trace inspection | `campaign status` exposes each prepared/running session's absolute `session.ndjson` staging path. The host flushes Tea trace JSONL after Factory redaction; the path is transient and terminal sessions use the durable `tea_trace_jsonl_gzip` export. | `crates/factory-kernel/src/operator_rpc.rs`, `crates/factory-tea-host/src/main.rs`, `docs/EVIDENCE.md` |
 | Provider semantic length guards | Repetition and tool-less-response cutoffs are removed. The Tea transport still has a no-progress stall timeout so a wedged subprocess cannot hold a session forever. | `/Users/josh/d/tea/crates/tea-providers/src/openrouter/transport.rs` |
 | Live provider spend | Provider accounting is refreshed when each provider turn settles. The host checks the explicit accounting callback at Tea's `ModelTurnUsage`/`TurnEnd` lifecycle boundary; a reported total at or above the packet's remaining campaign allowance cancels the run and emits `cost_limit`. In-flight provider spend is unknowable until that response returns. | `crates/factory-tea-host/src/execution.rs`, `crates/factory-tea-host/src/main.rs`, `/Users/josh/d/tea/crates/tea-core/src/event.rs` |
-| Terminal cost | A complete provider-reported terminal total is the sole authoritative Factory cost. Token usage and admitted model rates are diagnostics only; missing or incomplete provider cost remains fail-closed, while a complete reported zero is known free usage. A known `cost_limit` terminal is recorded as exceeded and cannot submit a deferred operation. | `crates/factory-kernel/src/process.rs`, `crates/factory-protocol/src/process.rs` |
+| Provider-effect durability | Tea's production `FactoryEffectGate` durably starts each physical provider request before dispatch and settles it before the core advances. The narrow ledger stores only typed attribution, content-free request fingerprint, closed outcome, nullable usage, and exact cost; Factory tools retain their own typed RPC durability. | `crates/factory-tea-host/src/provider_effect_gate.rs`, `crates/factory-kernel/src/process.rs` |
+| Terminal cost | A complete provider-effect ledger is the authoritative Factory cost: it must agree exactly with a supplied terminal total and recovers cost/usage if the host dies after settlement. Token usage stays nullable (`Some(0)` is known zero, `None` unknown); incomplete or cost-unknown ledger entries remain fail-closed. A known `cost_limit` terminal is recorded as exceeded and cannot submit a deferred operation. | `crates/factory-kernel/src/process.rs`, `crates/factory-kernel/src/session_runtime.rs`, `crates/factory-protocol/src/process.rs` |
 
 Live cancellation can only react to spend reported by completed provider turns;
 the cost of an in-flight provider request is not knowable until that provider
@@ -71,6 +72,9 @@ an actor merely because it has used many operations.
 - Process custody owns the child group, wall deadline, output capture,
   cancellation, direct wait, and terminal reconciliation. A daemon shutdown
   cancels and reconciles active sessions before releasing its lock.
+- The Tea trace and Factory execution summary are separate terminal artifacts.
+  The trace ends at Tea `EpisodeEnd`; the summary is canonical JSON evidence,
+  not a transcript.
 - Required reads, sealed policy/prompt artifacts, transcript archives, candidate
   trees, validation logs, and delivery receipts are immutable evidence. A
   terminal operation cannot bypass cost, evidence, hard validation, clean

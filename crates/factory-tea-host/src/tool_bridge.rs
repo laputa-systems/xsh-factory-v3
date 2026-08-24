@@ -24,6 +24,7 @@ use tea_core::harness::extension::{
     ExtensionCapabilityRequest, ExtensionCapabilityResponse, ExtensionToolDescription,
 };
 use tea_core::scheduler::CancellationToken;
+use tea_core::tool::{CancellationSettlementMode, ToolExecutionMode};
 use tea_protocol::{JsonNumber, JsonValue};
 
 /// Stable Factory dispatch metadata keyed by the closed actor tool identity.
@@ -33,53 +34,75 @@ pub struct FactoryToolContract {
     pub capability_method: &'static str,
     /// Framed daemon operation, or `None` for rooted host-local execution.
     pub daemon_operation: Option<&'static str>,
+    /// Scheduler ordering admitted for this Factory operation.
+    pub execution_mode: ToolExecutionMode,
+    /// Whether this operation must be the only tool call in a provider batch.
+    pub requires_exclusive_batch: bool,
+    /// How an already-started operation settles after run cancellation.
+    pub cancellation_settlement_mode: CancellationSettlementMode,
 }
 
 /// Return the stable Factory execution contract for one actor tool.
 #[must_use]
 pub fn tool_contract(tool: ToolName) -> FactoryToolContract {
     match tool {
-        ToolName::WorkspaceRead => contract("workspace.read", Some("workspace.read")),
-        ToolName::WorkspaceWrite => contract("workspace.write", None),
-        ToolName::WorkspaceEdit => contract("workspace.edit", None),
-        ToolName::WorkspaceSearch => contract("workspace.search", None),
-        ToolName::WorkspaceList => contract("workspace.list", None),
-        ToolName::Shell => contract("shell.exec", None),
-        ToolName::ForumSearch => contract("forum.search", Some("forum.search")),
-        ToolName::ForumListTopics => contract("forum.list_topics", Some("forum.list_topics")),
-        ToolName::ForumListThreads => contract("forum.list_threads", Some("forum.list_threads")),
-        ToolName::ForumReadThread => contract("forum.read_thread", Some("forum.read_thread")),
-        ToolName::PublicationCreate => contract("publication.create", Some("publication.create")),
-        ToolName::ArtifactSeal => contract(
+        ToolName::WorkspaceRead => read_contract("workspace.read", Some("workspace.read")),
+        ToolName::WorkspaceWrite => mutating_contract("workspace.write", None),
+        ToolName::WorkspaceEdit => mutating_contract("workspace.edit", None),
+        ToolName::WorkspaceSearch => read_contract("workspace.search", None),
+        ToolName::WorkspaceList => read_contract("workspace.list", None),
+        ToolName::Shell => mutating_contract("shell.exec", None),
+        ToolName::ForumSearch => read_contract("forum.search", Some("forum.search")),
+        ToolName::ForumListTopics => read_contract("forum.list_topics", Some("forum.list_topics")),
+        ToolName::ForumListThreads => read_contract("forum.list_threads", Some("forum.list_threads")),
+        ToolName::ForumReadThread => read_contract("forum.read_thread", Some("forum.read_thread")),
+        ToolName::PublicationCreate => mutating_contract("publication.create", Some("publication.create")),
+        ToolName::ArtifactSeal => mutating_contract(
             "artifact.seal_workspace_file",
             Some("artifact.seal_workspace_file"),
         ),
-        ToolName::ArtifactRead => contract("artifact.read", Some("artifact.read")),
+        ToolName::ArtifactRead => read_contract("artifact.read", Some("artifact.read")),
         ToolName::ProductSubmitTicket => {
-            contract("product.submit_ticket", Some("product.submit_ticket"))
+            mutating_contract("product.submit_ticket", Some("product.submit_ticket"))
         }
-        ToolName::CandidateCheckpointRegression => contract(
+        ToolName::CandidateCheckpointRegression => mutating_contract(
             "candidate.checkpoint_regression",
             Some("candidate.checkpoint_regression"),
         ),
-        ToolName::CandidateSubmit => contract("candidate.submit", Some("candidate.submit")),
+        ToolName::CandidateSubmit => mutating_contract("candidate.submit", Some("candidate.submit")),
         ToolName::QualityRunFullSuite => {
-            contract("quality.run_full_suite", Some("quality.run_full_suite"))
+            mutating_contract("quality.run_full_suite", Some("quality.run_full_suite"))
         }
         ToolName::QualitySubmitReview => {
-            contract("quality.submit_review", Some("quality.submit_review"))
+            mutating_contract("quality.submit_review", Some("quality.submit_review"))
         }
-        ToolName::WorkComplete => contract("work.complete", Some("work.complete")),
+        ToolName::WorkComplete => mutating_contract("work.complete", Some("work.complete")),
     }
 }
 
-const fn contract(
+const fn read_contract(
     capability_method: &'static str,
     daemon_operation: Option<&'static str>,
 ) -> FactoryToolContract {
     FactoryToolContract {
         capability_method,
         daemon_operation,
+        execution_mode: ToolExecutionMode::Sequential,
+        requires_exclusive_batch: false,
+        cancellation_settlement_mode: CancellationSettlementMode::DropFuture,
+    }
+}
+
+const fn mutating_contract(
+    capability_method: &'static str,
+    daemon_operation: Option<&'static str>,
+) -> FactoryToolContract {
+    FactoryToolContract {
+        capability_method,
+        daemon_operation,
+        execution_mode: ToolExecutionMode::Sequential,
+        requires_exclusive_batch: true,
+        cancellation_settlement_mode: CancellationSettlementMode::AwaitFuture,
     }
 }
 
@@ -532,8 +555,12 @@ pub struct BoundTool {
     pub description: String,
     /// Closed JSON schema copied from sealed Luau policy.
     pub schema: JsonValue,
-    /// Policy-selected execution mode (`sequential` or `parallel`).
-    pub execution_mode: String,
+    /// Rust-verified scheduler ordering.
+    pub execution_mode: ToolExecutionMode,
+    /// Rust-verified exclusive-batch requirement.
+    pub requires_exclusive_batch: bool,
+    /// Rust-verified cancellation settlement behavior.
+    pub cancellation_settlement_mode: CancellationSettlementMode,
 }
 
 /// A policy/packet admission failure.
@@ -600,11 +627,22 @@ pub fn bind_extension_tools(
         validate_schema_shape(&declaration.schema).map_err(|error| {
             PolicyBindingError(format!("tool {name} has invalid schema: {error}"))
         })?;
+        let contract = tool_contract(name);
+        if declaration.execution_mode != contract.execution_mode
+            || declaration.requires_exclusive_batch != contract.requires_exclusive_batch
+            || declaration.cancellation_settlement_mode != contract.cancellation_settlement_mode
+        {
+            return Err(PolicyBindingError(format!(
+                "tool {name} declares execution behavior outside the Rust-owned Factory contract"
+            )));
+        }
         bound.push(BoundTool {
             name,
             description: declaration.description.clone(),
             schema: declaration.schema.clone(),
-            execution_mode: format!("{:?}", declaration.execution_mode).to_lowercase(),
+            execution_mode: declaration.execution_mode,
+            requires_exclusive_batch: declaration.requires_exclusive_batch,
+            cancellation_settlement_mode: declaration.cancellation_settlement_mode,
         });
     }
     if seen != packet {
@@ -1676,6 +1714,53 @@ mod tests {
     }
 
     #[test]
+    fn every_factory_tool_has_the_closed_execution_contract() {
+        let read_only = [
+            ToolName::WorkspaceRead,
+            ToolName::WorkspaceSearch,
+            ToolName::WorkspaceList,
+            ToolName::ForumSearch,
+            ToolName::ForumListTopics,
+            ToolName::ForumListThreads,
+            ToolName::ForumReadThread,
+            ToolName::ArtifactRead,
+        ];
+        for tool in read_only {
+            let contract = tool_contract(tool);
+            assert_eq!(contract.execution_mode, ToolExecutionMode::Sequential);
+            assert!(!contract.requires_exclusive_batch, "{tool}");
+            assert_eq!(
+                contract.cancellation_settlement_mode,
+                CancellationSettlementMode::DropFuture,
+                "{tool}"
+            );
+        }
+        let mutating = [
+            ToolName::WorkspaceWrite,
+            ToolName::WorkspaceEdit,
+            ToolName::Shell,
+            ToolName::PublicationCreate,
+            ToolName::ArtifactSeal,
+            ToolName::ProductSubmitTicket,
+            ToolName::CandidateCheckpointRegression,
+            ToolName::CandidateSubmit,
+            ToolName::QualityRunFullSuite,
+            ToolName::QualitySubmitReview,
+            ToolName::WorkComplete,
+        ];
+        for tool in mutating {
+            let contract = tool_contract(tool);
+            assert_eq!(contract.execution_mode, ToolExecutionMode::Sequential);
+            assert!(contract.requires_exclusive_batch, "{tool}");
+            assert_eq!(
+                contract.cancellation_settlement_mode,
+                CancellationSettlementMode::AwaitFuture,
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
     fn accepted_product_submission_defers_work_complete_and_terminates() {
         let terminal = Arc::new(TerminalDeferral::new([ToolName::WorkComplete]));
         let capability = FactoryCapability::new(
@@ -1687,7 +1772,9 @@ mod tests {
                     ("type", JsonValue::String("object".to_owned())),
                     ("additionalProperties", JsonValue::Bool(false)),
                 ]),
-                execution_mode: "sequential".to_owned(),
+                execution_mode: ToolExecutionMode::Sequential,
+                requires_exclusive_batch: true,
+                cancellation_settlement_mode: CancellationSettlementMode::AwaitFuture,
             }],
             CommandContext::new(1),
             Arc::clone(&terminal),
@@ -1728,7 +1815,9 @@ mod tests {
                     ("type", JsonValue::String("object".to_owned())),
                     ("additionalProperties", JsonValue::Bool(false)),
                 ]),
-                execution_mode: "sequential".to_owned(),
+                execution_mode: ToolExecutionMode::Sequential,
+                requires_exclusive_batch: true,
+                cancellation_settlement_mode: CancellationSettlementMode::AwaitFuture,
             }],
             CommandContext::new(1),
             terminal,

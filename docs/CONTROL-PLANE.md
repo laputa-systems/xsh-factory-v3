@@ -66,12 +66,16 @@ non-fast-forward delivery.
 ## Failure and recovery
 
 The daemon owns the process group, deadline, output capture, cancellation,
-direct wait, and terminal reconciliation. Provider accounting is refreshed at
-each completed model turn; the host checks that snapshot at the core lifecycle
-boundary and cancels at the remaining campaign allowance, emitting the typed
-`cost_limit` stop reason. A session without a complete provider-reported
-terminal cost is fail-closed; token usage and admitted model rates are retained
-as diagnostics only. A complete provider-reported zero is known free usage. A
+direct wait, and terminal reconciliation. `FactoryEffectGate` records each
+provider request intent before dispatch and its settlement before Tea advances;
+the terminal reconciler reads that ledger to recover a complete cost/usage
+total after a host crash and requires an exact match with any host terminal
+total. Provider accounting is still refreshed at each completed model turn;
+the host checks that snapshot at the core lifecycle boundary and cancels at the
+remaining campaign allowance, emitting the typed `cost_limit` stop reason. An
+incomplete provider-effect ledger or missing exact provider cost is fail-closed;
+diagnostic token categories remain nullable, and a complete reported zero is
+known free usage. A
 released ticket requalifies again under
 an idempotency key bound to its campaign, immutable ticket-revision row, and
 current revision, so a retry cannot collide with sealed evidence from its

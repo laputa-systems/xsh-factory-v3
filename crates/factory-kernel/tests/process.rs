@@ -251,6 +251,8 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
         assert_eq!(read_response.blake3, observed.digest.to_hex());
 
         let transcript = seal_and_register(&store, &build, "transcript", b"transcript").await;
+        let execution_summary =
+            seal_and_register(&store, &build, "execution-summary", b"summary").await;
         let stdout = seal_and_register(&store, &build, "stdout", b"stdout").await;
         let stderr = seal_and_register(&store, &build, "stderr", b"stderr").await;
         let assertion = read_authority
@@ -280,14 +282,15 @@ fn accepted_session_has_exact_facts_and_a_thousand_events_have_no_rows() {
                 &packet_bytes,
                 factory_kernel::process::TerminalArtifactSeals {
                     transcript: transcript.sealed,
+                    execution_summary: Some(execution_summary.sealed),
                     stdout: stdout.sealed,
                     stderr: stderr.sealed,
                     partial_transcript: None,
                 },
                 assertion,
                 Some(UsageTotalsV2 {
-                    input_tokens: 1,
-                    output_tokens: 1,
+                    input_tokens: Some(1),
+                    output_tokens: Some(1),
                     reported_cost_micro_usd: Some(MicroUsd::new(7)),
                     ..UsageTotalsV2::default()
                 }),

@@ -10,6 +10,7 @@
 
 mod admission;
 mod execution;
+mod provider_effect_gate;
 mod tea_harness;
 mod tool_bridge;
 mod transport;
@@ -22,6 +23,7 @@ pub use execution::{
     CostReader, CostSnapshot, ExecutionDiagnostics, ExecutionError, ExecutionInput,
     ExecutionResult, PreparedExecution, build_factory_execution_input,
 };
+pub use provider_effect_gate::{FactoryEffectGate, ProviderEffectDiagnostics};
 pub use factory_settings::{RUNTIME_NAME, TEA_SOURCE};
 pub use tool_bridge::{
     BoundTool, CommandContext, DaemonError, DaemonFuture, DeferredTerminal, FACTORY_CAPABILITY,

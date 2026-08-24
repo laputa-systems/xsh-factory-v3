@@ -16,7 +16,7 @@ use factory_protocol::{
     TerminalReportV2, ThinkingLevelV2, TicketAttemptId, UsageTotalsV2,
 };
 use factory_settings::CAMPAIGN_SESSION_COST_AGGREGATE_MAXIMUM;
-use sqlx::{PgPool, Postgres};
+use sqlx::{PgPool, Postgres, Row};
 
 use crate::cas::{CasArtifact, CasStore};
 use crate::harness_store::{RecordHarnessCompilation, persist_harness_compilation};
@@ -250,6 +250,9 @@ pub struct SessionCostBreakdown {
     pub model_id: String,
     pub outcome: SessionState,
     pub cost: Option<TerminalCostV2>,
+    /// Nullable provider diagnostics. They remain distinct from the exact
+    /// provider-reported terminal cost used for economics.
+    pub usage: UsageTotalsV2,
     /// Present only while this is the resident paid session.  The database
     /// derives it from its own clock, so a daemon restart cannot invent an
     /// elapsed duration or turn a status read into a write.
@@ -278,6 +281,7 @@ pub struct SessionCostAggregate {
 #[derive(Clone, Debug)]
 pub struct VerifiedTerminalEvidence {
     transcript_artifact_id: ArtifactId,
+    execution_summary_artifact_id: Option<ArtifactId>,
     stdout_artifact_id: ArtifactId,
     stderr_artifact_id: ArtifactId,
     partial_transcript_artifact_id: Option<ArtifactId>,
@@ -298,9 +302,65 @@ pub struct VerifiedTerminalEvidence {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalArtifactSeals {
     pub transcript: CasArtifact,
+    /// Factory-only summary, separately sealed from the pure Tea trajectory.
+    pub execution_summary: Option<CasArtifact>,
     pub stdout: CasArtifact,
     pub stderr: CasArtifact,
     pub partial_transcript: Option<CasArtifact>,
+}
+
+/// Durable summary of the narrow provider-effect ledger for one session.
+/// `usage` is field-wise complete only where every recorded provider request
+/// supplied that category. A session with no provider requests is a complete,
+/// known zero ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderEffectLedger {
+    pub provider_effect_count: u32,
+    pub settled_provider_effect_count: u32,
+    pub complete_usage: bool,
+    pub complete_cost: bool,
+    pub usage: UsageTotalsV2,
+}
+
+/// Closed state returned by a provider-effect intent or settlement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderEffectState {
+    Started,
+    Settled,
+    Failed,
+    Cancelled,
+}
+
+impl ProviderEffectState {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Settled => "settled",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    const fn code(self) -> i16 {
+        match self {
+            Self::Started => 0,
+            Self::Settled => 1,
+            Self::Failed => 2,
+            Self::Cancelled => 3,
+        }
+    }
+
+    fn from_settlement(value: &str) -> Result<Self, StoreError> {
+        match value {
+            "settled" => Ok(Self::Settled),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(StoreError::InvalidProcessCommand {
+                field: "provider effect outcome",
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1513,6 +1573,9 @@ impl ProcessStore {
             return Err(StoreError::InvalidPacketDigest);
         }
         cas.verify(artifacts.transcript.digest())?;
+        if let Some(summary) = artifacts.execution_summary {
+            cas.verify(summary.digest())?;
+        }
         cas.verify(artifacts.stdout.digest())?;
         cas.verify(artifacts.stderr.digest())?;
         cas.verify(packet_artifact.digest())?;
@@ -1578,6 +1641,15 @@ impl ProcessStore {
             return Err(StoreError::RequiredReadManifestMismatch);
         }
         let transcript_id = artifact_id_for_seal(&self.pool, artifacts.transcript).await?;
+        let execution_summary_artifact_id = match artifacts.execution_summary {
+            Some(summary) => Some(artifact_id_for_seal(&self.pool, summary).await?),
+            None => None,
+        };
+        if execution_summary_artifact_id == Some(transcript_id) {
+            return Err(StoreError::InvalidProcessCommand {
+                field: "execution summary evidence",
+            });
+        }
         let stdout_id = artifact_id_for_seal(&self.pool, artifacts.stdout).await?;
         let stderr_id = artifact_id_for_seal(&self.pool, artifacts.stderr).await?;
         let partial_transcript_id = match artifacts.partial_transcript {
@@ -1606,6 +1678,7 @@ impl ProcessStore {
         }
         Ok(VerifiedTerminalEvidence {
             transcript_artifact_id: transcript_id,
+            execution_summary_artifact_id,
             stdout_artifact_id: stdout_id,
             stderr_artifact_id: stderr_id,
             partial_transcript_artifact_id: partial_transcript_id
@@ -1620,6 +1693,209 @@ impl ProcessStore {
             required_read_satisfied_count: assertion.satisfied_count(),
             usage,
         })
+    }
+
+    /// Record provider request intent immediately before Tea dispatches it.
+    /// The actor's session binding supplies assignment identity; all supplied
+    /// IDs are verified against that binding before the ledger is touched.
+    pub async fn provider_effect_start(
+        &self,
+        session_id: SessionId,
+        assignment_id: AssignmentId,
+        request: &factory_protocol::SessionProviderRequestStartRequest,
+    ) -> Result<ProviderEffectState, StoreError> {
+        validate_provider_effect_start(request)?;
+        require_provider_effect_command("start", session_id, assignment_id, request.client_command_id.as_str(), &request.core_run_id, request.effect_id)?;
+        let provider_surface_digest = request
+            .provider_surface_digest
+            .parse::<ContentDigest>()
+            .map_err(|_| StoreError::InvalidProcessCommand {
+                field: "provider effect provider surface digest",
+            })?;
+        let request_fingerprint = request
+            .request_fingerprint
+            .parse::<ContentDigest>()
+            .map_err(|_| StoreError::InvalidProcessCommand {
+                field: "provider effect request fingerprint",
+            })?;
+        let mut tx = self.pool.begin().await?;
+        lock_process_transaction(&mut tx).await?;
+        let session = sqlx::query(
+            "SELECT assignment_id, revision, lifecycle, model_provider, model_id
+               FROM factory.sessions WHERE id = $1 FOR UPDATE",
+        )
+        .bind(session_id.get())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::UnknownSession { session_id })?;
+        provider_effect_session_matches(
+            &session,
+            session_id,
+            assignment_id,
+            request.expected_revision,
+            &request.provider,
+            &request.model,
+        )?;
+        let existing = sqlx::query(
+            "SELECT harness_snapshot_id, harness_revision_id, model_harness_profile_id,
+                    provider_surface_digest, provider, model, request_fingerprint, state
+               FROM factory.provider_effects
+              WHERE session_id = $1 AND core_run_id = $2 AND effect_id = $3
+              FOR UPDATE",
+        )
+        .bind(session_id.get())
+        .bind(&request.core_run_id)
+        .bind(i64::try_from(request.effect_id).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "provider effect ID",
+        })?)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing) = existing {
+            let matches = existing.try_get::<String, _>("harness_snapshot_id")? == request.harness_snapshot_id
+                && existing.try_get::<String, _>("harness_revision_id")? == request.harness_revision_id
+                && existing.try_get::<String, _>("model_harness_profile_id")? == request.model_harness_profile_id
+                && existing.try_get::<Vec<u8>, _>("provider_surface_digest")? == provider_surface_digest.as_bytes()
+                && existing.try_get::<String, _>("provider")? == request.provider
+                && existing.try_get::<String, _>("model")? == request.model
+                && existing.try_get::<Vec<u8>, _>("request_fingerprint")? == request_fingerprint.as_bytes();
+            if !matches {
+                return Err(StoreError::ProviderEffectConflict);
+            }
+            let state = provider_effect_state_from_code(existing.try_get("state")?)?;
+            tx.commit().await?;
+            return Ok(state);
+        }
+        sqlx::query(
+            "INSERT INTO factory.provider_effects (
+                session_id, assignment_id, core_run_id, effect_id,
+                harness_snapshot_id, harness_revision_id, model_harness_profile_id,
+                provider_surface_digest, provider, model, request_fingerprint, state
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(session_id.get())
+        .bind(assignment_id.get())
+        .bind(&request.core_run_id)
+        .bind(i64::try_from(request.effect_id).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "provider effect ID",
+        })?)
+        .bind(&request.harness_snapshot_id)
+        .bind(&request.harness_revision_id)
+        .bind(&request.model_harness_profile_id)
+        .bind(provider_surface_digest.as_bytes().to_vec())
+        .bind(&request.provider)
+        .bind(&request.model)
+        .bind(request_fingerprint.as_bytes().to_vec())
+        .bind(ProviderEffectState::Started.code())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(ProviderEffectState::Started)
+    }
+
+    /// Settle one prior provider request. A duplicate byte-equivalent
+    /// settlement is accepted; any conflicting replay remains fail-closed.
+    pub async fn provider_effect_settle(
+        &self,
+        session_id: SessionId,
+        assignment_id: AssignmentId,
+        request: &factory_protocol::SessionProviderRequestSettleRequest,
+    ) -> Result<ProviderEffectState, StoreError> {
+        validate_provider_effect_settlement_identity(request)?;
+        require_provider_effect_command("settle", session_id, assignment_id, request.client_command_id.as_str(), &request.core_run_id, request.effect_id)?;
+        let state = ProviderEffectState::from_settlement(&request.outcome)?;
+        let settlement = provider_effect_settlement(request, state)?;
+        let mut tx = self.pool.begin().await?;
+        lock_process_transaction(&mut tx).await?;
+        let session = sqlx::query(
+            "SELECT assignment_id, revision, lifecycle, model_provider, model_id
+               FROM factory.sessions WHERE id = $1 FOR UPDATE",
+        )
+        .bind(session_id.get())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::UnknownSession { session_id })?;
+        provider_effect_session_matches_settlement(
+            &session,
+            session_id,
+            assignment_id,
+            request.expected_revision,
+        )?;
+        let existing = sqlx::query(
+            "SELECT state, stop_reason, context_overflow, input_tokens, output_tokens,
+                    cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                    reported_cost_micro_usd, failure_class
+               FROM factory.provider_effects
+              WHERE session_id = $1 AND core_run_id = $2 AND effect_id = $3
+              FOR UPDATE",
+        )
+        .bind(session_id.get())
+        .bind(&request.core_run_id)
+        .bind(i64::try_from(request.effect_id).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "provider effect ID",
+        })?)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::ProviderEffectNotStarted)?;
+        let existing_state = provider_effect_state_from_code(existing.try_get("state")?)?;
+        if existing_state != ProviderEffectState::Started {
+            if provider_effect_settlement_matches(&existing, &settlement, state)? {
+                tx.commit().await?;
+                return Ok(existing_state);
+            }
+            return Err(StoreError::ProviderEffectConflict);
+        }
+        sqlx::query(
+            "UPDATE factory.provider_effects
+                SET state = $1, stop_reason = $2, context_overflow = $3,
+                    input_tokens = $4, output_tokens = $5, cache_read_tokens = $6,
+                    cache_write_tokens = $7, reasoning_tokens = $8,
+                    reported_cost_micro_usd = $9, failure_class = $10,
+                    settled_at = CURRENT_TIMESTAMP
+              WHERE session_id = $11 AND core_run_id = $12 AND effect_id = $13 AND state = $14",
+        )
+        .bind(state.code())
+        .bind(&settlement.stop_reason)
+        .bind(settlement.context_overflow)
+        .bind(settlement.input_tokens)
+        .bind(settlement.output_tokens)
+        .bind(settlement.cache_read_tokens)
+        .bind(settlement.cache_write_tokens)
+        .bind(settlement.reasoning_tokens)
+        .bind(settlement.reported_cost_micro_usd)
+        .bind(&settlement.failure_class)
+        .bind(session_id.get())
+        .bind(&request.core_run_id)
+        .bind(i64::try_from(request.effect_id).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "provider effect ID",
+        })?)
+        .bind(ProviderEffectState::Started.code())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(state)
+    }
+
+    /// Read the compact provider-effect ledger used during terminal
+    /// reconciliation. No per-token events or response text are materialized.
+    pub async fn provider_effect_ledger(
+        &self,
+        session_id: SessionId,
+    ) -> Result<ProviderEffectLedger, StoreError> {
+        let rows = sqlx::query(
+            "SELECT state, input_tokens, output_tokens, cache_read_tokens,
+                    cache_write_tokens, reasoning_tokens, reported_cost_micro_usd
+               FROM factory.provider_effects
+              WHERE session_id = $1
+              ORDER BY id ASC",
+        )
+        .bind(session_id.get())
+        .fetch_all(&self.pool)
+        .await?;
+        let ledger_rows = rows
+            .iter()
+            .map(provider_effect_ledger_row)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        provider_effect_ledger_from_rows(&ledger_rows)
     }
 
     pub async fn terminal_session(
@@ -1780,49 +2056,55 @@ impl ProcessStore {
             _ => None,
         };
         let next_revision = current_revision.next()?;
+        if state == SessionState::Succeeded && evidence.execution_summary_artifact_id.is_none() {
+            return Err(StoreError::InvalidProcessCommand {
+                field: "execution summary evidence",
+            });
+        }
         let usage = evidence.usage.map(usage_sql).transpose()?;
-        sqlx::query!(
+        sqlx::query(
             "UPDATE factory.sessions SET lifecycle = $1, transcript_artifact_id = $2,
-                 stdout_artifact_id = $3, stderr_artifact_id = $4,
-                 partial_transcript_artifact_id = $5, required_read_assertion_artifact_id = $6,
-                 required_read_expected_count = $7, required_read_satisfied_count = $8,
-                 input_tokens = $9, output_tokens = $10, cache_read_tokens = $11,
-                 cache_write_tokens = $12, reasoning_tokens = $13,
-                 reported_cost_micro_usd = $14, cost_state = $15, cost_micro_usd = $16,
-                 stop_reason = $17, terminal_operation = $18, failure_class = $19,
-                 terminal_at = CURRENT_TIMESTAMP, revision = $20
-             WHERE id = $21 AND lifecycle = $22",
-            session_state_code(state),
-            evidence.transcript_artifact_id.get(),
-            evidence.stdout_artifact_id.get(),
-            evidence.stderr_artifact_id.get(),
-            evidence.partial_transcript_artifact_id.map(ArtifactId::get),
-            evidence.required_read_assertion_artifact_id.get(),
-            i32::try_from(evidence.required_read_expected_count).map_err(|_| {
-                StoreError::InvalidProcessCommand {
-                    field: "required read count",
-                }
-            })?,
-            i32::try_from(evidence.required_read_satisfied_count).map_err(|_| {
-                StoreError::InvalidProcessCommand {
-                    field: "required read count",
-                }
-            })?,
-            usage.as_ref().map(|v| v.0),
-            usage.as_ref().map(|v| v.1),
-            usage.as_ref().map(|v| v.2),
-            usage.as_ref().map(|v| v.3),
-            usage.as_ref().and_then(|v| v.4),
-            usage.as_ref().and_then(|v| v.5),
-            next_cost_state,
-            cost_value.and_then(|v| i64::try_from(v).ok()),
-            stop_reason_code(report.stop_reason),
-            report.operation.map(terminal_operation_code),
-            failure_code(report.stop_reason),
-            i64::try_from(next_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?,
-            session_id.get(),
-            SESSION_RUNNING
+                 execution_summary_artifact_id = $3, stdout_artifact_id = $4, stderr_artifact_id = $5,
+                 partial_transcript_artifact_id = $6, required_read_assertion_artifact_id = $7,
+                 required_read_expected_count = $8, required_read_satisfied_count = $9,
+                 input_tokens = $10, output_tokens = $11, cache_read_tokens = $12,
+                 cache_write_tokens = $13, reasoning_tokens = $14,
+                 reported_cost_micro_usd = $15, cost_state = $16, cost_micro_usd = $17,
+                 stop_reason = $18, terminal_operation = $19, failure_class = $20,
+                 terminal_at = CURRENT_TIMESTAMP, revision = $21
+             WHERE id = $22 AND lifecycle = $23",
         )
+        .bind(session_state_code(state))
+        .bind(evidence.transcript_artifact_id.get())
+        .bind(evidence.execution_summary_artifact_id.map(ArtifactId::get))
+        .bind(evidence.stdout_artifact_id.get())
+        .bind(evidence.stderr_artifact_id.get())
+        .bind(evidence.partial_transcript_artifact_id.map(ArtifactId::get))
+        .bind(evidence.required_read_assertion_artifact_id.get())
+        .bind(i32::try_from(evidence.required_read_expected_count).map_err(|_| {
+            StoreError::InvalidProcessCommand {
+                field: "required read count",
+            }
+        })?)
+        .bind(i32::try_from(evidence.required_read_satisfied_count).map_err(|_| {
+            StoreError::InvalidProcessCommand {
+                field: "required read count",
+            }
+        })?)
+        .bind(usage.as_ref().map(|v| v.0))
+        .bind(usage.as_ref().map(|v| v.1))
+        .bind(usage.as_ref().map(|v| v.2))
+        .bind(usage.as_ref().map(|v| v.3))
+        .bind(usage.as_ref().and_then(|v| v.4))
+        .bind(usage.as_ref().and_then(|v| v.5))
+        .bind(next_cost_state)
+        .bind(cost_value.and_then(|v| i64::try_from(v).ok()))
+        .bind(stop_reason_code(report.stop_reason))
+        .bind(report.operation.map(terminal_operation_code))
+        .bind(failure_code(report.stop_reason))
+        .bind(i64::try_from(next_revision.get()).map_err(|_| StoreError::RevisionOutOfRange)?)
+        .bind(session_id.get())
+        .bind(SESSION_RUNNING)
         .execute(&mut *tx)
         .await?;
         sqlx::query!("UPDATE factory.assignments SET lifecycle = $1, revision = revision + 1 WHERE id = $2 AND lifecycle = $3", assignment_state_code(state), session.assignment_id, SESSION_RUNNING).execute(&mut *tx).await?;
@@ -2005,36 +2287,52 @@ impl ProcessStore {
             return Err(StoreError::UnknownCampaign { campaign_id });
         }
         let after = after_session_id.map_or(0, SessionId::get);
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             "SELECT id, assignment_id, assignment_role, model_provider, model_id,
                     lifecycle, cost_state, cost_micro_usd,
+                    input_tokens, output_tokens, cache_read_tokens,
+                    cache_write_tokens, reasoning_tokens,
                     CASE WHEN lifecycle = $4 THEN GREATEST(
                         0,
                         FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - started_at) * 1000)::BIGINT
-                    ) ELSE NULL END AS \"elapsed_millis?\"
+                    ) ELSE NULL END AS elapsed_millis
              FROM factory.sessions
              WHERE campaign_id = $1 AND id > $2
              ORDER BY id ASC
              LIMIT $3",
-            campaign_id.get(),
-            after,
-            i64::from(limit),
-            SESSION_RUNNING,
         )
+        .bind(campaign_id.get())
+        .bind(after)
+        .bind(i64::from(limit))
+        .bind(SESSION_RUNNING)
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter()
             .map(|row| {
+                let token = |field| {
+                    row.try_get::<Option<i64>, _>(field)?
+                        .map(u64::try_from)
+                        .transpose()
+                        .map_err(|_| StoreError::CorruptCostColumn)
+                };
                 Ok(SessionCostBreakdown {
-                    session_id: SessionId::new(row.id)?,
-                    assignment_id: AssignmentId::new(row.assignment_id)?,
-                    assignment_role: assignment_role_from_code(row.assignment_role)?,
-                    model_provider: row.model_provider,
-                    model_id: row.model_id,
-                    outcome: session_state_from_code(row.lifecycle)?,
-                    cost: db_cost(row.cost_state, row.cost_micro_usd)?,
+                    session_id: SessionId::new(row.try_get("id")?)?,
+                    assignment_id: AssignmentId::new(row.try_get("assignment_id")?)?,
+                    assignment_role: assignment_role_from_code(row.try_get("assignment_role")?)?,
+                    model_provider: row.try_get("model_provider")?,
+                    model_id: row.try_get("model_id")?,
+                    outcome: session_state_from_code(row.try_get("lifecycle")?)?,
+                    cost: db_cost(row.try_get("cost_state")?, row.try_get("cost_micro_usd")?)?,
+                    usage: UsageTotalsV2 {
+                        input_tokens: token("input_tokens")?,
+                        output_tokens: token("output_tokens")?,
+                        cache_read_tokens: token("cache_read_tokens")?,
+                        cache_write_tokens: token("cache_write_tokens")?,
+                        reasoning_tokens: token("reasoning_tokens")?,
+                        reported_cost_micro_usd: None,
+                    },
                     elapsed_millis: row
-                        .elapsed_millis
+                        .try_get::<Option<i64>, _>("elapsed_millis")?
                         .map(|value| {
                             u64::try_from(value).map_err(|_| StoreError::CorruptCostColumn)
                         })
@@ -2982,6 +3280,7 @@ fn fingerprint_terminal(
     hash_digest(&mut h, r.packet_digest);
     hash_u64(&mut h, r.expected_session_revision.get().get());
     hash_i64(&mut h, evidence.transcript_artifact_id.get());
+    hash_optional_artifact_id(&mut h, evidence.execution_summary_artifact_id);
     hash_i64(&mut h, evidence.required_read_assertion_artifact_id.get());
     hash_u32(&mut h, evidence.required_read_expected_count);
     hash_u32(&mut h, evidence.required_read_satisfied_count);
@@ -2992,21 +3291,305 @@ fn fingerprint_terminal(
         hash_u32(&mut h, u32::MAX);
     }
     if let Some(usage) = evidence.usage {
-        hash_u64(&mut h, usage.input_tokens);
-        hash_u64(&mut h, usage.output_tokens);
-        hash_u64(&mut h, usage.cache_read_tokens);
-        hash_u64(&mut h, usage.cache_write_tokens);
-        hash_u64(&mut h, usage.reasoning_tokens.unwrap_or(u64::MAX));
-        if let Some(cost) = usage.reported_cost_micro_usd {
-            hash_u64(&mut h, cost.get());
-        } else {
-            hash_u64(&mut h, u64::MAX);
-        }
+        hash_optional_u64(&mut h, usage.input_tokens);
+        hash_optional_u64(&mut h, usage.output_tokens);
+        hash_optional_u64(&mut h, usage.cache_read_tokens);
+        hash_optional_u64(&mut h, usage.cache_write_tokens);
+        hash_optional_u64(&mut h, usage.reasoning_tokens);
+        hash_optional_u64(&mut h, usage.reported_cost_micro_usd.map(MicroUsd::get));
     } else {
         hash_u64(&mut h, u64::MAX);
     }
     hash_digest(&mut h, r.report_digest);
     ContentDigest::from_bytes(*h.finalize().as_bytes())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProviderEffectSettlement {
+    stop_reason: String,
+    context_overflow: bool,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
+    reasoning_tokens: Option<i64>,
+    reported_cost_micro_usd: Option<i64>,
+    failure_class: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProviderEffectLedgerRow {
+    state: ProviderEffectState,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    reported_cost_micro_usd: Option<MicroUsd>,
+}
+
+fn validate_provider_effect_start(
+    request: &factory_protocol::SessionProviderRequestStartRequest,
+) -> Result<(), StoreError> {
+    for (field, value, maximum) in [
+        ("provider effect core run ID", request.core_run_id.as_str(), 60),
+        (
+            "provider effect harness snapshot ID",
+            request.harness_snapshot_id.as_str(),
+            240,
+        ),
+        (
+            "provider effect harness revision ID",
+            request.harness_revision_id.as_str(),
+            240,
+        ),
+        (
+            "provider effect model harness profile ID",
+            request.model_harness_profile_id.as_str(),
+            240,
+        ),
+        ("provider effect provider", request.provider.as_str(), 160),
+        ("provider effect model", request.model.as_str(), 240),
+    ] {
+        if value.is_empty() || value.len() > maximum || value.contains('\0') {
+            return Err(StoreError::InvalidProcessCommand { field });
+        }
+    }
+    Ok(())
+}
+
+fn validate_provider_effect_settlement_identity(
+    request: &factory_protocol::SessionProviderRequestSettleRequest,
+) -> Result<(), StoreError> {
+    if request.core_run_id.is_empty()
+        || request.core_run_id.len() > 60
+        || request.core_run_id.contains('\0')
+    {
+        return Err(StoreError::InvalidProcessCommand {
+            field: "provider effect core run ID",
+        });
+    }
+    Ok(())
+}
+
+fn require_provider_effect_command(
+    phase: &str,
+    session_id: SessionId,
+    assignment_id: AssignmentId,
+    command_id: &str,
+    core_run_id: &str,
+    effect_id: u64,
+) -> Result<(), StoreError> {
+    let expected = format!(
+        "provider-effect-{phase}-session-{}-assignment-{}-run-{core_run_id}-effect-{effect_id}",
+        session_id.get(),
+        assignment_id.get(),
+    );
+    if command_id != expected {
+        return Err(StoreError::InvalidProcessCommand {
+            field: "provider effect client command ID",
+        });
+    }
+    validate_command("actor", command_id)
+}
+
+fn provider_effect_settlement(
+    request: &factory_protocol::SessionProviderRequestSettleRequest,
+    state: ProviderEffectState,
+) -> Result<ProviderEffectSettlement, StoreError> {
+    let stop_reason = match request.stop_reason.as_str() {
+        "stop" | "tool_use" | "length" | "aborted" | "cancelled" | "error" => {
+            request.stop_reason.clone()
+        }
+        _ => {
+            return Err(StoreError::InvalidProcessCommand {
+                field: "provider effect stop reason",
+            });
+        }
+    };
+    if state == ProviderEffectState::Settled && request.failure_class.is_some() {
+        return Err(StoreError::InvalidProcessCommand {
+            field: "provider effect failure class",
+        });
+    }
+    let failure_class = match request.failure_class.as_deref() {
+        None => None,
+        Some("provider_response_error" | "provider_transport_error") => request.failure_class.clone(),
+        Some(_) => {
+            return Err(StoreError::InvalidProcessCommand {
+                field: "provider effect failure class",
+            });
+        }
+    };
+    let convert = |value: Option<u64>| {
+        value
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| StoreError::InvalidProcessCommand {
+                field: "provider effect usage",
+            })
+    };
+    Ok(ProviderEffectSettlement {
+        stop_reason,
+        context_overflow: request.context_overflow,
+        input_tokens: convert(request.input_tokens)?,
+        output_tokens: convert(request.output_tokens)?,
+        cache_read_tokens: convert(request.cache_read_tokens)?,
+        cache_write_tokens: convert(request.cache_write_tokens)?,
+        reasoning_tokens: convert(request.reasoning_tokens)?,
+        reported_cost_micro_usd: convert(request.reported_cost_micro_usd)?,
+        failure_class,
+    })
+}
+
+fn provider_effect_session_matches(
+    row: &sqlx::postgres::PgRow,
+    session_id: SessionId,
+    assignment_id: AssignmentId,
+    expected_revision: u64,
+    provider: &str,
+    model: &str,
+) -> Result<(), StoreError> {
+    provider_effect_session_matches_settlement(row, session_id, assignment_id, expected_revision)?;
+    if row.try_get::<String, _>("model_provider")? != provider
+        || row.try_get::<String, _>("model_id")? != model
+    {
+        return Err(StoreError::PacketIdentityMismatch);
+    }
+    Ok(())
+}
+
+fn provider_effect_session_matches_settlement(
+    row: &sqlx::postgres::PgRow,
+    session_id: SessionId,
+    assignment_id: AssignmentId,
+    expected_revision: u64,
+) -> Result<(), StoreError> {
+    if row.try_get::<i64, _>("assignment_id")? != assignment_id.get() {
+        return Err(StoreError::PacketIdentityMismatch);
+    }
+    let current = storage::aggregate_revision_from_sql_for_process(row.try_get("revision")?)?;
+    if current.get() != expected_revision {
+        return Err(StoreError::RevisionConflict {
+            expected: ExpectedRevision::new(AggregateRevision::from_persisted(expected_revision)),
+            current,
+        });
+    }
+    if row.try_get::<i16, _>("lifecycle")? != SESSION_RUNNING {
+        return Err(StoreError::SessionAlreadyTerminal {
+            session_id,
+        });
+    }
+    Ok(())
+}
+
+fn provider_effect_state_from_code(value: i16) -> Result<ProviderEffectState, StoreError> {
+    match value {
+        0 => Ok(ProviderEffectState::Started),
+        1 => Ok(ProviderEffectState::Settled),
+        2 => Ok(ProviderEffectState::Failed),
+        3 => Ok(ProviderEffectState::Cancelled),
+        _ => Err(StoreError::CorruptLifecycleColumn),
+    }
+}
+
+fn provider_effect_settlement_matches(
+    row: &sqlx::postgres::PgRow,
+    settlement: &ProviderEffectSettlement,
+    state: ProviderEffectState,
+) -> Result<bool, StoreError> {
+    Ok(provider_effect_state_from_code(row.try_get("state")?)? == state
+        && row.try_get::<Option<String>, _>("stop_reason")? == Some(settlement.stop_reason.clone())
+        && row.try_get::<Option<bool>, _>("context_overflow")? == Some(settlement.context_overflow)
+        && row.try_get::<Option<i64>, _>("input_tokens")? == settlement.input_tokens
+        && row.try_get::<Option<i64>, _>("output_tokens")? == settlement.output_tokens
+        && row.try_get::<Option<i64>, _>("cache_read_tokens")? == settlement.cache_read_tokens
+        && row.try_get::<Option<i64>, _>("cache_write_tokens")? == settlement.cache_write_tokens
+        && row.try_get::<Option<i64>, _>("reasoning_tokens")? == settlement.reasoning_tokens
+        && row.try_get::<Option<i64>, _>("reported_cost_micro_usd")?
+            == settlement.reported_cost_micro_usd
+        && row.try_get::<Option<String>, _>("failure_class")? == settlement.failure_class)
+}
+
+fn provider_effect_ledger_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<ProviderEffectLedgerRow, StoreError> {
+    let value = |field| {
+        row.try_get::<Option<i64>, _>(field)?
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| StoreError::CorruptCostColumn)
+    };
+    Ok(ProviderEffectLedgerRow {
+        state: provider_effect_state_from_code(row.try_get("state")?)?,
+        input_tokens: value("input_tokens")?,
+        output_tokens: value("output_tokens")?,
+        cache_read_tokens: value("cache_read_tokens")?,
+        cache_write_tokens: value("cache_write_tokens")?,
+        reasoning_tokens: value("reasoning_tokens")?,
+        reported_cost_micro_usd: value("reported_cost_micro_usd")?.map(MicroUsd::new),
+    })
+}
+
+fn provider_effect_ledger_from_rows(
+    rows: &[ProviderEffectLedgerRow],
+) -> Result<ProviderEffectLedger, StoreError> {
+    let complete_settlement = rows
+        .iter()
+        .all(|row| row.state == ProviderEffectState::Settled);
+    let sum = |values: Vec<Option<u64>>| -> Result<Option<u64>, StoreError> {
+        values.into_iter().try_fold(Some(0_u64), |total, value| match (total, value) {
+            (Some(total), Some(value)) => total.checked_add(value).map(Some).ok_or(
+                StoreError::InvalidProcessCommand {
+                    field: "provider effect usage aggregate",
+                },
+            ),
+            _ => Ok(None),
+        })
+    };
+    let input_tokens = sum(rows.iter().map(|row| row.input_tokens).collect())?;
+    let output_tokens = sum(rows.iter().map(|row| row.output_tokens).collect())?;
+    let cache_read_tokens = sum(rows.iter().map(|row| row.cache_read_tokens).collect())?;
+    let cache_write_tokens = sum(rows.iter().map(|row| row.cache_write_tokens).collect())?;
+    let reasoning_tokens = sum(rows.iter().map(|row| row.reasoning_tokens).collect())?;
+    let reported_cost_micro_usd = sum(
+        rows.iter()
+            .map(|row| row.reported_cost_micro_usd.map(MicroUsd::get))
+            .collect(),
+    )?;
+    let complete_usage = complete_settlement
+        && input_tokens.is_some()
+        && output_tokens.is_some()
+        && cache_read_tokens.is_some()
+        && cache_write_tokens.is_some()
+        && reasoning_tokens.is_some();
+    let complete_cost = complete_settlement && reported_cost_micro_usd.is_some();
+    Ok(ProviderEffectLedger {
+        provider_effect_count: u32::try_from(rows.len()).map_err(|_| StoreError::InvalidProcessCommand {
+            field: "provider effect count",
+        })?,
+        settled_provider_effect_count: u32::try_from(
+            rows.iter()
+                .filter(|row| row.state != ProviderEffectState::Started)
+                .count(),
+        )
+        .map_err(|_| StoreError::InvalidProcessCommand {
+            field: "settled provider effect count",
+        })?,
+        complete_usage,
+        complete_cost,
+        usage: UsageTotalsV2 {
+            input_tokens: complete_settlement.then_some(input_tokens).flatten(),
+            output_tokens: complete_settlement.then_some(output_tokens).flatten(),
+            cache_read_tokens: complete_settlement.then_some(cache_read_tokens).flatten(),
+            cache_write_tokens: complete_settlement.then_some(cache_write_tokens).flatten(),
+            reasoning_tokens: complete_settlement.then_some(reasoning_tokens).flatten(),
+            reported_cost_micro_usd: complete_settlement
+                .then_some(reported_cost_micro_usd)
+                .flatten()
+                .map(MicroUsd::new),
+        },
+    })
 }
 fn assignment_role_code(assignment_role: factory_protocol::AssignmentRole) -> i16 {
     match assignment_role {
@@ -3128,15 +3711,33 @@ fn failure_code(value: StopReasonV2) -> Option<i16> {
 }
 fn usage_sql(
     value: UsageTotalsV2,
-) -> Result<(i64, i64, i64, i64, Option<i64>, Option<i64>), StoreError> {
+) -> Result<
+    (
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+    ),
+    StoreError,
+> {
     let range = |_| StoreError::InvalidProcessCommand {
         field: "usage total",
     };
     Ok((
-        i64::try_from(value.input_tokens).map_err(range)?,
-        i64::try_from(value.output_tokens).map_err(range)?,
-        i64::try_from(value.cache_read_tokens).map_err(range)?,
-        i64::try_from(value.cache_write_tokens).map_err(range)?,
+        value.input_tokens.map(i64::try_from).transpose().map_err(range)?,
+        value.output_tokens.map(i64::try_from).transpose().map_err(range)?,
+        value
+            .cache_read_tokens
+            .map(i64::try_from)
+            .transpose()
+            .map_err(range)?,
+        value
+            .cache_write_tokens
+            .map(i64::try_from)
+            .transpose()
+            .map_err(range)?,
         value
             .reasoning_tokens
             .map(i64::try_from)
@@ -3148,6 +3749,26 @@ fn usage_sql(
             .transpose()
             .map_err(range)?,
     ))
+}
+
+fn hash_optional_u64(hasher: &mut blake3::Hasher, value: Option<u64>) {
+    match value {
+        Some(value) => {
+            hash_u32(hasher, 1);
+            hash_u64(hasher, value);
+        }
+        None => hash_u32(hasher, 0),
+    }
+}
+
+fn hash_optional_artifact_id(hasher: &mut blake3::Hasher, value: Option<ArtifactId>) {
+    match value {
+        Some(value) => {
+            hash_u32(hasher, 1);
+            hash_i64(hasher, value.get());
+        }
+        None => hash_u32(hasher, 0),
+    }
 }
 fn db_cost(state: Option<i16>, value: Option<i64>) -> Result<Option<TerminalCostV2>, StoreError> {
     match (state, value) {
@@ -3197,11 +3818,80 @@ mod tests {
     #[test]
     fn provider_cost_is_unknown_when_absent_even_with_token_usage() {
         let usage = UsageTotalsV2 {
-            input_tokens: 100,
-            output_tokens: 100,
+            input_tokens: Some(100),
+            output_tokens: Some(100),
             reported_cost_micro_usd: None,
             ..UsageTotalsV2::default()
         };
         assert!(usage.provider_cost().is_err());
+    }
+
+    fn provider_row(
+        state: ProviderEffectState,
+        tokens: Option<u64>,
+        cost: Option<u64>,
+    ) -> ProviderEffectLedgerRow {
+        ProviderEffectLedgerRow {
+            state,
+            input_tokens: tokens,
+            output_tokens: tokens,
+            cache_read_tokens: tokens,
+            cache_write_tokens: tokens,
+            reasoning_tokens: tokens,
+            reported_cost_micro_usd: cost.map(MicroUsd::new),
+        }
+    }
+
+    #[test]
+    fn provider_effect_ledger_recovers_multiple_complete_turns() {
+        let ledger = provider_effect_ledger_from_rows(&[
+            provider_row(ProviderEffectState::Settled, Some(2), Some(3)),
+            provider_row(ProviderEffectState::Settled, Some(5), Some(7)),
+        ])
+        .expect("complete provider ledger");
+        assert_eq!(ledger.provider_effect_count, 2);
+        assert_eq!(ledger.settled_provider_effect_count, 2);
+        assert!(ledger.complete_usage);
+        assert!(ledger.complete_cost);
+        assert_eq!(ledger.usage.input_tokens, Some(7));
+        assert_eq!(ledger.usage.cache_read_tokens, Some(7));
+        assert_eq!(ledger.usage.reported_cost_micro_usd, Some(MicroUsd::new(10)));
+    }
+
+    #[test]
+    fn provider_effect_ledger_distinguishes_known_zero_from_unknown() {
+        let zero = provider_effect_ledger_from_rows(&[provider_row(
+            ProviderEffectState::Settled,
+            Some(0),
+            Some(0),
+        )])
+        .expect("known zero provider ledger");
+        assert!(zero.complete_cost);
+        assert_eq!(zero.usage.reported_cost_micro_usd, Some(MicroUsd::new(0)));
+
+        let unknown = provider_effect_ledger_from_rows(&[provider_row(
+            ProviderEffectState::Settled,
+            None,
+            None,
+        )])
+        .expect("unknown provider ledger remains representable");
+        assert!(!unknown.complete_usage);
+        assert!(!unknown.complete_cost);
+        assert_eq!(unknown.usage.input_tokens, None);
+        assert_eq!(unknown.usage.reported_cost_micro_usd, None);
+    }
+
+    #[test]
+    fn started_provider_effect_keeps_terminal_cost_incomplete() {
+        let ledger = provider_effect_ledger_from_rows(&[provider_row(
+            ProviderEffectState::Started,
+            Some(1),
+            Some(1),
+        )])
+        .expect("started effect ledger");
+        assert_eq!(ledger.settled_provider_effect_count, 0);
+        assert!(!ledger.complete_usage);
+        assert!(!ledger.complete_cost);
+        assert_eq!(ledger.usage.reported_cost_micro_usd, None);
     }
 }

@@ -207,12 +207,42 @@ fn request_field_names(operation: &str) -> Option<&'static [&'static str]> {
             "role",
             "byte_limit",
         ],
+        "session.provider_request_start" => &[
+            "client_command_id",
+            "expected_revision",
+            "core_run_id",
+            "effect_id",
+            "harness_snapshot_id",
+            "harness_revision_id",
+            "model_harness_profile_id",
+            "provider_surface_digest",
+            "provider",
+            "model",
+            "request_fingerprint",
+        ],
+        "session.provider_request_settle" => &[
+            "client_command_id",
+            "expected_revision",
+            "core_run_id",
+            "effect_id",
+            "outcome",
+            "stop_reason",
+            "context_overflow",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "reasoning_tokens",
+            "reported_cost_micro_usd",
+            "failure_class",
+        ],
         "session.submit_terminal" => &[
             "client_command_id",
             "expected_revision",
             "terminal_operation",
             "terminal_payload_b64",
             "transcript_artifact_id",
+            "execution_summary_artifact_id",
             "input_tokens",
             "output_tokens",
             "cache_read_tokens",
@@ -645,14 +675,16 @@ fn shell(
     let stderr = thread::spawn(move || drain(stderr, 128 * 1024));
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
+    let mut cancelled = false;
     loop {
         if child.try_wait().map_err(io_error)?.is_some() {
             terminate_shell_process_group(process_group);
             break;
         }
         if cancellation.is_cancelled() {
+            cancelled = true;
             terminate_shell_process_group(process_group);
-            return Err(DaemonError::new("shell invocation was cancelled"));
+            break;
         }
         if Instant::now() >= deadline {
             timed_out = true;
@@ -668,6 +700,9 @@ fn shell(
     let stderr = stderr
         .join()
         .map_err(|_| DaemonError::new("shell stderr reader panicked"))?;
+    if cancelled {
+        return Err(DaemonError::new("shell invocation was cancelled"));
+    }
     Ok(ShellOutput {
         status: status.code().unwrap_or(128),
         stdout: String::from_utf8_lossy(&stdout.0).into_owned(),
@@ -729,10 +764,18 @@ mod tests {
     use factory_protocol::{
         CandidateSubmitRequest, InstitutionalReferenceWireV2, PROTOCOL_VERSION_V2,
         PublicationAttachmentWireV2, PublicationCreateRequest, QualitySubmitReviewRequest,
-        REQUEST_FRAME_MAX_BYTES, SessionVerifyPacketRequest, decode_operation_request,
+        OP_SESSION_PROVIDER_REQUEST_SETTLE, OP_SESSION_PROVIDER_REQUEST_START,
+        REQUEST_FRAME_MAX_BYTES, SessionProviderRequestSettleRequest,
+        SessionProviderRequestStartRequest, SessionVerifyPacketRequest, decode_operation_request,
         decode_product_submit_ticket_request_v2, encode_frame,
     };
-    use std::{path::Path, time::Duration};
+    use std::{
+        fs,
+        path::Path,
+        process::{Command, Stdio},
+        thread,
+        time::{Duration, Instant},
+    };
     use tea_core::scheduler::CancellationToken;
     use tea_protocol::{JsonNumber, JsonValue};
 
@@ -750,6 +793,132 @@ mod tests {
         assert_eq!(output.status, 0);
         assert!(!output.timed_out);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn shell_cancellation_reaps_background_descendants_before_returning() {
+        let root = std::env::temp_dir().join(format!(
+            "factory-shell-cancellation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock is after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create temporary shell root");
+        let child_pid_path = root.join("background.pid");
+        let cancellation = CancellationToken::new();
+        let canceller = cancellation.clone();
+        let cancellation_path = child_pid_path.clone();
+        let cancellation_notifier = thread::spawn(move || {
+            for _ in 0..100 {
+                if cancellation_path.is_file() {
+                    canceller.cancel();
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            canceller.cancel();
+        });
+
+        let started = Instant::now();
+        let error = match shell(
+            &root,
+            "sleep 60 & echo $! > background.pid; wait",
+            Duration::from_secs(2),
+            cancellation,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled shell must fail after reaping its process group"),
+        };
+        cancellation_notifier
+            .join()
+            .expect("cancellation notifier must not panic");
+
+        let background_pid = fs::read_to_string(&child_pid_path)
+            .expect("background command records its process id")
+            .trim()
+            .to_owned();
+        let background_gone = (0..100).any(|_| {
+            let absent = !Command::new(factory_settings::HOST_KILL_EXECUTABLE)
+                .args(["-0", background_pid.as_str()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if !absent {
+                thread::sleep(Duration::from_millis(10));
+            }
+            absent
+        });
+        fs::remove_dir_all(&root).expect("remove temporary shell root");
+
+        assert_eq!(error.to_string(), "shell invocation was cancelled");
+        assert!(background_gone, "background child outlived cancelled shell");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn request_json_supports_closed_provider_effect_requests() {
+        let start = request_json(
+            OP_SESSION_PROVIDER_REQUEST_START,
+            "provider-start",
+            JsonValue::object([
+                ("client_command_id", JsonValue::String("provider-effect-start-session-1-assignment-2-run-run-effect-3".to_owned())),
+                ("expected_revision", JsonValue::Number(JsonNumber::Unsigned(4))),
+                ("core_run_id", JsonValue::String("run".to_owned())),
+                ("effect_id", JsonValue::Number(JsonNumber::Unsigned(3))),
+                ("harness_snapshot_id", JsonValue::String("snapshot".to_owned())),
+                ("harness_revision_id", JsonValue::String("revision".to_owned())),
+                ("model_harness_profile_id", JsonValue::String("profile".to_owned())),
+                ("provider_surface_digest", JsonValue::String("a".repeat(64))),
+                ("provider", JsonValue::String("provider".to_owned())),
+                ("model", JsonValue::String("model".to_owned())),
+                ("request_fingerprint", JsonValue::String("b".repeat(64))),
+            ]),
+        )
+        .expect("provider start request is canonical");
+        let frame = encode_frame(start.as_bytes(), REQUEST_FRAME_MAX_BYTES).expect("frame start");
+        let parsed: SessionProviderRequestStartRequest = decode_operation_request(
+            &frame,
+            REQUEST_FRAME_MAX_BYTES,
+            OP_SESSION_PROVIDER_REQUEST_START,
+        )
+        .expect("typed provider start");
+        assert_eq!(parsed.effect_id, 3);
+        assert_eq!(parsed.request_fingerprint, "b".repeat(64));
+
+        let settle = request_json(
+            OP_SESSION_PROVIDER_REQUEST_SETTLE,
+            "provider-settle",
+            JsonValue::object([
+                ("client_command_id", JsonValue::String("provider-effect-settle-session-1-assignment-2-run-run-effect-3".to_owned())),
+                ("expected_revision", JsonValue::Number(JsonNumber::Unsigned(4))),
+                ("core_run_id", JsonValue::String("run".to_owned())),
+                ("effect_id", JsonValue::Number(JsonNumber::Unsigned(3))),
+                ("outcome", JsonValue::String("settled".to_owned())),
+                ("stop_reason", JsonValue::String("stop".to_owned())),
+                ("context_overflow", JsonValue::Bool(false)),
+                ("input_tokens", JsonValue::Number(JsonNumber::Unsigned(0))),
+                ("output_tokens", JsonValue::Null),
+                ("cache_read_tokens", JsonValue::Null),
+                ("cache_write_tokens", JsonValue::Null),
+                ("reasoning_tokens", JsonValue::Null),
+                ("reported_cost_micro_usd", JsonValue::Number(JsonNumber::Unsigned(0))),
+                ("failure_class", JsonValue::Null),
+            ]),
+        )
+        .expect("provider settlement request is canonical");
+        let frame = encode_frame(settle.as_bytes(), REQUEST_FRAME_MAX_BYTES).expect("frame settle");
+        let parsed: SessionProviderRequestSettleRequest = decode_operation_request(
+            &frame,
+            REQUEST_FRAME_MAX_BYTES,
+            OP_SESSION_PROVIDER_REQUEST_SETTLE,
+        )
+        .expect("typed provider settlement");
+        assert_eq!(parsed.input_tokens, Some(0));
+        assert_eq!(parsed.output_tokens, None);
+        assert_eq!(parsed.reported_cost_micro_usd, Some(0));
     }
 
     #[test]

@@ -47,8 +47,11 @@ not implicitly mergeable because their IDs and CAS provenance are local to the
 qualified runtime/evidence set.
 
 `factory-tea-host` validates closed host shapes, adapts the sealed assignment
-packet to Tea, and speaks the framed kernel descriptor. It has
-no independent lifecycle authority.
+packet to Tea, and speaks the framed kernel descriptor. It has no independent
+lifecycle authority. Its production `FactoryEffectGate` is limited to provider
+request intent/settlement; Factory tool mutations continue to use their
+existing typed capability RPC authority and are not duplicated in a generic
+event log.
 
 Each process contains one Tea hosted epoch: the immutable model-facing prompt,
 ordered tools, resolved extension hooks, runtime policies, capability-binding
@@ -204,7 +207,9 @@ not yet collected—see the [V1 backlog](../V1.md).
 - One daemon and one paid actor at a time in the current MVP.
 - Closed typed protocol values; no metadata maps, plugin callbacks, or generic
   workflow language.
-- Four Rust crates, no ORM or internal event bus.
+- Six Rust crates (`factory-settings`, `factory-protocol`, `factory-tea-host`,
+  `factory-kernel`, `factoryd`, and `factoryctl`), no ORM or internal event
+  bus.
 - Local Unix socket for operator control and inherited connected descriptors
   for actor RPC; no HTTP control plane.
 - Same-user cooperation, not adversarial isolation.

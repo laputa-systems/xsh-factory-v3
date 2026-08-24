@@ -3,8 +3,9 @@
 ## Durable layers
 
 PostgreSQL contains small typed facts: lifecycle rows, immutable identities,
-aggregate revisions, and audit receipts. It never stores per-token events,
-shell chunks, tool-call rows, or transcript text. The append-only CAS stores
+aggregate revisions, audit receipts, and one row per provider request intent
+and settlement. It never stores per-token events, shell chunks, tool-call
+rows, prompt/message text, provider bodies, or transcript text. The append-only CAS stores
 the actual bounded bytes: application/template sources, assignment evidence,
 command receipts, patches, reports, and session archives.
 
@@ -30,21 +31,30 @@ documented missing capability, not permission to delete runtime data broadly.
 Tea's `TraceObserver` produces the machine trajectory; Factory does not project
 `AgentEventKind` into a second event model. A Factory-owned `RedactingSink`
 removes model inputs and credential-shaped tool fields before a bounded sink
-incrementally writes and flushes `session.ndjson`. At terminal state the host
-appends one `factory.execution_summary.v1` record and seals
-`tea-trace.jsonl.gz` under the versioned `tea_trace_jsonl_gzip` evidence role.
-That summary retains the Factory application revision, assignment, packet,
-policy, and host-build identities; exact provider/model selection; Tea harness
-snapshot, revision, and model-profile identities; standard Tea surface
-digests; engineering diagnostics; cost-stop state; and the selected terminal
-operation.
+incrementally writes and flushes `session.ndjson`. The compressed
+`tea-trace.jsonl.gz` artifact has role `tea_trace_jsonl_gzip` and contains only
+Tea trace JSONL: one `EpisodeHeader`, zero or more Tea trajectory records, and
+one final `EpisodeEnd`. Factory never appends a record after that terminal Tea
+event.
+
+Factory seals its own canonical `factory-execution-summary.json` separately
+under `factory_execution_summary_json`. The summary retains Factory
+application/assignment/packet/policy/build identities; provider/model; Tea
+harness snapshot, revision, model-profile, and surface identities (including
+the host-only tool-execution-policy digest); tool diagnostics; cost-stop state;
+provider-effect completeness/counts; trace truncation; and the selected
+terminal operation. A successful terminal settlement names both sealed
+artifacts explicitly. Operator export writes
+`session-<id>-trace.ndjson.gz` and
+`session-<id>-execution-summary.json`; the latter is not a transcript and is
+never gunzipped as NDJSON.
 
 The Tea JSONL records retain turns, bounded assistant output, tool calls and
 failures, cache evidence, compaction lifecycle, and stop reason. Model input is
 always replaced at the redaction boundary. Tool arguments recursively redact
 credential-shaped fields, and arguments, results, and errors are byte bounded.
-The sink reserves terminal and summary capacity before accepting ordinary
-records, records whether trajectory content was truncated, and uses a
+The sink reserves terminal capacity before accepting ordinary records, records
+whether trajectory content was truncated, and uses a
 conservative gzip upper bound so the sealed member remains within packet
 authority. The gzip member uses the `flate2` Rust backend (`miniz_oxide`) and a
 stored-block fallback when compression would expand the bounded artifact.
@@ -69,6 +79,24 @@ an available transcript remain explicitly reported.
 `make status` preserves each complete `.ndjson.gz` archive and gunzips a readable
 `.ndjson` copy beside it in that temporary directory; the compressed artifact
 remains the durable-evidence projection.
+
+## Provider-effect accounting and recovery
+
+`FactoryEffectGate` is installed for every production hosted epoch; production
+assignments do not use `NoopEffectGate`. Immediately before provider dispatch
+it records the bound session/assignment, Tea core-run/effect identity, resolved
+harness identities, requested provider/model, and a content-free request
+fingerprint. Settlement records only its closed outcome, bounded failure class,
+context-overflow classification, nullable usage counters, and exact parsed
+micro-USD provider cost. Factory tools do not enter this ledger: their existing
+typed capability RPCs remain their authoritative durability boundary.
+
+Terminal reconciliation rereads this narrow ledger. Every started request must
+have a settled record with known exact provider cost before the ledger total is
+known. A complete ledger agrees exactly with a supplied terminal cost, or it
+recovers cost and usage after a host dies before terminal submission. An
+unsettled, failed, conflicting, or cost-unknown request keeps the cost
+fail-closed. A session with no provider request has a known zero total.
 
 ## Factory-Cost on delivered commits
 

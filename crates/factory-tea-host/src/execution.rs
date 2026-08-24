@@ -12,7 +12,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tea_core::agent::Agent;
-use tea_core::effect::NoopEffectGate;
 use tea_core::error::CoreError;
 use tea_core::event::{AgentEvent, AgentEventKind, EventObserver, ObserverFuture};
 use tea_core::harness::extension::ExtensionCapability;
@@ -54,6 +53,10 @@ pub struct ExecutionInput {
     pub cost_reader: Option<CostReader>,
     /// Shared host state for revision identity and bounded assignment phases.
     pub command_context: CommandContext,
+    /// Durable provider-request authority. Factory tools continue to use their
+    /// own typed capability operations instead of this narrow ledger gate.
+    effect_gate: Arc<dyn tea_core::effect::EffectGate>,
+    provider_effect_gate: Arc<crate::FactoryEffectGate>,
 }
 
 impl fmt::Debug for ExecutionInput {
@@ -79,6 +82,7 @@ pub struct PreparedExecution {
     terminal: Arc<TerminalDeferral>,
     cost_reader: Option<CostReader>,
     command_context: CommandContext,
+    provider_effect_gate: Arc<crate::FactoryEffectGate>,
 }
 
 /// Enforce the admitted campaign allowance at provider-turn boundaries.
@@ -151,7 +155,7 @@ impl ExecutionInput {
             self.provider,
             self.verified,
             self.capability,
-            Arc::new(NoopEffectGate),
+            self.effect_gate,
             phase_hook_set(Arc::new(OpenAiContextHook), self.command_context.clone()),
         )
         .map_err(ExecutionError::Harness)?;
@@ -161,6 +165,7 @@ impl ExecutionInput {
             terminal: self.terminal,
             cost_reader: self.cost_reader,
             command_context: self.command_context,
+            provider_effect_gate: self.provider_effect_gate,
         })
     }
 }
@@ -303,12 +308,19 @@ where
     let verified =
         crate::tea_harness::verify_extension(&admission).map_err(ExecutionError::Harness)?;
     let capability: Arc<dyn ExtensionCapability> = Arc::new(FactoryCapability::new(
-        daemon,
+        Arc::clone(&daemon),
         verified.tools.clone(),
         command_context.clone(),
         Arc::clone(&terminal),
         local,
     ));
+    let effect_daemon: Arc<dyn FramedDaemon> = daemon;
+    let provider_effect_gate = Arc::new(crate::FactoryEffectGate::new(
+        admission.clone(),
+        effect_daemon,
+        command_context.clone(),
+    ));
+    let effect_gate: Arc<dyn tea_core::effect::EffectGate> = provider_effect_gate.clone();
     Ok(ExecutionInput {
         admission,
         provider,
@@ -317,6 +329,8 @@ where
         terminal,
         cost_reader,
         command_context,
+        effect_gate,
+        provider_effect_gate,
     })
 }
 
@@ -343,6 +357,12 @@ impl PreparedExecution {
     #[must_use]
     pub fn surface_fingerprints(&self) -> &tea_core::harness::HarnessSurfaceFingerprints {
         self.hosted.surface_fingerprints()
+    }
+
+    /// Return the provider-effect facts acknowledged to Factory's ledger.
+    #[must_use]
+    pub fn provider_effect_diagnostics(&self) -> crate::ProviderEffectDiagnostics {
+        self.provider_effect_gate.diagnostics()
     }
 
     /// Borrow the one-shot terminal deferral gate.

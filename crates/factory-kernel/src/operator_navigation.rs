@@ -294,14 +294,19 @@ impl OperatorNavigationRpc {
             let rows = sqlx::query(
                 "SELECT s.id AS session_id,
                         s.transcript_artifact_id,
+                        s.execution_summary_artifact_id,
                         s.partial_transcript_artifact_id,
                         transcript.digest AS transcript_digest,
                         transcript.byte_length AS transcript_byte_length,
+                        execution_summary.digest AS execution_summary_digest,
+                        execution_summary.byte_length AS execution_summary_byte_length,
                         partial.digest AS partial_digest,
                         partial.byte_length AS partial_byte_length
                    FROM factory.sessions s
               LEFT JOIN factory.artifacts transcript
                      ON transcript.id = s.transcript_artifact_id
+              LEFT JOIN factory.artifacts execution_summary
+                     ON execution_summary.id = s.execution_summary_artifact_id
               LEFT JOIN factory.artifacts partial
                      ON partial.id = s.partial_transcript_artifact_id
                   WHERE s.campaign_id = $1
@@ -343,6 +348,9 @@ impl OperatorNavigationRpc {
                 let partial_transcript_artifact_id = row
                     .try_get::<Option<i64>, _>("partial_transcript_artifact_id")
                     .map_err(navigation_database)?;
+                let execution_summary_artifact_id = row
+                    .try_get::<Option<i64>, _>("execution_summary_artifact_id")
+                    .map_err(navigation_database)?;
                 let mut exported = false;
                 // When a host dies before sealing its compact transcript, the
                 // terminal transition stores the bounded partial marker in both
@@ -364,11 +372,11 @@ impl OperatorNavigationRpc {
                         "transcript_digest",
                         "transcript_byte_length",
                     )?;
-                    let file_name = format!("session-{session_id}-transcript.ndjson.gz");
+                    let file_name = format!("session-{session_id}-trace.ndjson.gz");
                     write_export_file(&directory, &file_name, &bytes)?;
                     files.push(CycleTranscriptFileResponse {
                         session_id,
-                        kind: "transcript".to_owned(),
+                        kind: "tea_trace".to_owned(),
                         file_name,
                         byte_length: bytes.len() as u64,
                     });
@@ -376,11 +384,11 @@ impl OperatorNavigationRpc {
                 } else {
                     remove_export_file(
                         &directory,
-                        &format!("session-{session_id}-transcript.ndjson.gz"),
+                        &format!("session-{session_id}-trace.ndjson.gz"),
                     )?;
                     remove_export_file(
                         &directory,
-                        &format!("session-{session_id}-transcript.ndjson"),
+                        &format!("session-{session_id}-trace.ndjson"),
                     )?;
                 }
                 if partial_transcript_artifact_id.is_some() {
@@ -395,6 +403,28 @@ impl OperatorNavigationRpc {
                         byte_length: bytes.len() as u64,
                     });
                     exported = true;
+                }
+                if execution_summary_artifact_id.is_some() {
+                    let bytes = read_export_artifact(
+                        cas,
+                        &row,
+                        "execution_summary_digest",
+                        "execution_summary_byte_length",
+                    )?;
+                    let file_name = format!("session-{session_id}-execution-summary.json");
+                    write_export_file(&directory, &file_name, &bytes)?;
+                    files.push(CycleTranscriptFileResponse {
+                        session_id,
+                        kind: "execution_summary".to_owned(),
+                        file_name,
+                        byte_length: bytes.len() as u64,
+                    });
+                    exported = true;
+                } else {
+                    remove_export_file(
+                        &directory,
+                        &format!("session-{session_id}-execution-summary.json"),
+                    )?;
                 }
                 if !exported {
                     missing_session_ids.push(session_id);

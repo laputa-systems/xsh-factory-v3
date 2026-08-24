@@ -28,6 +28,96 @@ impl MicroUsd {
                 reason: "sum exceeds u64",
             })
     }
+
+    /// Parse a nonnegative USD decimal without using floating point, rounding
+    /// any sub-micro-USD remainder up so a provider charge is never
+    /// understated at the Factory boundary.
+    pub fn parse_decimal_usd(value: &str) -> Result<Self, ContractError> {
+        let (whole, fraction) = value.split_once('.').map_or((value, None), |(whole, fraction)| {
+            (whole, Some(fraction))
+        });
+        if whole.is_empty()
+            || !whole.as_bytes().iter().all(u8::is_ascii_digit)
+            || fraction.is_some_and(|fraction| {
+                fraction.is_empty() || !fraction.as_bytes().iter().all(u8::is_ascii_digit)
+            })
+        {
+            return Err(ContractError::InvalidValue {
+                field: "USD decimal",
+                reason: "must be an unsigned decimal with an optional fractional part",
+            });
+        }
+
+        let whole = whole
+            .parse::<u64>()
+            .map_err(|_| ContractError::InvalidValue {
+                field: "USD decimal",
+                reason: "exceeds u64 micro-USD",
+            })?;
+        let fraction = fraction.unwrap_or_default().as_bytes();
+        let mut fractional_micro_usd = 0_u64;
+        for digit in fraction.iter().take(6) {
+            fractional_micro_usd = fractional_micro_usd * 10 + u64::from(digit - b'0');
+        }
+        for _ in fraction.len()..6 {
+            fractional_micro_usd *= 10;
+        }
+        let rounds_up = fraction
+            .get(6..)
+            .is_some_and(|remaining| remaining.iter().any(|digit| *digit != b'0'));
+
+        whole
+            .checked_mul(1_000_000)
+            .and_then(|value| value.checked_add(fractional_micro_usd))
+            .and_then(|value| value.checked_add(u64::from(rounds_up)))
+            .map(Self)
+            .ok_or(ContractError::InvalidValue {
+                field: "USD decimal",
+                reason: "exceeds u64 micro-USD",
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MicroUsd;
+
+    #[test]
+    fn usd_decimal_rounds_sub_micro_usd_remainders_up() {
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("1.000000"),
+            Ok(MicroUsd::new(1_000_000))
+        );
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("0.1"),
+            Ok(MicroUsd::new(100_000))
+        );
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("0.000001000000"),
+            Ok(MicroUsd::new(1))
+        );
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("0.0000011"),
+            Ok(MicroUsd::new(2))
+        );
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("0.0000001"),
+            Ok(MicroUsd::new(1))
+        );
+    }
+
+    #[test]
+    fn usd_decimal_rejects_malformed_or_overflowing_amounts() {
+        for malformed in ["", ".1", "1.", "-1", "+1", "1e-3", "1.2.3", "0.000000x"] {
+            assert!(MicroUsd::parse_decimal_usd(malformed).is_err());
+        }
+        assert_eq!(
+            MicroUsd::parse_decimal_usd("18446744073709.551615"),
+            Ok(MicroUsd::new(u64::MAX))
+        );
+        assert!(MicroUsd::parse_decimal_usd("18446744073709.5516151").is_err());
+        assert!(MicroUsd::parse_decimal_usd("18446744073710").is_err());
+    }
 }
 
 /// A duration carried across a durable boundary as whole milliseconds.

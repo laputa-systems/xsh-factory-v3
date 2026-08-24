@@ -22,7 +22,7 @@ use sqlx::{
 use thiserror::Error;
 
 /// Comment installed on the factory-owned schema by the canonical migrations.
-pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:authority-v3";
+pub const SCHEMA_IDENTITY: &str = "factory-v3-schema:authority-v5";
 
 /// A fixed kernel-local key. PostgreSQL holds it per connection until explicit
 /// release or connection death, so a daemon restart cannot inherit a stale lock.
@@ -1642,6 +1642,12 @@ pub enum StoreError {
 
     #[error("terminal stop reason and provider cost evidence disagree")]
     TerminalCostMismatch,
+
+    #[error("provider-effect settlement has no matching durable provider request intent")]
+    ProviderEffectNotStarted,
+
+    #[error("provider-effect replay conflicts with the durable request or settlement")]
+    ProviderEffectConflict,
 
     #[error("cost/lifecycle column is corrupt")]
     CorruptLifecycleColumn,

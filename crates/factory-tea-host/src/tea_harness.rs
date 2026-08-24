@@ -17,15 +17,14 @@ use tea_core::harness::extension::{
 };
 use tea_core::harness::{
     CapabilityBindingRef, HarnessActor, HarnessError, HarnessResolver, HarnessResourceLimits,
-    HarnessRuntimePolicyDescriptors, HarnessSeedBuilder, HarnessSeedExtension,
-    HarnessSeedExtensionScope, ModelHarnessProfile, PluginCapabilityBinding,
-    PluginCapabilityCatalog, SelfExtensionMode, ToolPresentationDescriptor,
+    HarnessSeedBuilder, HarnessSeedExtension, HarnessSeedExtensionScope, ModelHarnessProfile,
+    PluginCapabilityBinding, PluginCapabilityCatalog, SelfExtensionMode, ToolPresentationDescriptor,
 };
 use tea_core::hooks::HookSet;
 use tea_core::runtime::{HostedEpoch, HostedEpochInput, RuntimeServices};
 use tea_core::scheduler::ModelProvider;
 use tea_core::state::{ModelDescriptor, ThinkingLevel};
-use tea_core::tool::ToolRegistry;
+use tea_core::tool::{CancellationSettlementMode, ToolExecutionMode, ToolRegistry};
 use tea_luau::LuauExtensionEngine;
 use tea_protocol::{JsonNumber, JsonValue};
 use tea_session::{CanonicalHashWriter, Digest, MemoryArtifactStore};
@@ -33,9 +32,8 @@ use tea_session::{CanonicalHashWriter, Digest, MemoryArtifactStore};
 pub(crate) const FACTORY_CAPABILITY_ABI: &str = "factory-capability-v1";
 const FACTORY_HOSTED_PROMPT_PROFILE: &str = "factory-sealed-system-v2";
 const FACTORY_HOSTED_TOOL_PROFILE: &str = "factory-policy-tools-v1";
-const FACTORY_COMPACTION_POLICY: &str = "tea-core-default-compaction-v1";
-const FACTORY_PROJECTION_POLICY: &str = "tea-core-default-tool-projection-v1";
-const FACTORY_FAILURE_POLICY: &str = "tea-core-default-tool-failure-v1";
+const FACTORY_COMPACTION_PROFILE: &str = "tea-core-default-compaction-v1";
+const FACTORY_PROJECTION_PROFILE: &str = "tea-core-default-tool-projection-v1";
 
 /// Provider-independent policy material verified before Tea resolution.
 #[derive(Debug)]
@@ -121,9 +119,10 @@ pub(crate) fn prepare_hosted_epoch(
         model.revision.clone(),
         FACTORY_HOSTED_PROMPT_PROFILE,
         FACTORY_HOSTED_TOOL_PROFILE,
-        FACTORY_COMPACTION_POLICY,
-        FACTORY_PROJECTION_POLICY,
+        FACTORY_COMPACTION_PROFILE,
+        FACTORY_PROJECTION_PROFILE,
     )?;
+    let base_profile = base_profile_digest(&system_prompt, &model, thinking);
     let limits = resource_limits(admission)?;
     let handler_limits = ExtensionToolLimits {
         max_source_bytes: limits.source_bytes,
@@ -148,21 +147,19 @@ pub(crate) fn prepare_hosted_epoch(
         binding_digest: binding.binding_digest(),
     };
     let artifacts: Arc<dyn tea_session::ArtifactStore> = Arc::new(MemoryArtifactStore::default());
-    let policies = HarnessRuntimePolicyDescriptors {
-        hook_bundle_digest: hook_bundle_digest(admission),
-        compaction_policy_digest: Digest::from_bytes(FACTORY_COMPACTION_POLICY),
-        tool_projection_digest: Digest::from_bytes(FACTORY_PROJECTION_POLICY),
-        failure_policy_digest: Digest::from_bytes(FACTORY_FAILURE_POLICY),
-    };
+    let services = RuntimeServices::new(provider, ToolRegistry::default())
+        .model(model)
+        .thinking_level(thinking)
+        .hooks_with_identity(base_hooks, hook_bundle_digest(admission));
     let seeded = HarnessSeedBuilder::new(
         artifacts,
         Arc::new(LuauExtensionEngine),
-        base_profile_digest(&system_prompt, &model, thinking),
+        base_profile,
         system_prompt,
         profile,
         SelfExtensionMode::Off,
         limits,
-        policies,
+        services.runtime_policy_identities(),
     )
     .extensions(vec![HarnessSeedExtension {
         scope: HarnessSeedExtensionScope::Session,
@@ -179,10 +176,6 @@ pub(crate) fn prepare_hosted_epoch(
     catalog
         .insert(binding)
         .map_err(|error| HarnessError::invalid_state(error.to_string()))?;
-    let services = RuntimeServices::new(provider, ToolRegistry::default())
-        .model(model)
-        .thinking_level(thinking)
-        .hooks(base_hooks);
     let resolver = HarnessResolver::new(
         seeded.repository,
         services.clone(),
@@ -334,7 +327,12 @@ fn capability_host_identity(
             "method",
             crate::tool_bridge::tool_contract(tool.name).capability_method,
         );
-        writer.string("execution_mode", &tool.execution_mode);
+        writer.string("execution_mode", execution_mode_name(tool.execution_mode));
+        writer.boolean("requires_exclusive_batch", tool.requires_exclusive_batch);
+        writer.string(
+            "cancellation_settlement_mode",
+            cancellation_settlement_mode_name(tool.cancellation_settlement_mode),
+        );
     }
     writer.u64("max_source_bytes", limits.max_source_bytes as u64);
     writer.u64("max_memory_bytes", limits.max_memory_bytes as u64);
@@ -352,7 +350,10 @@ fn verify_resolved_tool_surface(
             tea.name != factory.name.as_str()
                 || tea.description != factory.description
                 || tea.schema != factory.schema
-                || tea.execution_mode != factory.execution_mode
+                || tea.execution_mode != execution_mode_name(factory.execution_mode)
+                || tea.requires_exclusive_batch != factory.requires_exclusive_batch
+                || tea.cancellation_settlement_mode
+                    != cancellation_settlement_mode_name(factory.cancellation_settlement_mode)
         })
     {
         return Err(HarnessError::invalid_state(
@@ -360,6 +361,20 @@ fn verify_resolved_tool_surface(
         ));
     }
     Ok(())
+}
+
+const fn execution_mode_name(value: ToolExecutionMode) -> &'static str {
+    match value {
+        ToolExecutionMode::Sequential => "sequential",
+        ToolExecutionMode::Parallel => "parallel",
+    }
+}
+
+const fn cancellation_settlement_mode_name(value: CancellationSettlementMode) -> &'static str {
+    match value {
+        CancellationSettlementMode::DropFuture => "drop_future",
+        CancellationSettlementMode::AwaitFuture => "await_future",
+    }
 }
 
 fn factory_provenance(admission: &Admission) -> RunProvenance {
@@ -407,6 +422,8 @@ mod tests {
                 description = "Finish the assignment.",
                 capability = "factory",
                 execution_mode = "sequential",
+                requires_exclusive_batch = true,
+                cancellation_settlement_mode = "await_future",
                 schema_json = '{"type":"object","additionalProperties":false}',
                 handler_source = [[
                     return function(call)
@@ -640,7 +657,7 @@ mod tests {
             assert_eq!(definition.description, expected.description);
             assert_eq!(definition.schema, expected.schema);
             assert_eq!(
-                format!("{:?}", definition.execution_mode).to_lowercase(),
+                definition.execution_mode,
                 expected.execution_mode,
             );
         }

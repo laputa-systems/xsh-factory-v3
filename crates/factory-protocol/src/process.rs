@@ -416,13 +416,18 @@ pub enum StopReasonV2 {
 }
 
 /// Normalized provider usage. Provider-specific event streams are not stored
-/// in PostgreSQL; this bounded summary is the only cost evidence at terminal.
+/// in PostgreSQL; this bounded summary is the terminal diagnostic evidence.
+///
+/// Token observations are intentionally nullable. `Some(0)` is a provider's
+/// known zero; `None` means the provider did not report that category. Factory
+/// must not turn the latter into a false zero while crossing its durable
+/// terminal boundary.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UsageTotalsV2 {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
     /// Optional provider-reported terminal total, already normalized to
     /// integral micro-USD by the host. A complete reported total is the sole
@@ -643,10 +648,10 @@ mod tests {
     #[test]
     fn provider_cost_wins_over_token_usage() {
         let usage = UsageTotalsV2 {
-            input_tokens: 1,
-            output_tokens: 1_000_001,
-            cache_read_tokens: 1,
-            cache_write_tokens: 1,
+            input_tokens: Some(1),
+            output_tokens: Some(1_000_001),
+            cache_read_tokens: Some(1),
+            cache_write_tokens: Some(1),
             reasoning_tokens: None,
             reported_cost_micro_usd: Some(MicroUsd::new(1)),
             ..UsageTotalsV2::default()
@@ -667,5 +672,16 @@ mod tests {
             ..UsageTotalsV2::default()
         };
         assert_eq!(usage.provider_cost(), Ok(MicroUsd::new(0)));
+    }
+
+    #[test]
+    fn unknown_tokens_are_not_known_zeroes() {
+        let unknown = UsageTotalsV2::default();
+        let zero = UsageTotalsV2 {
+            cache_read_tokens: Some(0),
+            ..UsageTotalsV2::default()
+        };
+        assert_eq!(unknown.cache_read_tokens, None);
+        assert_eq!(zero.cache_read_tokens, Some(0));
     }
 }

@@ -405,6 +405,7 @@
       "terminal_operation": "work_complete",
       "terminal_payload_b64": "e30=",
       "transcript_artifact_id": 20,
+      "execution_summary_artifact_id": 21,
       "input_tokens": 1,
       "output_tokens": 2,
       "cache_read_tokens": 3,
